@@ -87,7 +87,9 @@
 #include <netinet/if_ether.h>
 #endif
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif
 
 #ifdef COMPAT_FREEBSD32
 #include <sys/mount.h>

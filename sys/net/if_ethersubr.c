@@ -99,7 +99,9 @@ extern u_char	at_org_code[3];
 extern u_char	aarp_org_code[3];
 #endif /* NETATALK */
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif
 
 #ifdef CTASSERT
 CTASSERT(sizeof (struct ether_header) == ETHER_ADDR_LEN * 2 + 2);

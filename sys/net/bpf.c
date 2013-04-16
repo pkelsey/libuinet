@@ -82,7 +82,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/net/bpf.c 236410 2012-06-01 17:17:46Z jkim
 
 #include <net80211/ieee80211_freebsd.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif
 
 MALLOC_DEFINE(M_BPF, "BPF", "BPF data");
 

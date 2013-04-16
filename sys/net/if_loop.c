@@ -81,7 +81,9 @@
 #include <netatalk/at_var.h>
 #endif
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif
 
 #ifdef TINY_LOMTU
 #define	LOMTU	(1024+512)
