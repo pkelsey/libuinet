@@ -95,7 +95,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/in_pcb.c 237910 2012-07-01 08:47:1
 #include <netipsec/key.h>
 #endif /* IPSEC */
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 static struct callout	ipport_tick_callout;
 
