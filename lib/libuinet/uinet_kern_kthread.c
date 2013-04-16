@@ -172,4 +172,5 @@ uinet_init_thread0(void)
 {
 
 	pcurthread = &thread0;
+	pcurthread->td_proc = &proc0;
 }
