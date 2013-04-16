@@ -24,7 +24,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Dervied in part from libplebnet's pn_lock.c.
+ * Derived in part from libplebnet's pn_lock.c and pn_glue.c.
  *
  */
 
@@ -92,6 +92,17 @@ _thread_lock_flags(struct thread *td, int opts, const char *file, int line)
 {
 
 	mtx_lock(td->td_lock);
+}
+
+/*
+ * Intialize the mutex code and system mutexes.  This is called from the MD
+ * startup code prior to mi_startup().  The per-CPU data space needs to be
+ * setup before this is called.
+ */
+void
+mutex_init(void)
+{
+	mtx_init(&Giant, "Giant", NULL, MTX_DEF | MTX_RECURSE);
 }
 
 void
