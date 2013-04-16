@@ -96,11 +96,15 @@ VPATH+= $S/netinet/cc
 UINET_SRCS+=			\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
+	uinet_kern_lock.c	\
 	uinet_kern_malloc.c	\
+	uinet_kern_mutex.c	\
+	uinet_kern_rmlock.c	\
+	uinet_kern_rwlock.c	\
 	uinet_kern_shutdown.c	\
+	uinet_kern_sx.c		\
 	uinet_kern_synch.c	\
 	uinet_kern_timeout.c	\
-	uinet_lock.c		\
 	uinet_main.c		\
 	uinet_support.c
 
