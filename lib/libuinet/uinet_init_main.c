@@ -45,7 +45,10 @@
 __FBSDID("$FreeBSD: release/9.1.0/sys/kern/init_main.c 237725 2012-06-28 19:34:23Z jhb $");
 
 #include "opt_ddb.h"
+
+#ifndef UINET
 #include "opt_init_path.h"
+#endif
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -65,7 +68,6 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/init_main.c 237725 2012-06-28 19:34:2
 #include <sys/resourcevar.h>
 #include <sys/systm.h>
 #include <sys/signalvar.h>
-#include <sys/vnode.h>
 #include <sys/sysent.h>
 #include <sys/reboot.h>
 #include <sys/sched.h>
@@ -80,7 +82,10 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/init_main.c 237725 2012-06-28 19:34:2
 #include <machine/cpu.h>
 
 #include <security/audit/audit.h>
+
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif
 
 #include <vm/vm.h>
 #include <vm/vm_param.h>
@@ -88,14 +93,18 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/init_main.c 237725 2012-06-28 19:34:2
 #include <vm/vm_map.h>
 #include <sys/copyright.h>
 
+#ifdef DDB
 #include <ddb/ddb.h>
 #include <ddb/db_sym.h>
+#endif
 
 void mi_startup(void);				/* Should be elsewhere */
 
 /* Components of the first process -- never freed. */
+#ifndef UINET
 static struct session session0;
 static struct pgrp pgrp0;
+#endif
 struct	proc proc0;
 struct	thread thread0 __aligned(16);
 struct	vmspace vmspace0;
@@ -194,6 +203,10 @@ mi_startup(void)
 	register struct sysinit **sipp;		/* system initialization*/
 	register struct sysinit **xipp;		/* interior loop of sort*/
 	register struct sysinit *save;		/* bubble*/
+#ifdef UINET
+	struct sysinit **temp;
+	int size;
+#endif 
 
 #if defined(VERBOSE_SYSINIT)
 	int last;
@@ -206,6 +219,13 @@ mi_startup(void)
 	if (sysinit == NULL) {
 		sysinit = SET_BEGIN(sysinit_set);
 		sysinit_end = SET_LIMIT(sysinit_set);
+#ifdef UINET
+		size = (uintptr_t)sysinit_end - (uintptr_t)sysinit;
+		temp = malloc(size, M_DEVBUF, M_WAITOK);
+		memcpy(temp, sysinit, size);
+		sysinit = temp;
+		sysinit_end = (struct sysinit **)(((uint8_t *)sysinit) + size);
+#endif
 	}
 
 restart:
@@ -296,10 +316,14 @@ restart:
 		}
 	}
 
+#ifndef UINET  /* UINET exists in a user process, which will pass through here on a normal exit */
 	panic("Shouldn't get here!");
 	/* NOTREACHED*/
+#endif
 }
 
+
+#ifndef UINET
 
 /*
  ***************************************************************************
@@ -349,6 +373,8 @@ SYSINIT(diagwarn, SI_SUB_COPYRIGHT, SI_ORDER_THIRD + 2,
     print_caddr_t, diag_warn);
 SYSINIT(diagwarn2, SI_SUB_RUN_SCHEDULER, SI_ORDER_THIRD + 2,
     print_caddr_t, diag_warn);
+#endif
+
 #endif
 
 static int
@@ -431,6 +457,8 @@ proc0_init(void *dummy __unused)
 	 * Initialize magic number and osrel.
 	 */
 	p->p_magic = P_MAGIC;
+
+#ifndef UINET
 	p->p_osrel = osreldate;
 
 	/*
@@ -469,6 +497,7 @@ proc0_init(void *dummy __unused)
 	mtx_init(&session0.s_mtx, "session", NULL, MTX_DEF);
 	refcount_init(&session0.s_count, 1);
 	session0.s_leader = p;
+#endif
 
 	p->p_sysent = &null_sysvec;
 	p->p_flag = P_SYSTEM | P_INMEM;
@@ -477,7 +506,11 @@ proc0_init(void *dummy __unused)
 	STAILQ_INIT(&p->p_ktr);
 	p->p_nice = NZERO;
 	td->td_tid = PID_MAX + 1;
+
+#ifndef UINET
 	LIST_INSERT_HEAD(TIDHASH(td->td_tid), td, td_hash);
+#endif
+
 	td->td_state = TDS_RUNNING;
 	td->td_pri_class = PRI_TIMESHARE;
 	td->td_user_pri = PUSER;
@@ -487,8 +520,12 @@ proc0_init(void *dummy __unused)
 	td->td_base_pri = PVM;
 	td->td_oncpu = 0;
 	td->td_flags = TDF_INMEM|TDP_KTHREAD;
+
+#ifndef UINET
 	td->td_cpuset = cpuset_thread0();
 	prison0.pr_cpuset = cpuset_ref(td->td_cpuset);
+#endif
+
 	p->p_peers = 0;
 	p->p_leader = p;
 
@@ -515,11 +552,13 @@ proc0_init(void *dummy __unused)
 #endif
 	td->td_ucred = crhold(p->p_ucred);
 
+#ifndef UINET
 	/* Create sigacts. */
 	p->p_sigacts = sigacts_alloc();
 
 	/* Initialize signal state for process 0. */
 	siginit(&proc0);
+#endif
 
 	/* Create the file descriptor table. */
 	p->p_fd = fdinit(NULL);
@@ -549,6 +588,7 @@ proc0_init(void *dummy __unused)
 	/* Initialize resource accounting structures. */
 	racct_create(&p->p_racct);
 
+#ifndef UINET
 	p->p_stats = pstats_alloc();
 
 	/* Allocate a prototype map so we have something to fork. */
@@ -562,6 +602,7 @@ proc0_init(void *dummy __unused)
 	 */
 	vm_map_init(&vmspace0.vm_map, vmspace_pmap(&vmspace0),
 	    p->p_sysent->sv_minuser, p->p_sysent->sv_maxuser);
+#endif
 
 	/*
 	 * Call the init and ctor for the new thread and proc.  We wait
@@ -572,6 +613,7 @@ proc0_init(void *dummy __unused)
 	EVENTHANDLER_INVOKE(process_ctor, p);
 	EVENTHANDLER_INVOKE(thread_ctor, td);
 
+#ifndef UINET
 	/*
 	 * Charge root for one process.
 	 */
@@ -579,6 +621,7 @@ proc0_init(void *dummy __unused)
 	PROC_LOCK(p);
 	racct_add_force(p, RACCT_NPROC, 1);
 	PROC_UNLOCK(p);
+#endif
 }
 SYSINIT(p0init, SI_SUB_INTRINSIC, SI_ORDER_FIRST, proc0_init, NULL);
 
@@ -620,6 +663,9 @@ proc0_post(void *dummy __unused)
 	srandom(ts.tv_sec ^ ts.tv_nsec);
 }
 SYSINIT(p0post, SI_SUB_INTRINSIC_POST, SI_ORDER_FIRST, proc0_post, NULL);
+
+
+#ifndef UINET
 
 static void
 random_init(void *dummy __unused)
@@ -849,3 +895,5 @@ kick_init(const void *udata __unused)
 	thread_unlock(td);
 }
 SYSINIT(kickinit, SI_SUB_KTHREAD_INIT, SI_ORDER_FIRST, kick_init, NULL);
+
+#endif
