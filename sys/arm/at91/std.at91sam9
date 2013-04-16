@@ -1,0 +1,9 @@
+# $FreeBSD: release/9.1.0/sys/arm/at91/std.at91sam9 213498 2010-10-06 22:40:27Z cognet $
+
+files	"../at91/files.at91sam9"
+cpu		CPU_ARM9
+makeoptions	CONF_CFLAGS="-mcpu=arm9"
+options 	PHYSADDR=0x20000000
+
+device		at91sam9g20
+device		at91sam9260

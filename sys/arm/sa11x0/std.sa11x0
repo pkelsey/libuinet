@@ -1,0 +1,7 @@
+#StrongARM SA11x0 common options
+#$FreeBSD: release/9.1.0/sys/arm/sa11x0/std.sa11x0 135667 2004-09-23 22:33:38Z cognet $
+files		"../sa11x0/files.sa11x0"
+cpu		CPU_SA1100
+cpu		CPU_SA1110
+makeoptions	KERNPHYSADDR=0xc0000000
+makeoptions	KERNVIRTADDR=0xc0000000

@@ -1,0 +1,5 @@
+#XScale i80321 generic configuration
+#$FreeBSD: release/9.1.0/sys/arm/xscale/i80321/std.i80321 142570 2005-02-26 18:59:01Z cognet $
+files		"../xscale/i80321/files.i80321"
+include		"../xscale/std.xscale"
+cpu 		CPU_XSCALE_80321

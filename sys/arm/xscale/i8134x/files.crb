@@ -1,0 +1,3 @@
+# $FreeBSD: release/9.1.0/sys/arm/xscale/i8134x/files.crb 172297 2007-09-22 16:25:43Z cognet $
+arm/xscale/i8134x/crb_machdep.c		standard
+arm/xscale/i8134x/iq81342_7seg.c	optional	7seg

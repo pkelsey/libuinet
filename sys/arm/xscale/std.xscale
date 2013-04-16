@@ -1,0 +1,2 @@
+# $FreeBSD: release/9.1.0/sys/arm/xscale/std.xscale 142570 2005-02-26 18:59:01Z cognet $
+options		ARM_CACHE_LOCK_ENABLE

@@ -1,0 +1,13 @@
+# $FreeBSD: release/9.1.0/sys/mips/adm5120/std.adm5120 215270 2010-11-13 22:34:12Z imp $
+#
+# Standard include file for ADM5120
+
+files		"../adm5120/files.adm5120"
+
+machine		mips mipsel
+cpu		CPU_MIPS4KC
+options		ISA_MIPS32
+
+# device 	admpci
+device		admsw
+device		pci

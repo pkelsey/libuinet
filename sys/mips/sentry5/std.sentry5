@@ -1,0 +1,11 @@
+# $FreeBSD: release/9.1.0/sys/mips/sentry5/std.sentry5 215270 2010-11-13 22:34:12Z imp $
+#
+
+machine		mips mipsel
+
+cpu		CPU_MIPS4KC
+options 	ISA_MIPS32
+options		CPU_SENTRY5			# XXX should this be a
+						# sub-cpu option?
+files		"../sentry5/files.sentry5"
+

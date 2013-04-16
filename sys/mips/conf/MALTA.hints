@@ -1,0 +1,5 @@
+# $FreeBSD: release/9.1.0/sys/mips/conf/MALTA.hints 202175 2010-01-12 21:36:08Z imp $
+# device.hints
+# hint.uart.0.at="nexus"
+# hint.uart.0.maddr="0x180003f8"
+# hint.uart.0.flags="0x90"

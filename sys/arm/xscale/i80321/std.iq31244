@@ -1,0 +1,7 @@
+#IQ31244 board configuration
+#$FreeBSD: release/9.1.0/sys/arm/xscale/i80321/std.iq31244 153277 2005-12-09 23:52:51Z cognet $
+include		"../xscale/i80321/std.i80321"
+files		"../xscale/i80321/files.iq31244"
+makeoptions	KERNPHYSADDR=0xa0200000
+makeoptions	KERNVIRTADDR=0xc0200000
+options		COUNTS_PER_SEC=198000000

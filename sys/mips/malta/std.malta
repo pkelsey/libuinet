@@ -1,0 +1,13 @@
+# $FreeBSD: release/9.1.0/sys/mips/malta/std.malta 220982 2011-04-24 08:58:58Z mav $
+files	"../malta/files.malta"
+
+cpu		CPU_MIPS4KC
+#options 	ISA_MIPS32
+device		pci
+device		ata
+options 	ATA_CAM
+
+device		scbus		# SCSI bus (required for ATA/SCSI)
+device		cd		# CD
+device		da		# Direct Access (disks)
+device		pass		# Passthrough device (direct ATA/SCSI access)

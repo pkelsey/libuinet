@@ -1,0 +1,21 @@
+#
+# $FreeBSD: release/9.1.0/sys/mips/conf/SWARM64 217653 2011-01-20 19:17:05Z imp $
+#
+
+include		"std.SWARM"
+
+ident		SWARM64
+
+machine		mips mips64eb
+makeoptions	ARCH_FLAGS="-mabi=64 -march=mips64"
+makeoptions	LDSCRIPT_NAME=ldscript.mips.cfe
+makeoptions	KERNLOADADDR=0xffffffff80001000
+
+#
+# XXX restrict memory to maximum 4GB because page table entries in pmap
+# are still 32 bits wide
+
+#
+# MAXMEM is specified in units of KB
+#
+options		MAXMEM=0x400000

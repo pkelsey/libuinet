@@ -1,0 +1,5 @@
+# $FreeBSD: release/9.1.0/sys/mips/conf/SENTRY5.hints 202175 2010-01-12 21:36:08Z imp $
+hint.siba.0.at="nexus0"
+hint.siba.0.maddr="0x18000000"
+hint.siba.0.msize="0x1000"
+# XXX irq?

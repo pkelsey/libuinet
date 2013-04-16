@@ -1,0 +1,4 @@
+# $FreeBSD: release/9.1.0/sys/arm/mv/kirkwood/files.sheevaplug 196536 2009-08-25 10:09:25Z raj $
+
+include "arm/mv/kirkwood/files.kirkwood"
+arm/mv/kirkwood/sheevaplug.c	standard

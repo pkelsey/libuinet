@@ -1,0 +1,4 @@
+# $FreeBSD: release/9.1.0/sys/arm/mv/kirkwood/files.kirkwood 196533 2009-08-25 09:39:11Z raj $
+
+arm/mv/rtc.c			standard
+arm/mv/kirkwood/kirkwood.c	standard

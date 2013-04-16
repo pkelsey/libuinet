@@ -1,0 +1,4 @@
+# $FreeBSD: release/9.1.0/sys/arm/mv/orion/files.db88f5xxx 183840 2008-10-13 20:07:13Z raj $
+
+arm/mv/orion/orion.c		standard
+arm/mv/orion/db88f5xxx.c	standard

@@ -1,0 +1,7 @@
+# $FreeBSD: release/9.1.0/sys/mips/idt/std.idt 215270 2010-11-13 22:34:12Z imp $
+# Standard include file for IDT
+
+files	"../idt/files.idt"
+
+machine		mips mipsel
+options		ISA_MIPS32

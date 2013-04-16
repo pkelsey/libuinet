@@ -1,0 +1,4 @@
+# $FreeBSD: release/9.1.0/sys/mips/nlm/std.xlp 224115 2011-07-16 20:31:29Z jchandra $
+files	"../nlm/files.xlp"
+cpu	CPU_NLM
+
