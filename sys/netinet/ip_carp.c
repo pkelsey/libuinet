@@ -51,7 +51,6 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_carp.c 233200 2012-03-19 20:49:
 #include <sys/sockio.h>
 
 #include <sys/socket.h>
-#include <sys/vnode.h>
 
 #include <machine/stdarg.h>
 
