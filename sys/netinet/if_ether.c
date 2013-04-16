@@ -71,7 +71,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/if_ether.c 233265 2012-03-21 07:22
 #include <net/if_arc.h>
 #include <net/iso88025.h>
 
+#if defined(MAC)
 #include <security/mac/mac_framework.h>
+#endif
 
 #define SIN(s) ((struct sockaddr_in *)s)
 #define SDL(s) ((struct sockaddr_dl *)s)

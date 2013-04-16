@@ -77,7 +77,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/igmp.c 233200 2012-03-19 20:49:16Z
 
 #include <machine/in_cksum.h>
 
+#if defined(MAC)
 #include <security/mac/mac_framework.h>
+#endif
 
 #ifndef KTR_IGMPV3
 #define KTR_IGMPV3 KTR_INET
