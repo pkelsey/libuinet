@@ -53,7 +53,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/sys_socket.c 224914 2011-08-16 20:07:
 #include <net/route.h>
 #include <net/vnet.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 struct fileops	socketops = {
 	.fo_read = soo_read,

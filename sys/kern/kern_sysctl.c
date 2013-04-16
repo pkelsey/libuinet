@@ -64,7 +64,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_sysctl.c 233647 2012-03-29 04:54
 
 #include <net/vnet.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>

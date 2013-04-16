@@ -41,7 +41,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_mbuf.c 209390 2010-06-21 09:55:5
 #include <sys/smp.h>
 #include <sys/sysctl.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 #include <vm/vm.h>
 #include <vm/vm_extern.h>

@@ -52,7 +52,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_environment.c 225617 2011-09-16 
 #include <sys/libkern.h>
 #include <sys/kenv.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 static MALLOC_DEFINE(M_KENV, "kenv", "kernel environment");
 

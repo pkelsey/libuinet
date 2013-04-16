@@ -73,7 +73,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/uipc_mbuf2.c 209390 2010-06-21 09:55:
 #include <sys/mbuf.h>
 #include <sys/mutex.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 static MALLOC_DEFINE(M_PACKET_TAGS, MBUF_TAG_MEM_NAME,
     "packet-attached information");
