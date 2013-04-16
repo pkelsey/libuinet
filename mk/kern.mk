@@ -40,25 +40,15 @@ endif
 # per function call.  While the 16-byte alignment may benefit micro benchmarks,
 # it is probably an overall loss as it makes the code bigger (less efficient
 # use of code cache tag lines) and uses more stack (less efficient use of data
-# cache tag lines).  Explicitly prohibit the use of FPU, SSE and other SIMD
-# operations inside the kernel itself.  These operations are exclusively
-# reserved for user applications.
-#
-# gcc:
-# Setting -mno-mmx implies -mno-3dnow
-# Setting -mno-sse implies -mno-sse2, -mno-sse3 and -mno-ssse3
-#
-# clang:
-# Setting -mno-mmx implies -mno-3dnow and -mno-3dnowa
-# Setting -mno-sse implies -mno-sse2, -mno-sse3, -mno-ssse3, -mno-sse41 and -mno-sse42
+# cache tag lines).
 #
 ifeq (${MACHINE_CPUARCH},i386)
 ifneq (${COMPILER_TYPE},clang)
 CFLAGS+=	-mno-align-long-strings -mpreferred-stack-boundary=2
 else
-CFLAGS+=	-mno-aes -mno-avx
+CFLAGS+=	
 endif
-CFLAGS+=	-mno-mmx -mno-sse -msoft-float
+CFLAGS+=	
 INLINE_LIMIT?=	8000
 endif
 
@@ -77,68 +67,34 @@ endif
 
 #
 # For sparc64 we want the medany code model so modules may be located
-# anywhere in the 64-bit address space.  We also tell GCC to use floating
-# point emulation.  This avoids using floating point registers for integer
-# operations which it has a tendency to do.
+# anywhere in the 64-bit address space.
 #
 ifeq (${MACHINE_CPUARCH},sparc64)
-CFLAGS+=	-mcmodel=medany -msoft-float
+CFLAGS+=	-mcmodel=medany
 INLINE_LIMIT?=	15000
 endif
 
-#
-# For AMD64, we explicitly prohibit the use of FPU, SSE and other SIMD
-# operations inside the kernel itself.  These operations are exclusively
-# reserved for user applications.
-#
-# gcc:
-# Setting -mno-mmx implies -mno-3dnow
-# Setting -mno-sse implies -mno-sse2, -mno-sse3, -mno-ssse3 and -mfpmath=387
-#
-# clang:
-# Setting -mno-mmx implies -mno-3dnow and -mno-3dnowa
-# Setting -mno-sse implies -mno-sse2, -mno-sse3, -mno-ssse3, -mno-sse41 and -mno-sse42
-# (-mfpmath= is not supported)
-#
 ifeq (${MACHINE_CPUARCH},amd64)
 ifeq (${COMPILER_TYPE},clang)
-CFLAGS+=	-mno-aes -mno-avx
+CFLAGS+=	
 endif
-CFLAGS+=	-mno-red-zone -mno-mmx -mno-sse -msoft-float \
-		-fno-asynchronous-unwind-tables
+CFLAGS+=	
 INLINE_LIMIT?=	8000
 endif
 
-#
-# For PowerPC we tell gcc to use floating point emulation.  This avoids using
-# floating point registers for integer operations which it has a tendency to do.
-# Also explicitly disable Altivec instructions inside the kernel.
-#
 ifeq (${MACHINE_CPUARCH},powerpc)
-CFLAGS+=	-msoft-float -mno-altivec
+CFLAGS+=	
 INLINE_LIMIT?=	15000
 endif
 
-#
-# Use dot symbols on powerpc64 to make ddb happy
-#
 ifeq (${MACHINE_ARCH},powerpc64)
-CFLAGS+=	-mcall-aixdesc
+CFLAGS+=	
 endif
 
-#
-# For MIPS we also tell gcc to use floating point emulation
-#
 ifeq (${MACHINE_CPUARCH},mips)
-CFLAGS+=	-msoft-float
+CFLAGS+=	
 INLINE_LIMIT?=	8000
 endif
-
-#
-# GCC 3.0 and above like to do certain optimizations based on the
-# assumption that the program is linked against libc.  Stop this.
-#
-CFLAGS+=	-ffreestanding
 
 #
 # GCC SSP support
