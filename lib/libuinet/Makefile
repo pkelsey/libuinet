@@ -136,6 +136,7 @@ UINET_SRCS+=			\
 	uinet_main_user.c	\
 	uinet_machdep.c		\
 	uinet_dev_random.c	\
+	uinet_sched.c		\
 	uinet_subr_bus.c	\
 	uinet_subr_prf.c	\
 	uinet_subr_rtc.c	\

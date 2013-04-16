@@ -34,6 +34,7 @@
 #include <sys/kernel.h>
 #include <sys/proc.h>
 #include <sys/kthread.h>
+#include <sys/sched.h>
 
 #include <net/if.h>
 #include <net/if_var.h>
@@ -718,6 +719,10 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 		ether_ifdetach(ifp);
 		if_free(ifp);
 		return (1);
+	}
+
+	if (sc->cfg->cpu >= 0) {
+		sched_bind(sc->rx_thread, sc->cfg->cpu);
 	}
 
 	return (0);
