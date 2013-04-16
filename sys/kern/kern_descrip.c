@@ -98,7 +98,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_descrip.c 238560 2012-07-18 04:5
 #include <vm/uma.h>
 #include <vm/vm.h>
 
+#ifdef DDB
 #include <ddb/ddb.h>
+#endif
 
 static MALLOC_DEFINE(M_FILEDESC, "filedesc", "Open file descriptor table");
 static MALLOC_DEFINE(M_FILEDESC_TO_LEADER, "filedesc_to_leader",
