@@ -69,7 +69,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/sys_capability.c 234037 2012-04-08 16
 #include <sys/systm.h>
 #include <sys/ucred.h>
 
+#ifdef CAPABILITIES
 #include <security/audit/audit.h>
+#endif /* CAPABILITIES */
 
 #include <vm/uma.h>
 #include <vm/vm.h>
