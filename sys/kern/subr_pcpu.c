@@ -51,6 +51,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/subr_pcpu.c 224218 2011-07-19 14:57:5
 #include "opt_ddb.h"
 
 #include <sys/param.h>
+#include <sys/kernel.h>
 #include <sys/systm.h>
 #include <sys/sysctl.h>
 #include <sys/lock.h>
@@ -59,7 +60,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/subr_pcpu.c 224218 2011-07-19 14:57:5
 #include <sys/proc.h>
 #include <sys/smp.h>
 #include <sys/sx.h>
+#ifdef DDB
 #include <ddb/ddb.h>
+#endif /* DDB */
 
 MALLOC_DEFINE(M_PCPU, "Per-cpu", "Per-cpu resource accouting.");
 
