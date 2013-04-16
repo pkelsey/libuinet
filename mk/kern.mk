@@ -104,7 +104,7 @@ ifeq (${MACHINE_CPUARCH},amd64)
 ifeq (${COMPILER_TYPE},clang)
 CFLAGS+=	-mno-aes -mno-avx
 endif
-CFLAGS+=	-mcmodel=kernel -mno-red-zone -mno-mmx -mno-sse -msoft-float \
+CFLAGS+=	-mno-red-zone -mno-mmx -mno-sse -msoft-float \
 		-fno-asynchronous-unwind-tables
 INLINE_LIMIT?=	8000
 endif
