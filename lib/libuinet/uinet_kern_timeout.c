@@ -63,13 +63,6 @@ __FBSDID("$FreeBSD$");
 
 static void *timer_intr(void *arg);
 
-int     _kqueue(void);
-
-int     _kevent(int kq, const struct kevent *changelist, int nchanges,
-         struct kevent *eventlist, int nevents,
-         const struct timespec *timeout);
-
-
 static int avg_depth;
 SYSCTL_INT(_debug, OID_AUTO, to_avg_depth, CTLFLAG_RD, &avg_depth, 0,
     "Average number of items examined per softclock call. Units = 1/1000");
@@ -791,40 +784,17 @@ _callout_init_lock(c, lock, flags)
 	c->c_cpu = timeout_cpu;
 }
 
-/*
- * The real-time timer, interrupting hz times per second.
- */
-void
-pn_hardclock(void)
-{
-
-	atomic_add_int((volatile int *)&ticks, 1);
-	callout_tick();
-	tc_ticktock(1);
-	cpu_tick_calibration();
-
-#ifdef DEVICE_POLLING
-	hardclock_device_poll();	/* this is very short and quick */
-#endif /* DEVICE_POLLING */
-}
 
 static void *
 timer_intr(void *arg)
 {
-	int kevid;
-	struct kevent ktimer, kresult;
-	int delaytime;
-	struct timespec ts;
+	struct timespec rq, rm;
 
-	delaytime = max((int)(1.0/(float)hz)*1000, 1);
-	EV_SET(&ktimer, 0xbeef, EVFILT_TIMER, EV_ADD|EV_ENABLE, 0, 
-	    delaytime, &ktimer);
-	ts.tv_sec = 0;
-	ts.tv_nsec = delaytime*1000;
-	kevid = _kqueue();
-	_kevent(kevid, &ktimer, 1, NULL, 0, NULL);
+	rq.tv_sec = 0;
+	rq.tv_nsec = 1000000000UL / hz;
+
 	while (1) {
-		_kevent(kevid, NULL, 0, &kresult, 1, &ts);
-		pn_hardclock();
+		nanosleep(&rq, &rm);
+		uinet_hardclock();
 	}
 }
