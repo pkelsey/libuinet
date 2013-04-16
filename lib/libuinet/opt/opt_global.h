@@ -1,0 +1,1 @@
+#define SMP 1
