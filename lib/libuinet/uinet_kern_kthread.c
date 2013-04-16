@@ -75,7 +75,7 @@ static void *
 pthread_start_routine(void *arg)
 {
 	struct pthread_start_args *psa = arg;
-	printf("Creating new thread, pcurthread = %p\n", psa->psa_td);
+
 	pcurthread = psa->psa_td;
 	pcurthread->td_proc = &proc0;
 	psa->psa_start_routine(psa->psa_arg);
