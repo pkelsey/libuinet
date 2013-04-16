@@ -89,6 +89,7 @@ endif
 CFLAGS+= -DUINET=1
 
 VPATH+= $S/kern
+VPATH+= $S/net
 VPATH+= $S/netinet
 VPATH+= $S/netinet/cc
 
@@ -154,6 +155,23 @@ KERN_MFILES+=		\
 	device_if.m
 
 
+NET_SRCS+=		\
+	bpf.c		\
+	if.c		\
+	if_clone.c	\
+	if_dead.c	\
+	if_ethersubr.c	\
+	if_loop.c	\
+	if_llatbl.c	\
+	netisr.c	\
+	pfil.c		\
+	radix.c		\
+	raw_cb.c	\
+	raw_usrreq.c	\
+	route.c		\
+	rtsock.c		
+
+
 NETINET_SRCS+=		\
 	ip_carp.c	\
 	if_ether.c	\
@@ -195,7 +213,7 @@ MFILES= ${KERN_MFILES}
 
 MHEADERS= $(patsubst %.m,%.h,${MFILES})
 
-SRCS= ${UINET_SRCS} ${KERN_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS}
+SRCS= ${UINET_SRCS} ${KERN_SRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS}
 
 OBJS+= $(patsubst %.cc,%.o,$(patsubst %.c,%.o,${SRCS}))
 
