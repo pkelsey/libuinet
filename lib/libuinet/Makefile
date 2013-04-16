@@ -88,6 +88,7 @@ endif
 
 CFLAGS+= -DUINET=1
 
+VPATH+= $S/machine/${MACHINE_CPUARCH}/${MACHINE_CPUARCH}
 VPATH+= $S/kern
 VPATH+= $S/net
 VPATH+= $S/netinet
@@ -109,7 +110,6 @@ UINET_SRCS+=			\
 	uinet_support.c
 
 # want vnode_if - do we really need to know about vnodes anywhere?
-#	kern_descrip.c		\
 #	kern_linker.c		\
 #	link_elf.c		\
 #	link_elf_obj.c		\
@@ -122,6 +122,7 @@ UINET_SRCS+=			\
 
 
 KERN_SRCS+=			\
+	kern_descrip.c		\
 	kern_environment.c	\
 	kern_fail.c		\
 	kern_khelp.c		\
@@ -156,8 +157,11 @@ KERN_SRCS+=			\
 
 KERN_MFILES+=		\
 	bus_if.m	\
-	device_if.m
+	device_if.m	\
+	vnode_if.m
 
+MACHINE_SRCS+=		\
+	in_cksum.c
 
 NET_SRCS+=		\
 	bpf.c		\
@@ -217,7 +221,7 @@ MFILES= ${KERN_MFILES}
 
 MHEADERS= $(patsubst %.m,%.h,${MFILES})
 
-SRCS= ${UINET_SRCS} ${KERN_SRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS}
+SRCS= ${UINET_SRCS} ${KERN_SRCS} ${MACHINE_SRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS}
 
 OBJS+= $(patsubst %.cc,%.o,$(patsubst %.c,%.o,${SRCS}))
 
@@ -236,6 +240,19 @@ ${PROGRAM}: ${MHEADERS} ${OBJS}
 
 clean:
 	rm -f ${PROGRAM} ${OBJS} ${MHEADERS}
+
+
+#
+# Distilled from FreeBSD src/sys/conf/kern.post.mk
+#
+vnode_if.h vnode_if_newproto.h vnode_if_typedef.h: $S/tools/vnode_if.awk \
+    $S/kern/vnode_if.src
+vnode_if.h: vnode_if_newproto.h vnode_if_typedef.h
+	${AWK} -f $S/tools/vnode_if.awk $S/kern/vnode_if.src -h
+vnode_if_newproto.h:
+	${AWK} -f $S/tools/vnode_if.awk $S/kern/vnode_if.src -p
+vnode_if_typedef.h:
+	${AWK} -f $S/tools/vnode_if.awk $S/kern/vnode_if.src -q
 
 
 include ${TOP_DIR}/network/uinet/mk/kern.mk
