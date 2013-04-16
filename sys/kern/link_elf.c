@@ -51,7 +51,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/link_elf.c 233353 2012-03-23 11:26:54
 
 #include <net/vnet.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif
 
 #include <vm/vm.h>
 #include <vm/vm_param.h>

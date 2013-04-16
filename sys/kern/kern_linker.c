@@ -54,7 +54,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_linker.c 235620 2012-05-18 18:51
 
 #include <net/vnet.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif
 
 #include "linker_if.h"
 
