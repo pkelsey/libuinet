@@ -56,11 +56,13 @@ struct server_conn {
 
 
 
-extern int
-get_kernel_stack_if_params(const char *ifname,
-			   struct sockaddr_in *addr,
-			   struct sockaddr_in *baddr,
-			   struct sockaddr_in *netmask);
+extern int get_kernel_stack_if_params(const char *ifname,
+				      struct sockaddr_in *addr,
+				      struct sockaddr_in *baddr,
+				      struct sockaddr_in *netmask);
+
+extern int uinet_init(void);
+
 
 
 static int
@@ -310,12 +312,22 @@ out:
 
 int main(int argc, char **argv)
 {
-	char *ifname = getenv("UINETIF");
+	char *ifname;
 	struct sockaddr_in addr;
-	struct thread *td = curthread;
+	struct thread *td;
 	struct socket *server_so;
 	struct sockaddr_in sin;
 	int error;
+
+	
+	/* Take care not to do to anything that requires any of the
+	 * user-kernel facilities before this point (such as referring to
+	 * curthread).
+	 */
+	uinet_init();
+
+	ifname = getenv("UINETIF");
+	td = curthread;
 
 	printf("uinet test\n");
 

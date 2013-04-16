@@ -55,17 +55,18 @@ extern void mi_startup(void);
 extern void uinet_init_thread0(void);
 extern void mutex_init(void);
 
-static int uinet_init(void) __attribute__((constructor));
+int uinet_init(void);
 pthread_mutex_t init_lock;
 pthread_cond_t init_cond;
 
-static int
+int
 uinet_init(void)
 {
 	struct thread *td;
 
 	printf("uinet_init starting\n");
 
+	/* XXX need to get this from OS */
 	mp_ncpus = 1;
 
         /* vm_init bits */
@@ -88,6 +89,7 @@ uinet_init(void)
 	sx_init(&proctree_lock, "proctree");
 	td = curthread;
 
+	/* XXX - would very much like to do better than this */
 	/* give all configuration threads time to complete initialization
 	 * before continuing
 	 */
