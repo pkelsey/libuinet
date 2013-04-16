@@ -32,9 +32,7 @@ INCLUDES+= ${STDINC_PATH}
 # Distilled from FreeBSD src/sys/conf/Makefile.amd64
 #
 ifeq (${MACHINE_CPUARCH},amd64)
-ifneq (($or ${DDB_ENABLED}, ${DTR_ENABLED}, ${HWPMC_ENABLED}),)
-CFLAGS+=	-fno-omit-frame-pointer
-endif
+
 endif
 
 #
@@ -44,20 +42,6 @@ ifeq (${MACHINE_CPUARCH},arm)
 
 ifneq (${COMPILER_TYPE},clang)
 CFLAGS += -mno-thumb-interwork
-endif
-
-ifeq (${DDB_ENABLED},)
-ifndef WITH_ARM_EABI
-ifneq (${COMPILER_TYPE},clang)
-CFLAGS += -mno-apcs-frame
-endif
-endif
-else ifdef WITH_ARM_EABI
-CFLAGS += -funwind-tables
-ifeq (${COMPILER_TYPE},clang)
-# clang requires us to tell it to emit assembly with unwind information
-CFLAGS += -mllvm -arm-enable-ehabi
-endif
 endif
 
 endif
