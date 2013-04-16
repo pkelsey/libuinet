@@ -65,6 +65,7 @@ __FBSDID("$FreeBSD$");
 
 
 int	hogticks;
+static int pause_wchan;
 
 typedef struct sleep_entry {
 	LIST_ENTRY(sleep_entry) list_entry;
@@ -163,27 +164,41 @@ _sleep(void *ident, struct lock_object *lock, int priority,
 	sleep_entry_t se;
 	int rv, tick_s;
 	struct timespec ts;
+	struct timespec rts;
 	pthread_mutex_t *plock;
 
-	plock = &((struct mtx *)lock)->mtx_lock;
-	pthread_mutex_lock(&synch_lock);
-	if ((se = se_lookup(ident)) != NULL)
-		se->waiters++;
-	else
-		se = se_alloc(ident, wmesg);
-	pthread_mutex_unlock(&synch_lock);
+	if (lock) {
+		plock = &((struct mtx *)lock)->mtx_lock;
+
+		pthread_mutex_lock(&synch_lock);
+		if ((se = se_lookup(ident)) != NULL)
+			se->waiters++;
+		else
+			se = se_alloc(ident, wmesg);
+		pthread_mutex_unlock(&synch_lock);
+	}
 
 	if (timo) {
 		tick_s = ts.tv_sec = timo/hz;
 		ts.tv_nsec = (timo - (tick_s*hz))*(1000000000ULL/hz);
-		rv = pthread_cond_timedwait(&se->cond, plock, &ts);
 
-	} else
+		if (lock) {
+			rv = pthread_cond_timedwait(&se->cond, plock, &ts);
+		} else {
+			while ((-1 == nanosleep(&ts, &rts)) && (EINTR == errno)) {
+				ts = rts;
+			}
+		}
+
+	} else if (lock) {
 		rv = pthread_cond_wait(&se->cond, plock);
+	}
 
-	pthread_mutex_lock(&synch_lock);
-	se_free(se);
-	pthread_mutex_unlock(&synch_lock);
+	if (lock) {
+		pthread_mutex_lock(&synch_lock);
+		se_free(se);
+		pthread_mutex_unlock(&synch_lock);
+	}
 
 	return (rv);
 }
@@ -212,6 +227,23 @@ msleep_spin(void *ident, struct mtx *mtx, const char *wmesg, int timo)
 	pthread_mutex_unlock(&synch_lock);
 
 	return (rv);
+}
+
+/*
+ * pause() delays the calling thread by the given number of system ticks.
+ * The "timo" argument must be greater than or equal to zero. A "timo" value
+ * of zero is equivalent to a "timo" value of one.
+ */
+int
+pause(const char *wmesg, int timo)
+{
+	KASSERT(timo >= 0, ("pause: timo must be >= 0"));
+
+	/* silently convert invalid timeouts */
+	if (timo < 1)
+		timo = 1;
+
+	return (tsleep(&pause_wchan, 0, wmesg, timo));
 }
 
 void
