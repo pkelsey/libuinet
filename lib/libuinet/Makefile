@@ -86,14 +86,19 @@ HACK_EXTRA_FLAGS+=${EXTRA_FLAGS} $(ARCH_FLAGS)
 endif
 
 
+CFLAGS+= -DUINET=1
+
 VPATH+= $S/kern
 VPATH+= $S/netinet
 VPATH+= $S/netinet/cc
 
 UINET_SRCS+=			\
+	uinet_init_main.c	\
+	uinet_kern_clock.c	\
 	uinet_kern_malloc.c	\
 	uinet_kern_shutdown.c	\
 	uinet_kern_synch.c	\
+	uinet_kern_timeout.c	\
 	uinet_lock.c		\
 	uinet_main.c		\
 	uinet_support.c
