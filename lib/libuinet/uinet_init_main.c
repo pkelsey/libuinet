@@ -452,6 +452,8 @@ proc0_init(void *dummy __unused)
 	GIANT_REQUIRED;
 	p = &proc0;
 	td = &thread0;
+	init_param1();
+	init_param2(100000 /* XXX physpages */);
 	
 	/*
 	 * Initialize magic number and osrel.
@@ -543,7 +545,9 @@ proc0_init(void *dummy __unused)
 	p->p_ucred->cr_uidinfo = uifind(0);
 	p->p_ucred->cr_ruidinfo = uifind(0);
 	p->p_ucred->cr_prison = &prison0;
+#ifndef UINET
 	p->p_ucred->cr_loginclass = loginclass_find("default");
+#endif
 #ifdef AUDIT
 	audit_cred_kproc0(p->p_ucred);
 #endif
@@ -585,10 +589,10 @@ proc0_init(void *dummy __unused)
 	p->p_limit->pl_rlimit[RLIMIT_MEMLOCK].rlim_max = pageablemem;
 	p->p_cpulimit = RLIM_INFINITY;
 
+#ifndef UINET
 	/* Initialize resource accounting structures. */
 	racct_create(&p->p_racct);
 
-#ifndef UINET
 	p->p_stats = pstats_alloc();
 
 	/* Allocate a prototype map so we have something to fork. */
@@ -630,6 +634,7 @@ static void
 proc0_post(void *dummy __unused)
 {
 	struct timespec ts;
+#ifndef UINET
 	struct proc *p;
 	struct rusage ru;
 	struct thread *td;
@@ -655,6 +660,7 @@ proc0_post(void *dummy __unused)
 	sx_sunlock(&allproc_lock);
 	PCPU_SET(switchtime, cpu_ticks());
 	PCPU_SET(switchticks, ticks);
+#endif
 
 	/*
 	 * Give the ``random'' number generator a thump.
