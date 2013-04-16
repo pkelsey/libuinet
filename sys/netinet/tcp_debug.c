@@ -100,8 +100,10 @@ tcp_trace(short act, short ostate, struct tcpcb *tp, void *ipgen,
 #ifdef INET6
 	int isipv6;
 #endif /* INET6 */
+#ifdef TCPDEBUG
 	tcp_seq seq, ack;
 	int len, flags;
+#endif /* TCPDEBUG */
 	struct tcp_debug *td;
 
 	mtx_lock(&tcp_debug_mtx);
