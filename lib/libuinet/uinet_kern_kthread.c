@@ -85,6 +85,10 @@ pthread_start_routine(void *arg)
 	return (NULL);
 }
 
+/*
+ * N.B. The flags are ignored.  Namely RFSTOPPED is not honored and threads
+ * are started right away.
+ */
 int
 kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,  
     struct thread **tdp, int flags, int pages,
@@ -98,7 +102,10 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	struct mtx *lock;
 	pthread_cond_t *cond; 
 
-	*tdp = td = malloc(sizeof(struct thread));
+	td = malloc(sizeof(struct thread));
+	if (tdp)
+		*tdp = td;
+
 	psa = malloc(sizeof(struct pthread_start_args));
 	lock = malloc(sizeof(struct mtx));
 	cond = malloc(sizeof(pthread_cond_t));

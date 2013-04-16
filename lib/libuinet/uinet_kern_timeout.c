@@ -49,6 +49,7 @@ __FBSDID("$FreeBSD$");
 #include <sys/event.h>
 #include <sys/interrupt.h>
 #include <sys/kernel.h>
+#include <sys/kthread.h>
 #include <sys/ktr.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -61,7 +62,7 @@ __FBSDID("$FreeBSD$");
 
 #include <pthread.h>
 
-static void *timer_intr(void *arg);
+static void timer_intr(void *arg);
 
 static int avg_depth;
 SYSCTL_INT(_debug, OID_AUTO, to_avg_depth, CTLFLAG_RD, &avg_depth, 0,
@@ -215,8 +216,7 @@ start_softclock(void *dummy)
 	    INTR_MPSAFE, &softclock_ih))
 		panic("died while creating standard software ithreads");
 #endif
-
-	if (pthread_create((pthread_t *)&softclock_ih, NULL, timer_intr, cc))
+	if (kthread_add(timer_intr, cc, NULL, (void *)&softclock_ih, 0, 0, "clock"))
 		panic("died while creating standard software ithreads");
 
 	cc->cc_cookie = softclock_ih;
@@ -785,7 +785,7 @@ _callout_init_lock(c, lock, flags)
 }
 
 
-static void *
+static void
 timer_intr(void *arg)
 {
 	struct timespec rq, rm;
