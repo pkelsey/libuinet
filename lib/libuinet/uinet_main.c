@@ -177,21 +177,23 @@ loopback_thread(void *arg)
 		error = soreceive(so, NULL, &uio, NULL, NULL, &rcv_flags);
 		if (0 != error) {
 			printf("loopback_thread: soreceive failed %d\n", error);
-			continue;
-		}
-
-		len = sizeof(sc->copybuf) - uio.uio_resid;
-		if (len) {
-			iov.iov_base = sc->copybuf;
-			iov.iov_len = sizeof(sc->copybuf);
-			uio.uio_offset = 0;
-			uio.uio_resid = len;
-			uio.uio_rw = UIO_WRITE;
-			error = sosend(so, NULL, &uio, NULL, NULL, 0, curthread);
-			if (0 != error) {
-				printf("loopback_thread: sosend failed %d\n", error);
+			len = 0;
+		} else {
+			len = sizeof(sc->copybuf) - uio.uio_resid;
+			if (len) {
+				iov.iov_base = sc->copybuf;
+				iov.iov_len = sizeof(sc->copybuf);
+				uio.uio_offset = 0;
+				uio.uio_resid = len;
+				uio.uio_rw = UIO_WRITE;
+				error = sosend(so, NULL, &uio, NULL, NULL, 0, curthread);
+				if (0 != error) {
+					printf("loopback_thread: sosend failed %d\n", error);
+				}
 			}
-		} else if (SBS_CANTRCVMORE & so->so_rcv.sb_state) {
+		}
+		
+		if ((0 == len) && (SBS_CANTRCVMORE & so->so_rcv.sb_state)) {
 			printf("loopback_thread: connection closed      from %s:%u\n",
 			       inet_ntoa(sc->sin.sin_addr), ntohs(sc->sin.sin_port));
 			sc->conn_state = SC_DONE;
