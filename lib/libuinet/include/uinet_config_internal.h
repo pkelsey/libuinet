@@ -24,34 +24,26 @@
  */
 
 
-#ifndef	_UINET_CONFIG_H_
-#define	_UINET_CONFIG_H_
+#ifndef	_UINET_CONFIG_INTERNAL_H_
+#define	_UINET_CONFIG_INTERNAL_H_
 
 
-/*
- *  Add an interface to the config.  If called twice for the same interface,
- *  the second config replaces the first.
- *
- *  ifname	is of the form <base><unit>:<queue>, e.g. em0:1.
- *  		<base><unit> is a synonym for <base><unit>:0.
- *
- *  cpu		is the cpu number on which to perform stack processing on
- *		packets received on ifname.  -1 means leave it up to the
- *		scheduler.
- *
- *  cdom	is the connection domain for ifname.  When looking up an
- *		inbound connection on ifname, only control blocks in the
- *		same connection domain will be searched.
- *
- *  returns:
- *
- *  0		Configuration successfully added.
- *
- *  ENOMEM	Too many configs
- *
- *  EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
- */
-int uinet_config_if(const char *ifname, int cpu, unsigned int cdom);
+#include <sys/queue.h>
+
+#include <net/if.h>
+
+struct uinet_config_if {
+	TAILQ_ENTRY(uinet_config_if) link;
+	char spec[IF_NAMESIZE];
+	char name[IF_NAMESIZE];
+	char basename[IF_NAMESIZE];
+	unsigned int unit;
+	unsigned int queue;
+	int cpu;
+};
 
 
-#endif /* _UINET_CONFIG_H_ */
+struct uinet_config_if *uinet_config_if_next(struct uinet_config_if *cur);
+
+
+#endif /* _UINET_CONFIG_INTERNAL_H_ */

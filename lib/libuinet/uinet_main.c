@@ -41,6 +41,8 @@
 #include <net/if.h>
 #include <netinet/in.h>
 
+#include "uinet_config.h"
+
 
 
 typedef enum { SC_INIT, SC_CONNECTED, SC_DONE } conn_state_t;
@@ -319,6 +321,9 @@ int main(int argc, char **argv)
 	struct sockaddr_in sin;
 	int error;
 
+	ifname = getenv("UINETIF");
+
+	uinet_config_if(ifname, 0, 0);
 	
 	/* Take care not to do to anything that requires any of the
 	 * user-kernel facilities before this point (such as referring to
@@ -326,7 +331,6 @@ int main(int argc, char **argv)
 	 */
 	uinet_init();
 
-	ifname = getenv("UINETIF");
 	td = curthread;
 
 	printf("uinet test\n");

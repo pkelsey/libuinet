@@ -23,27 +23,16 @@
  * SUCH DAMAGE.
  */
 
-#include "uinet_config.h"
 
 #undef _KERNEL
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
 #include <errno.h>
 
-#include <net/if.h>
-
-#include <sys/queue.h>
-
-
-struct uinet_config_if {
-	TAILQ_ENTRY(uinet_config_if) link;
-	char name[IF_NAMESIZE];
-	char basename[IF_NAMESIZE];
-	unsigned int unit;
-	unsigned int queue;
-	int cpu;
-};
+#include "uinet_config.h"
+#include "uinet_config_internal.h"
 
 
 static TAILQ_HEAD(config_head, uinet_config_if) if_conf = TAILQ_HEAD_INITIALIZER(if_conf);
@@ -56,11 +45,17 @@ int uinet_config_if(const char *ifname, int cpu, unsigned int cdom)
 	unsigned int unit;
 	struct uinet_config_if *cfg;
 	int copylen;
+
 	
 	if (NULL == ifname) {
 		return (EINVAL);
 	}
-	
+
+	if (strlen(ifname) >= IF_NAMESIZE) {
+		return (EINVAL);
+	}
+
+
 	/* parse ifname into base, unit, and queue */
 	colon = strchr(ifname, ':');
 	if (colon) {
@@ -96,11 +91,6 @@ int uinet_config_if(const char *ifname, int cpu, unsigned int cdom)
 	 * number.
 	 */
 
-	if ((p - ifname + 1) >= IF_NAMESIZE) {
-		/* base + unit is too long */
-		return (EINVAL);
-	}
-
 	p_orig = p;
 	while (isdigit(*p) && p != ifname)
 		p--;
@@ -127,6 +117,8 @@ int uinet_config_if(const char *ifname, int cpu, unsigned int cdom)
 	/* copies guaranteed not to overflow the destinations due to above
 	 * checks against IF_NAMESIZE.
 	 */
+	strcpy(cfg->spec, ifname);
+
 	copylen = p_orig - ifname + 1;
 	memcpy(cfg->name, ifname, copylen);
 	cfg->name[copylen] = '\0';
@@ -135,10 +127,22 @@ int uinet_config_if(const char *ifname, int cpu, unsigned int cdom)
 	memcpy(cfg->basename, ifname, copylen);
 	cfg->basename[copylen] = '\0';
 
+	cfg->unit = unit;
 	cfg->queue = queue;
 	cfg->cpu = cpu;
 
 	TAILQ_INSERT_TAIL(&if_conf, cfg, link);
 
 	return (0);
+}
+
+
+struct uinet_config_if *
+uinet_config_if_next(struct uinet_config_if *cur)
+{
+	if (NULL == cur) {
+		return (TAILQ_FIRST(&if_conf));
+	} else {
+		return (TAILQ_NEXT(cur, link));
+	}
 }

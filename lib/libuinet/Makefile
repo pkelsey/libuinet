@@ -102,6 +102,7 @@ VPATH+= $S/libkern
 UINET_SRCS+=			\
 	uinet_arc4random.c	\
 	uinet_clock.c		\
+	uinet_config.c		\
 	uinet_elf_machdep.c	\
 	uinet_if_netmap.c	\
 	uinet_init.c		\

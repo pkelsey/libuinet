@@ -47,6 +47,8 @@
 
 #include <machine/atomic.h>
 
+#include "uinet_config_internal.h"
+
 #undef _KERNEL
 #include <sys/types.h>
 #include <sys/ioctl.h>
@@ -117,9 +119,7 @@ struct if_netmap_bufinfo_pool {
 
 struct if_netmap_softc {
 	struct ifnet *ifp;
-	char ifname[IFNAMSIZ];
-	char ifbase[IFNAMSIZ];
-	int ifunit;
+	const struct uinet_config_if *cfg;
 	uint8_t addr[ETHER_ADDR_LEN];
 	int fd;
 	struct nmreq req;
@@ -257,23 +257,15 @@ if_netmap_bufinfo_free(struct if_netmap_bufinfo_pool *p, struct if_netmap_bufinf
 
 
 static int
-if_netmap_attach(void)
+if_netmap_attach(struct uinet_config_if *cfg)
 {
 	struct if_netmap_softc *sc;
 	struct ifaddrs *ifa, *ifa_current;
 	int fd, error, rv;
-	char *ifname;
-	char *s, *p;
 	uint32_t pool_size;
 
-	ifname = getenv("UINETIF");
 
-	if (ifname == NULL || strlen(ifname) < 2) {
-		printf("UINETIF needs to be set to determine interface to use. %s\n", ifname);
-		return (ENXIO);
-	}
-
-	printf("ifname is %s\n", ifname);
+	printf("ifname is %s\n", cfg->spec);
 
 	sc = malloc(sizeof(struct if_netmap_softc), M_DEVBUF, M_WAITOK);
 	if (NULL == sc) {
@@ -282,33 +274,9 @@ if_netmap_attach(void)
 	}
 	memset(sc, 0, sizeof(struct if_netmap_softc));
 
-	s = sc->ifname;
-	for (p = ifname; *p != '\0'; p++) {
-		if (*p != ':') {
-			*s++ = *p;
-			continue;
-		}
-		break;
-	}
-	*s = '\0';
-	if (*p == ':') {
-		sc->queue = atoi(p + 1);
-	} else {
-		sc->queue = 0;
-	}
+	sc->cfg = cfg;
 
-	s = sc->ifbase;
-	for (p = sc->ifname; *p != '\0'; p++) {
-		if (!isdigit(*p)) {
-			*s++ = *p;
-			continue;
-		}
-		break;
-	}
-	*s = '\0';
-	sc->ifunit = atoi(p);
-
-	printf("queue is %d\n", sc->queue);
+	printf("queue is %d\n", sc->cfg->queue);
 
 	fd = open("/dev/netmap", O_RDWR);
 	if (fd < 0) {
@@ -339,8 +307,8 @@ if_netmap_attach(void)
 	}
 
 	sc->req.nr_version = NETMAP_API;
-	sc->req.nr_ringid = NETMAP_NO_TX_POLL | NETMAP_HW_RING | sc->queue;
-	strlcpy(sc->req.nr_name, sc->ifname, sizeof(sc->req.nr_name));
+	sc->req.nr_ringid = NETMAP_NO_TX_POLL | NETMAP_HW_RING | sc->cfg->queue;
+	strlcpy(sc->req.nr_name, sc->cfg->name, sizeof(sc->req.nr_name));
 	rv = ioctl(sc->fd, NIOCREGIF, &sc->req);
 	if (rv == -1) {
 		printf("NIOCREGIF failed\n");
@@ -370,8 +338,8 @@ if_netmap_attach(void)
 		goto fail;
 	}
 
-        sc->hw_rx_ring = NETMAP_RXRING(NETMAP_IF(sc->mem, sc->req.nr_offset), sc->queue);
-	sc->hw_tx_ring = NETMAP_TXRING(NETMAP_IF(sc->mem, sc->req.nr_offset), sc->queue);
+        sc->hw_rx_ring = NETMAP_RXRING(NETMAP_IF(sc->mem, sc->req.nr_offset), sc->cfg->queue);
+	sc->hw_tx_ring = NETMAP_TXRING(NETMAP_IF(sc->mem, sc->req.nr_offset), sc->cfg->queue);
 
 	/* NIOCREGIF will reset the hardware rings, but the reserved count
 	 * might still be non-zero from a previous user's activities
@@ -387,7 +355,7 @@ if_netmap_attach(void)
 	ifa_current = ifa;
 	error = -1;
 	while (NULL != ifa_current) {
-		if ((0 == strcmp(ifa_current->ifa_name, sc->ifname)) &&
+		if ((0 == strcmp(ifa_current->ifa_name, sc->cfg->name)) &&
 		    (AF_LINK == ifa_current->ifa_addr->sa_family) &&
 		    (NULL != ifa_current->ifa_data)) {
 			    struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa_current->ifa_addr;
@@ -410,6 +378,8 @@ if_netmap_attach(void)
 	if (0 == if_netmap_setup_interface(sc)) {
 		return (0);
 	}
+
+	if_netmap_set_promisc(sc, false);
 
 fail:
 	if_netmap_bufinfo_pool_destroy(&sc->rx_bufinfo);
@@ -729,7 +699,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	ifp->if_init =  if_netmap_init;
 	ifp->if_softc = sc;
 
-	if_initname(ifp, sc->ifbase, sc->ifunit);
+	if_initname(ifp, sc->cfg->basename, sc->cfg->unit);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = if_netmap_ioctl;
 	ifp->if_start = if_netmap_start;
@@ -744,7 +714,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	ifp->if_capabilities = ifp->if_capenable = 0;
 
 	if (kthread_add(if_netmap_receive, sc, NULL, &sc->rx_thread, 0, 0, "nm_rx")) {
-		printf("Could not start receive thread for %s\n", sc->ifname);
+		printf("Could not start receive thread for %s\n", sc->cfg->spec);
 		ether_ifdetach(ifp);
 		if_free(ifp);
 		return (1);
@@ -754,13 +724,12 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 }
 
 
-#if 0
 static int
-if_netmap_detach(void)
+if_netmap_detach(struct uinet_config_if *cfg)
 {
 	return (0);
 }
-#endif
+
 
 static int
 if_netmap_set_offload(struct if_netmap_softc *sc, bool on)
@@ -769,7 +738,7 @@ if_netmap_set_offload(struct if_netmap_softc *sc, bool on)
 	int rv;
 
 	memset(&ifr, 0, sizeof ifr);
-	strlcpy(ifr.ifr_name, sc->ifname, sizeof ifr.ifr_name);
+	strlcpy(ifr.ifr_name, sc->cfg->name, sizeof ifr.ifr_name);
 	rv = ioctl(sc->fd, SIOCGIFCAP, &ifr);
 	if (rv == -1) {
 		perror("get interface capabilities failed");
@@ -799,7 +768,7 @@ if_netmap_set_promisc(struct if_netmap_softc *sc, bool on)
 	int rv;
 
 	memset(&ifr, 0, sizeof ifr);
-	strlcpy(ifr.ifr_name, sc->ifname, sizeof ifr.ifr_name);
+	strlcpy(ifr.ifr_name, sc->cfg->name, sizeof ifr.ifr_name);
 	rv = ioctl(sc->fd, SIOCGIFFLAGS, &ifr);
 	if (rv == -1) {
 		perror("get interface flags failed");
@@ -829,14 +798,20 @@ if_netmap_set_promisc(struct if_netmap_softc *sc, bool on)
 static int
 if_netmap_modevent(module_t mod, int type, void *data)
 {
+	struct uinet_config_if *cfg = NULL;
 
 	switch (type) {
 	case MOD_LOAD:
-		return (if_netmap_attach());
+		while (NULL != (cfg = uinet_config_if_next(cfg))) {
+			if_netmap_attach(cfg);
+		}
 		break;
 
 	case MOD_UNLOAD:
-		return (EINVAL);
+		while (NULL != (cfg = uinet_config_if_next(cfg))) {
+			if_netmap_detach(cfg);
+		}
+		break;
 
 	default:
 		return (EOPNOTSUPP);
