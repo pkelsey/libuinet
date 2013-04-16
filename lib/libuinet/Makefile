@@ -10,9 +10,18 @@ include ${TOP_DIR}/network/uinet/mk/kern.pre.mk
 INCLUDES+= -I$S/machine/${MACHINE_CPUARCH}
 INCLUDES+= -I./opt
 
+ifneq (${COMPILER_TYPE},clang)
+STDINC_PATH:= $(patsubst %,-I%,$(shell `${CC} -print-prog-name=cc1` -v < /dev/null 2>&1 | sed '/\// !d'))
+else
+STDINC_PATH:= $(patsubst %,-I%,$(shell ${CC} -E -Xpreprocessor -v - < /dev/null 2>&1 | sed '/\// !d'))
+endif
+$(warning STDINC_PATH = ${STDINC_PATH})
+
 ifneq ($(filter amd64 i386,${MACHINE_CPUARCH}),)
 INCLUDES+= -I$S/machine/x86
 endif
+
+INCLUDES+= ${STDINC_PATH}
 
 #
 # Distilled from FreeBSD src/sys/conf/Makefile.amd64
@@ -73,8 +82,57 @@ HACK_EXTRA_FLAGS+=${EXTRA_FLAGS} $(ARCH_FLAGS)
 endif
 
 
+VPATH+= $S/kern
 VPATH+= $S/netinet
 VPATH+= $S/netinet/cc
+
+UINET_SRCS+=		\
+	uinet_lock.c	\
+	uinet_main.c
+
+# want vnode_if
+#	kern_descrip.c		\
+#	kern_linker.c		\
+#	link_elf.c		\
+#	link_elf_obj.c		\
+#	sys_generic.c		\
+#	uipc_syscalls.c
+
+# want device_if bus_if
+#	subr_taskqueue.c	\
+
+
+KERN_SRCS+=			\
+	kern_environment.c	\
+	kern_event.c		\
+	kern_fail.c		\
+	kern_khelp.c		\
+	kern_hhook.c		\
+	kern_mbuf.c		\
+	kern_module.c		\
+	kern_mtxpool.c		\
+	kern_ntptime.c		\
+	kern_osd.c		\
+	kern_sysctl.c		\
+	kern_tc.c		\
+	md5c.c			\
+	subr_eventhandler.c	\
+	subr_kobj.c		\
+	subr_lock.c		\
+	subr_module.c		\
+	subr_param.c		\
+	subr_pcpu.c		\
+	subr_sbuf.c		\
+	subr_unit.c		\
+	sys_capability.c	\
+	sys_socket.c		\
+	uipc_accf.c		\
+	uipc_mbuf.c		\
+	uipc_mbuf2.c		\
+	uipc_domain.c		\
+	uipc_sockbuf.c		\
+	uipc_socket.c
+
 
 NETINET_SRCS+=		\
 	ip_carp.c	\
@@ -113,20 +171,22 @@ NETINET_SRCS+=		\
 
 NETINET6_SRCS=
 
-KERN_SRCS=
 
-
-SRCS= ${NETINET_SRCS} ${NETINET6_SRCS} ${KERN_SRCS}
+SRCS= ${UINET_SRCS} ${KERN_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS}
 
 
 OBJS+=  $(patsubst %.cc,%.o,$(patsubst %.c,%.o,${SRCS}))
 
-libuinet.a: ${OBJS}
+PROGRAM=uinet_test
+
+${PROGRAM}: ${OBJS}
 	${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
 
 .c.o:
 	${NORMAL_C}
 
+clean:
+	rm -f ${PROGRAM} ${OBJS}
 
 
 include ${TOP_DIR}/network/uinet/mk/kern.mk
