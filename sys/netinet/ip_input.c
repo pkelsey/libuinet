@@ -79,7 +79,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_input.c 237910 2012-07-01 08:47
 
 #include <sys/socketvar.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 #ifdef CTASSERT
 CTASSERT(sizeof(struct ip) == 20);

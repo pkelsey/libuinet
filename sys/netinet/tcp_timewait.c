@@ -88,7 +88,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_timewait.c 238247 2012-07-08 1
 
 #include <machine/in_cksum.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 static VNET_DEFINE(uma_zone_t, tcptw_zone);
 #define	V_tcptw_zone			VNET(tcptw_zone)

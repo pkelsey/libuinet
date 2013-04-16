@@ -113,7 +113,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_input.c 238247 2012-07-08 14:2
 
 #include <machine/in_cksum.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 const int tcprexmtthresh = 3;
 

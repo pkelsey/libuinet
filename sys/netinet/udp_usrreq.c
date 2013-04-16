@@ -92,7 +92,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/udp_usrreq.c 238240 2012-07-08 12:
 
 #include <machine/in_cksum.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 /*
  * UDP protocol implementation.

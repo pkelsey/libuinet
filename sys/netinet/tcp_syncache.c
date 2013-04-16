@@ -96,7 +96,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_syncache.c 238247 2012-07-08 1
 
 #include <machine/in_cksum.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 static VNET_DEFINE(int, tcp_syncookies) = 1;
 #define	V_tcp_syncookies		VNET(tcp_syncookies)

@@ -82,7 +82,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 
 #include <machine/in_cksum.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 VNET_DEFINE(u_short, ip_id);
 

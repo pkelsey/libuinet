@@ -110,7 +110,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_subr.c 238247 2012-07-08 14:21
 #include <machine/in_cksum.h>
 #include <sys/md5.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 VNET_DEFINE(int, tcp_mssdflt) = TCP_MSS;
 #ifdef INET6

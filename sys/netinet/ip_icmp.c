@@ -71,7 +71,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_icmp.c 237913 2012-07-01 09:00:
 
 #include <machine/in_cksum.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 #endif /* INET */
 
 /*

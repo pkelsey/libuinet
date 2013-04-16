@@ -73,7 +73,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/raw_ip.c 227423 2011-11-10 19:10:5
 #include <netipsec/ipsec.h>
 #endif /*IPSEC*/
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 VNET_DEFINE(int, ip_defttl) = IPDEFTTL;
 SYSCTL_VNET_INT(_net_inet_ip, IPCTL_DEFTTL, ttl, CTLFLAG_RW,

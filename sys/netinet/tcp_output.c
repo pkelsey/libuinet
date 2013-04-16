@@ -82,7 +82,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_output.c 238247 2012-07-08 14:
 
 #include <machine/in_cksum.h>
 
+#ifdef MAC
 #include <security/mac/mac_framework.h>
+#endif /* MAC */
 
 VNET_DEFINE(int, path_mtu_discovery) = 1;
 SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, path_mtu_discovery, CTLFLAG_RW,
