@@ -103,12 +103,14 @@ UINET_SRCS+=			\
 	uinet_arc4random.c	\
 	uinet_clock.c		\
 	uinet_elf_machdep.c	\
+	uinet_if_netmap.c	\
 	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
 	uinet_kern_clocksource.c\
 	uinet_kern_condvar.c	\
 	uinet_kern_conf.c	\
+	uinet_kern_environment.c\
 	uinet_kern_intr.c	\
 	uinet_kern_jail.c	\
 	uinet_kern_kthread.c	\
@@ -130,6 +132,7 @@ UINET_SRCS+=			\
 	uinet_kern_time.c	\
 	uinet_kern_timeout.c	\
 	uinet_main.c		\
+	uinet_main_user.c	\
 	uinet_machdep.c		\
 	uinet_dev_random.c	\
 	uinet_subr_bus.c	\
@@ -159,7 +162,6 @@ CRYPTO_SRCS+=		\
 
 KERN_SRCS+=			\
 	kern_descrip.c		\
-	kern_environment.c	\
 	kern_event.c		\
 	kern_fail.c		\
 	kern_khelp.c		\
