@@ -1525,6 +1525,7 @@ sysctl_root(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
+#ifndef UINET
 #ifndef _SYS_SYSPROTO_H_
 struct sysctl_args {
 	int	*name;
@@ -1560,6 +1561,7 @@ sys___sysctl(struct thread *td, struct sysctl_args *uap)
 	}
 	return (error);
 }
+#endif /* UINET */
 
 /*
  * This is used from various compatibility syscalls too.  That's why name

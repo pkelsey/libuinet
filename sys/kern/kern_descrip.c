@@ -3912,6 +3912,7 @@ invfo_chown(struct file *fp, uid_t uid, gid_t gid, struct ucred *active_cred,
 	return (EINVAL);
 }
 
+#ifndef UINET
 /*-------------------------------------------------------------------*/
 
 /*
@@ -3965,3 +3966,4 @@ fildesc_drvinit(void *unused)
 }
 
 SYSINIT(fildescdev, SI_SUB_DRIVERS, SI_ORDER_MIDDLE, fildesc_drvinit, NULL);
+#endif /* UINET */

@@ -435,7 +435,9 @@ taskqueue_start_threads(struct taskqueue **tqp, int count, int pri,
 			const char *name, ...)
 {
 	va_list ap;
+#ifndef UINET
 	struct thread *td;
+#endif /* UINET */
 	struct taskqueue *tq;
 	int i, error;
 	char ktname[MAXCOMLEN + 1];
@@ -472,6 +474,7 @@ taskqueue_start_threads(struct taskqueue **tqp, int count, int pri,
 		} else
 			tq->tq_tcount++;
 	}
+#ifndef UINET
 	for (i = 0; i < count; i++) {
 		if (tq->tq_threads[i] == NULL)
 			continue;
@@ -481,6 +484,7 @@ taskqueue_start_threads(struct taskqueue **tqp, int count, int pri,
 		sched_add(td, SRQ_BORING);
 		thread_unlock(td);
 	}
+#endif /* UINET */
 
 	return (0);
 }
