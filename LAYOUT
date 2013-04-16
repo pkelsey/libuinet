@@ -21,19 +21,3 @@ sys		Subset of the FreeBSD kernel source tree required by this port
 		entirety from the FreeBSD sources, even if not all the sources
 		therein will be used, in order to make merging with newer
 		kernel code more straightforward.
-sys/machine	Contains machine-specific sources and includes from the FreeBSD
-		kernel, with a synthetic structure explained below.
-sys/machine/<arch>/<arch>
-		Copy of sys/<arch>/<arch> from the FreeBSD kernel source tree.
-		Only the machine-specific IP checksum routines are of use to
-		this port.
-sys/machine/<arch>/machine
-		Copy of sys/<arch>/include from the FreeBSD kernel source tree,
-		so placed to allow a single-stage build using the include path
-		-Isys/machine/<arch> to access machine/ include	files, instead
-		of copying them to the build dir first.
-/sys/machine/x86/x86
-		Copy of sys/x86/include from the FreeBSD kernel source tree,
-		so placed to allow a single-stage build using the include path
-		-Isys/machine/x86 to access x86/ include files, instead of
-		copying them to the build dir first.
