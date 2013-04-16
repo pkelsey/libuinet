@@ -36,7 +36,6 @@
  *
  */
 
-
 #include <sys/types.h>
 
 /*
@@ -53,6 +52,10 @@ int	copyin(const void * __restrict udaddr, void * __restrict kaddr,
 	    size_t len) __nonnull(1) __nonnull(2);
 int	copyout(const void * __restrict kaddr, void * __restrict udaddr,
 	    size_t len) __nonnull(1) __nonnull(2);
+
+int	subyte(void *base, int byte);
+int	fubyte(void *base);
+
 
 #include <string.h>
 
@@ -103,3 +106,18 @@ copyout(const void *kaddr, void *uaddr, size_t len)
 }
 
 
+int
+subyte(void *base, int byte)
+{
+
+	*(char *)base = (uint8_t)byte;
+	return (0);
+}
+
+
+int
+fubyte(void *base)
+{
+
+	return (*(uint8_t *)base);
+}
