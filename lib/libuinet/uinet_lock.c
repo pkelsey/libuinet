@@ -27,7 +27,7 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/bus.h>
+//#include <sys/bus.h>
 #include <sys/conf.h>
 #include <sys/kdb.h>
 #include <sys/kernel.h>
@@ -59,14 +59,14 @@ assert_mtx(struct lock_object *lock, int what)
 	mtx_assert((struct mtx *)lock, what);
 }
 
-void
+static void
 lock_mtx(struct lock_object *lock, int how)
 {
 
 	mtx_lock((struct mtx *)lock);
 }
 
-int
+static int
 unlock_mtx(struct lock_object *lock)
 {
 	struct mtx *m;
@@ -154,7 +154,7 @@ _mtx_unlock_spin_flags(struct mtx *m, int opts, const char *file, int line)
 	pthread_mutex_unlock(&m->mtx_lock);
 }
 
-void
+static void
 assert_rw(struct lock_object *lock, int what)
 {
 
