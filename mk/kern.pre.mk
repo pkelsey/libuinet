@@ -6,6 +6,11 @@ include ${TOP_DIR}/network/uinet/mk/compiler.mk
 
 MACHINE_CPUARCH:= $(shell uname -m)
 
+# Convert Mac OS X name to FreeBSD one.
+ifeq (${MACHINE_CPUARCH},x86_64)
+MACHINE_CPUARCH=	amd64
+endif
+
 AWK?=		awk
 
 ifdef DEBUG

@@ -21,7 +21,7 @@ INCLUDES+= -I./opt
 ifneq (${COMPILER_TYPE},clang)
 STDINC_PATH:= $(patsubst %,-I%,$(shell `${CC} -print-prog-name=cc1` -v < /dev/null 2>&1 | sed '/\// !d'))
 else
-STDINC_PATH:= $(patsubst %,-I%,$(shell ${CC} -E -Xpreprocessor -v - < /dev/null 2>&1 | sed '/\// !d'))
+STDINC_PATH:= $(patsubst %,-I%,$(shell ${CC} -E -Xpreprocessor -v - < /dev/null 2>&1 | grep -v framework\ directory | sed '/\// !d'))
 endif
 
 
