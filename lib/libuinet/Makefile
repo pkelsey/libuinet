@@ -2,6 +2,7 @@
 # Derived from FreeBSD auto-generated kernel Makefile and
 # machine-specific Makefile templates
 #
+DEBUG=-g
 
 S=$(TOP_DIR)/network/uinet/sys
 
@@ -86,47 +87,84 @@ HACK_EXTRA_FLAGS+=${EXTRA_FLAGS} $(ARCH_FLAGS)
 endif
 
 
-CFLAGS+= -DUINET=1
+CFLAGS+= -DUINET=1 -O0
 
 VPATH+= $S/machine/${MACHINE_CPUARCH}/${MACHINE_CPUARCH}
 VPATH+= $S/kern
+VPATH+= $S/crypto
 VPATH+= $S/net
 VPATH+= $S/netinet
 VPATH+= $S/netinet/cc
+VPATH+= $S/vm
+VPATH+= $S/libkern
+
 
 UINET_SRCS+=			\
+	uinet_arc4random.c	\
+	uinet_clock.c		\
+	uinet_elf_machdep.c	\
+	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
+	uinet_kern_clocksource.c\
+	uinet_kern_condvar.c	\
+	uinet_kern_conf.c	\
+	uinet_kern_intr.c	\
+	uinet_kern_jail.c	\
+	uinet_kern_kthread.c	\
 	uinet_kern_lock.c	\
 	uinet_kern_malloc.c	\
+	uinet_kern_mib.c	\
 	uinet_kern_mutex.c	\
+	uinet_kern_priv.c	\
+	uinet_kern_proc.c	\
+	uinet_kern_prot.c	\
+	uinet_kern_racct.c	\
+	uinet_kern_resource.c	\
 	uinet_kern_rmlock.c	\
 	uinet_kern_rwlock.c	\
 	uinet_kern_shutdown.c	\
+	uinet_kern_sig.c	\
 	uinet_kern_sx.c		\
 	uinet_kern_synch.c	\
+	uinet_kern_time.c	\
 	uinet_kern_timeout.c	\
 	uinet_main.c		\
-	uinet_support.c
+	uinet_machdep.c		\
+	uinet_dev_random.c	\
+	uinet_subr_bus.c	\
+	uinet_subr_prf.c	\
+	uinet_subr_rtc.c	\
+	uinet_subr_smp.c	\
+	uinet_subr_uio.c	\
+	uinet_support.c		\
+	uinet_tty.c		\
+	uinet_uipc_shm.c	\
+	uinet_uma_int.c		\
+	uinet_vfs_bio.c		\
+	uinet_vfs_mountroot.c	\
+	uinet_vfs_ops.c		\
+	uinet_vfs_subr.c	\
+	uinet_vfs_syscalls.c	\
+	uinet_vm_contig.c	\
+	uinet_vm_glue.c		\
+	uinet_vm_kern.c		\
+	uinet_vm_meter.c	\
+	uinet_vm_object.c
 
-# want vnode_if - do we really need to know about vnodes anywhere?
-#	kern_linker.c		\
-#	link_elf.c		\
-#	link_elf_obj.c		\
-#	sys_generic.c		\
-#	uipc_syscalls.c
 
-# not sure if we need yet
-#	kern_event.c		\
-
+CRYPTO_SRCS+=		\
+	sha1.c
 
 
 KERN_SRCS+=			\
 	kern_descrip.c		\
 	kern_environment.c	\
+	kern_event.c		\
 	kern_fail.c		\
 	kern_khelp.c		\
 	kern_hhook.c		\
+	kern_linker.c		\
 	kern_mbuf.c		\
 	kern_module.c		\
 	kern_mtxpool.c		\
@@ -134,6 +172,7 @@ KERN_SRCS+=			\
 	kern_osd.c		\
 	kern_sysctl.c		\
 	kern_tc.c		\
+	link_elf.c		\
 	md5c.c			\
 	subr_eventhandler.c	\
 	subr_hash.c		\
@@ -146,6 +185,7 @@ KERN_SRCS+=			\
 	subr_taskqueue.c	\
 	subr_unit.c		\
 	sys_capability.c	\
+	sys_generic.c		\
 	sys_socket.c		\
 	uipc_accf.c		\
 	uipc_mbuf.c		\
@@ -155,13 +195,23 @@ KERN_SRCS+=			\
 	uipc_socket.c
 
 
-KERN_MFILES+=		\
+KERN_MHEADERS+=		\
 	bus_if.m	\
 	device_if.m	\
-	vnode_if.m
+	linker_if.m
+
+
+KERN_MSRCS+=		\
+	linker_if.m
+
+
+LIBKERN_SRCS+=		\
+	bcd.c
+
 
 MACHINE_SRCS+=		\
 	in_cksum.c
+
 
 NET_SRCS+=		\
 	bpf.c		\
@@ -215,13 +265,20 @@ NETINET_SRCS+=		\
 	cc_newreno.c
 
 
-NETINET6_SRCS=
+NETINET6_SRCS+=
 
-MFILES= ${KERN_MFILES}
 
-MHEADERS= $(patsubst %.m,%.h,${MFILES})
+VM_SRCS+=		\
+	uma_core.c
 
-SRCS= ${UINET_SRCS} ${KERN_SRCS} ${MACHINE_SRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS}
+
+MHEADERS= $(patsubst %.m,%.h,${KERN_MHEADERS})
+MHEADERS+= vnode_if.h vnode_if_newproto.h vnode_if_typedef.h
+
+MSRCS= $(patsubst %.m,%.c,${KERN_MSRCS})
+
+SRCS=  ${UINET_SRCS} ${CRYPTO_SRCS} ${KERN_SRCS} ${LIBKERN_SRCS} ${MACHINE_SRCS}
+SRCS+= ${MSRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS} ${VM_SRCS}
 
 OBJS+= $(patsubst %.cc,%.o,$(patsubst %.c,%.o,${SRCS}))
 
@@ -229,17 +286,20 @@ PROGRAM=uinet_test
 
 LDADD+= -lpthread
 
-${PROGRAM}: ${MHEADERS} ${OBJS}
+${PROGRAM}: ${MHEADERS} ${MSRCS} ${OBJS}
 	${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
 
 .c.o:
 	${NORMAL_C}
 
+.m.c:
+	${AWK} -f $S/tools/makeobjops.awk $< -c
+
 .m.h:
 	${AWK} -f $S/tools/makeobjops.awk $< -h
 
 clean:
-	rm -f ${PROGRAM} ${OBJS} ${MHEADERS}
+	rm -f ${MHEADERS} ${MSRCS} ${OBJS} ${PROGRAM}
 
 
 #
