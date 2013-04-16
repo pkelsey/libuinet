@@ -78,6 +78,12 @@ pthread_start_routine(void *arg)
 
 	pcurthread = psa->psa_td;
 	pcurthread->td_proc = &proc0;
+
+	/*
+	 * Ensure tc_wchan is valid before thread body executes, in case the
+	 * thread starts before this gets set in kthread_add.
+	 */
+	pcurthread->td_wchan = pthread_self();
 	psa->psa_start_routine(psa->psa_arg);
 	free(psa->psa_td);
 	free(psa);
@@ -120,6 +126,10 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	
 	pthread_attr_init(&attr); 
 	error = _pthread_create(&thread, &attr, pthread_start_routine, psa);
+	/*
+	 * Ensure tc_wchan is valid before kthread_add returns, in case the
+	 * thread has not started yet.
+	 */
 	td->td_wchan = thread;
 	return (error);
 }
@@ -162,6 +172,10 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	
 	pthread_attr_init(&attr); 
 	error = _pthread_create(&thread, &attr, pthread_start_routine, psa);
+	/*
+	 * Ensure tc_wchan is valid before kthread_add returns, in case the
+	 * thread has not started yet.
+	 */
 	td->td_wchan = thread;
 	return (error);
 }
@@ -170,7 +184,6 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 void
 uinet_init_thread0(void)
 {
-
 	pcurthread = &thread0;
 	pcurthread->td_proc = &proc0;
 }
