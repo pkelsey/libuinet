@@ -86,7 +86,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/vm/uma_core.c 236269 2012-05-30 00:38:24Z 
 #include <vm/uma_int.h>
 #include <vm/uma_dbg.h>
 
+#ifdef DDB
 #include <ddb/ddb.h>
+#endif
 
 /*
  * This is the zone and keg from which all zones are spawned.  The idea is that
@@ -208,7 +210,9 @@ enum zfreeskip { SKIP_NONE, SKIP_DTOR, SKIP_FINI };
 
 /* Prototypes.. */
 
+#ifndef UINET
 static void *obj_alloc(uma_zone_t, int, u_int8_t *, int);
+#endif /* UINET */
 static void *page_alloc(uma_zone_t, int, u_int8_t *, int);
 static void *startup_alloc(uma_zone_t, int, u_int8_t *, int);
 static void page_free(void *, int, u_int8_t);
@@ -996,6 +1000,7 @@ page_alloc(uma_zone_t zone, int bytes, u_int8_t *pflag, int wait)
 	return (p);
 }
 
+#ifndef UINET
 /*
  * Allocates a number of pages from within an object
  *
@@ -1055,6 +1060,7 @@ done:
 
 	return ((void *)retkva);
 }
+#endif /* UINET */
 
 /*
  * Frees a number of pages to the system
@@ -2939,6 +2945,7 @@ uma_zone_set_allocf(uma_zone_t zone, uma_alloc allocf)
 	ZONE_UNLOCK(zone);
 }
 
+#ifndef UINET
 /* See uma.h */
 int
 uma_zone_set_obj(uma_zone_t zone, struct vm_object *obj, int count)
@@ -2972,6 +2979,7 @@ uma_zone_set_obj(uma_zone_t zone, struct vm_object *obj, int count)
 	ZONE_UNLOCK(zone);
 	return (1);
 }
+#endif
 
 /* See uma.h */
 void
