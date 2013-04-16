@@ -7,6 +7,10 @@ S=$(TOP_DIR)/network/uinet/sys
 
 include ${TOP_DIR}/network/uinet/mk/kern.pre.mk
 
+KERNPREINCLUDES:= ${INCLUDES}
+INCLUDES= -I${TOP_DIR}/network/uinet/lib/libuinet/include ${KERNPREINCLUDES}
+
+
 INCLUDES+= -I$S/machine/${MACHINE_CPUARCH}
 INCLUDES+= -I./opt
 
@@ -15,7 +19,7 @@ STDINC_PATH:= $(patsubst %,-I%,$(shell `${CC} -print-prog-name=cc1` -v < /dev/nu
 else
 STDINC_PATH:= $(patsubst %,-I%,$(shell ${CC} -E -Xpreprocessor -v - < /dev/null 2>&1 | sed '/\// !d'))
 endif
-$(warning STDINC_PATH = ${STDINC_PATH})
+
 
 ifneq ($(filter amd64 i386,${MACHINE_CPUARCH}),)
 INCLUDES+= -I$S/machine/x86
@@ -86,11 +90,15 @@ VPATH+= $S/kern
 VPATH+= $S/netinet
 VPATH+= $S/netinet/cc
 
-UINET_SRCS+=		\
-	uinet_lock.c	\
-	uinet_main.c
+UINET_SRCS+=			\
+	uinet_kern_malloc.c	\
+	uinet_kern_shutdown.c	\
+	uinet_kern_synch.c	\
+	uinet_lock.c		\
+	uinet_main.c		\
+	uinet_support.c
 
-# want vnode_if
+# want vnode_if - do we really need to know about vnodes anywhere?
 #	kern_descrip.c		\
 #	kern_linker.c		\
 #	link_elf.c		\
@@ -98,13 +106,13 @@ UINET_SRCS+=		\
 #	sys_generic.c		\
 #	uipc_syscalls.c
 
-# want device_if bus_if
-#	subr_taskqueue.c	\
+# not sure if we need yet
+#	kern_event.c		\
+
 
 
 KERN_SRCS+=			\
 	kern_environment.c	\
-	kern_event.c		\
 	kern_fail.c		\
 	kern_khelp.c		\
 	kern_hhook.c		\
@@ -117,12 +125,14 @@ KERN_SRCS+=			\
 	kern_tc.c		\
 	md5c.c			\
 	subr_eventhandler.c	\
+	subr_hash.c		\
 	subr_kobj.c		\
 	subr_lock.c		\
 	subr_module.c		\
 	subr_param.c		\
 	subr_pcpu.c		\
 	subr_sbuf.c		\
+	subr_taskqueue.c	\
 	subr_unit.c		\
 	sys_capability.c	\
 	sys_socket.c		\
@@ -132,6 +142,11 @@ KERN_SRCS+=			\
 	uipc_domain.c		\
 	uipc_sockbuf.c		\
 	uipc_socket.c
+
+
+KERN_MFILES+=		\
+	bus_if.m	\
+	device_if.m
 
 
 NETINET_SRCS+=		\
@@ -171,22 +186,29 @@ NETINET_SRCS+=		\
 
 NETINET6_SRCS=
 
+MFILES= ${KERN_MFILES}
+
+MHEADERS= $(patsubst %.m,%.h,${MFILES})
 
 SRCS= ${UINET_SRCS} ${KERN_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS}
 
-
-OBJS+=  $(patsubst %.cc,%.o,$(patsubst %.c,%.o,${SRCS}))
+OBJS+= $(patsubst %.cc,%.o,$(patsubst %.c,%.o,${SRCS}))
 
 PROGRAM=uinet_test
 
-${PROGRAM}: ${OBJS}
+LDADD+= -lpthread
+
+${PROGRAM}: ${MHEADERS} ${OBJS}
 	${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
 
 .c.o:
 	${NORMAL_C}
 
+.m.h:
+	${AWK} -f $S/tools/makeobjops.awk $< -h
+
 clean:
-	rm -f ${PROGRAM} ${OBJS}
+	rm -f ${PROGRAM} ${OBJS} ${MHEADERS}
 
 
 include ${TOP_DIR}/network/uinet/mk/kern.mk
