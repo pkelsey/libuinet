@@ -12,6 +12,9 @@ lib/libuinet	Library containing the user-space port of the FreeBSD TCP/IP
 lib/libuinet/include
 		Public and private includes for the libuinet port and header
 		overrides for some of the FreeBSD kernel headers.
+lib/libuinet/opt
+		Kernel option headers required by the port. The kernel
+		configuration is modified by editing these files.
 mk		Port of requisite FreeBSD kernel make infrastructure to gmake.
 sys		Subset of the FreeBSD kernel source tree required by this port
 		of the TCP/IP stack.  Subdirs have been imported in their

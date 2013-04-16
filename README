@@ -1,0 +1,23 @@
+UINET (User INET)
+=============================================================================
+
+This is a user-space port of the FreeBSD TCP/IP stack, begun with the
+FreeBSD 9.1-RELEASE sources and many pieces of Kip Macy's user-space
+port of an earlier version of the FreeBSD stack, libplebnet.
+
+
+The current build target is a test program for exercising the stack
+that does a netmap takeover of the interface in the host system
+specified in the environment variable UINETIF, uses the same IP
+configuration that the host interface had, and runs a simple TCP
+loopback server on port 2222 on that interface.
+
+
+cd wanproxy/network/uinet/lib/libuinet
+gmake TOP_DIR=../../../..
+export UINETIF=em1
+./uinet_test
+
+netcat or similar can then be used to make connections to the loopback
+server and drive traffic.
+
