@@ -5,6 +5,9 @@
 DEBUG=-g
 
 S=$(TOP_DIR)/network/uinet/sys
+MACHINE_INCLUDES_ROOT=machine_includes
+MACHINE_INCLUDES_DIR=${MACHINE_INCLUDES_ROOT}/${MACHINE_CPUARCH}/machine
+X86_INCLUDES=0
 
 include ${TOP_DIR}/network/uinet/mk/kern.pre.mk
 
@@ -12,7 +15,7 @@ KERNPREINCLUDES:= ${INCLUDES}
 INCLUDES= -I${TOP_DIR}/network/uinet/lib/libuinet/include ${KERNPREINCLUDES}
 
 
-INCLUDES+= -I$S/machine/${MACHINE_CPUARCH}
+INCLUDES+= -I./machine_includes
 INCLUDES+= -I./opt
 
 ifneq (${COMPILER_TYPE},clang)
@@ -23,7 +26,7 @@ endif
 
 
 ifneq ($(filter amd64 i386,${MACHINE_CPUARCH}),)
-INCLUDES+= -I$S/machine/x86
+X86_INCLUDES=1
 endif
 
 INCLUDES+= ${STDINC_PATH}
@@ -32,7 +35,6 @@ INCLUDES+= ${STDINC_PATH}
 # Distilled from FreeBSD src/sys/conf/Makefile.amd64
 #
 ifeq (${MACHINE_CPUARCH},amd64)
-
 endif
 
 #
@@ -73,7 +75,7 @@ endif
 
 CFLAGS+= -DUINET=1 -O0
 
-VPATH+= $S/machine/${MACHINE_CPUARCH}/${MACHINE_CPUARCH}
+VPATH+= $S/${MACHINE_CPUARCH}/${MACHINE_CPUARCH}
 VPATH+= $S/kern
 VPATH+= $S/crypto
 VPATH+= $S/net
@@ -274,7 +276,8 @@ PROGRAM=uinet_test
 
 LDADD+= -lpthread
 
-${PROGRAM}: ${MHEADERS} ${MSRCS} ${OBJS}
+
+${PROGRAM}: machine_includes ${MHEADERS} ${MSRCS} ${OBJS}
 	${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
 
 .c.o:
@@ -286,8 +289,21 @@ ${PROGRAM}: ${MHEADERS} ${MSRCS} ${OBJS}
 .m.h:
 	${AWK} -f $S/tools/makeobjops.awk $< -h
 
+.PHONY: clean
 clean:
 	rm -f ${MHEADERS} ${MSRCS} ${OBJS} ${PROGRAM}
+	rm -rf ${MACHINE_INCLUDES_ROOT}
+
+
+.PHONY: machine_includes
+machine_includes:
+	@rm -rf ${MACHINE_INCLUDES_ROOT}
+	@mkdir -p ${MACHINE_INCLUDES_DIR}
+	@cp -r $S/${MACHINE_CPUARCH}/include/ ${MACHINE_INCLUDES_DIR}
+	@if [ "${X86_INCLUDES}" = "1" ]; then 				\
+		mkdir ${MACHINE_INCLUDES_ROOT}/x86;			\
+		cp -r $S/x86/include/ ${MACHINE_INCLUDES_ROOT}/x86;	\
+	fi
 
 
 #
