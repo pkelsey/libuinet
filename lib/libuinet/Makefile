@@ -74,6 +74,7 @@ endif
 
 
 VPATH+= $S/netinet
+VPATH+= $S/netinet/cc
 
 NETINET_SRCS+=		\
 	ip_carp.c	\
