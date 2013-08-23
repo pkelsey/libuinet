@@ -47,6 +47,8 @@
 
 struct vnet;
 
+struct in_l2info;
+
 /*
  * Kernel structure per socket.
  * Contains send and receive buffer queues,
@@ -71,7 +73,7 @@ struct socket;
 struct socket {
 	int	so_count;		/* (b) reference count */
 	short	so_type;		/* (a) generic type, see socket.h */
-	short	so_options;		/* from socket call, see socket.h */
+	int	so_options;		/* from socket call, see socket.h */
 	short	so_linger;		/* time to linger while closing */
 	short	so_state;		/* (b) internal state flags SS_* */
 	int	so_qstate;		/* (e) internal state flags SQ_* */
@@ -125,6 +127,8 @@ struct socket {
 	 */
 	int so_fibnum;		/* routing domain for this socket */
 	uint32_t so_user_cookie;
+
+	struct in_l2info *so_l2info;	/* (b) PROMISCUOUS_INET L2 info */
 };
 
 /*
@@ -163,7 +167,7 @@ struct xsocket {
 	size_t	xso_len;	/* length of this structure */
 	struct	socket *xso_so;	/* makes a convenient handle sometimes */
 	short	so_type;
-	short	so_options;
+	int	so_options;
 	short	so_linger;
 	short	so_state;
 	caddr_t	so_pcb;		/* another convenient handle */

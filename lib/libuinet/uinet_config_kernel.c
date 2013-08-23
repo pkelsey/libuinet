@@ -24,29 +24,46 @@
  */
 
 
-#ifndef	_UINET_CONFIG_INTERNAL_H_
-#define	_UINET_CONFIG_INTERNAL_H_
+#include <sys/param.h>
+#include <sys/sysctl.h>
+
+#include "uinet_config.h"
+#include "uinet_config_internal.h"
 
 
-#include <sys/queue.h>
-#include <sys/socket.h>
+int
+uinet_config_blackhole(uinet_blackhole_t action)
+{
+	int val;
+	char *name;
+	int error = 0;
 
-#include <net/if.h>
+	switch (action) {
+	case UINET_BLACKHOLE_TCP_NONE:
+		name = "net.inet.tcp.blackhole";
+		val = 0;
+		break;
+	case UINET_BLACKHOLE_TCP_SYN_ONLY:
+		name = "net.inet.tcp.blackhole";
+		val = 1;
+		break;
+	case UINET_BLACKHOLE_TCP_ALL:
+		name = "net.inet.tcp.blackhole";
+		val = 2;
+		break;
+	case UINET_BLACKHOLE_UDP_NONE:
+		name = "net.inet.udp.blackhole";
+		val = 0;
+		break;
+	case UINET_BLACKHOLE_UDP_ALL:
+		name = "net.inet.udp.blackhole";
+		val = 1;
+		break;
+	default:
+		return (EINVAL);
+	}
 
-
-struct uinet_config_if {
-	TAILQ_ENTRY(uinet_config_if) link;
-	char spec[IF_NAMESIZE];
-	char name[IF_NAMESIZE];
-	char basename[IF_NAMESIZE];
-	unsigned int unit;
-	unsigned int queue;
-	int cpu;
-	unsigned int cdom;
-};
-
-
-struct uinet_config_if *uinet_config_if_next(struct uinet_config_if *cur);
-
-
-#endif /* _UINET_CONFIG_INTERNAL_H_ */
+	error = kernel_sysctlbyname(curthread, name, NULL, NULL,
+				    &val, sizeof(int), NULL, 0);
+	return (error);
+}

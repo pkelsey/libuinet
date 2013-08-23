@@ -68,7 +68,7 @@
  *  will be available for zero-copy receive at any given time.  During
  *  receive processing, if that many buffers have been handed to the stack
  *  in a zero-copy fashion, all further received buffers will be passed to
- *  the stack using copies until some of the zero-coppy buffers are
+ *  the stack using copies until some of the zero-copy buffers are
  *  returned.
  *
  *  One way to look at this is that the complement of this fraction
@@ -277,15 +277,11 @@ if_netmap_attach(struct uinet_config_if *cfg)
 
 	sc->cfg = cfg;
 
-	printf("queue is %d\n", sc->cfg->queue);
-
 	fd = open("/dev/netmap", O_RDWR);
 	if (fd < 0) {
 		perror("/dev/netmap open failed");
 		return (ENXIO);
 	}
-
-	printf("/dev/netmap open\n");
 
 	sc->fd = fd;
 
@@ -694,14 +690,16 @@ static int
 if_netmap_setup_interface(struct if_netmap_softc *sc)
 {
 	struct ifnet *ifp;
+	char basename[IF_NAMESIZE];
 
 	ifp = sc->ifp = if_alloc(IFT_ETHER);
 
 	ifp->if_init =  if_netmap_init;
 	ifp->if_softc = sc;
 
-	if_initname(ifp, sc->cfg->basename, sc->cfg->unit);
-	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
+	snprintf(basename, IF_NAMESIZE, "%s%u:", sc->cfg->basename, sc->cfg->unit);
+	if_initname(ifp, basename, sc->cfg->queue);
+	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST | IFF_PPROMISC | IFF_PROMISCINET;
 	ifp->if_ioctl = if_netmap_ioctl;
 	ifp->if_start = if_netmap_start;
 
@@ -710,6 +708,8 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	ifp->if_snd.ifq_drv_maxlen = 50;
 
 	IFQ_SET_READY(&ifp->if_snd);
+
+	ifp->if_fib = sc->cfg->cdom;
 
 	ether_ifattach(ifp, sc->addr);
 	ifp->if_capabilities = ifp->if_capenable = 0;

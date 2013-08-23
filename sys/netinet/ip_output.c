@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 #include "opt_route.h"
 #include "opt_mbuf_stress_test.h"
 #include "opt_mpath.h"
+#include "opt_promiscinet.h"
 #include "opt_sctp.h"
 
 #include <sys/param.h>
@@ -54,6 +55,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 
 #include <net/if.h>
 #include <net/if_llatbl.h>
+#ifdef PROMISCUOUS_INET
+#include <net/if_promiscinet.h>
+#endif
 #include <net/netisr.h>
 #include <net/pfil.h>
 #include <net/route.h>
@@ -79,6 +83,10 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 #include <netinet/ip_ipsec.h>
 #include <netipsec/ipsec.h>
 #endif /* IPSEC*/
+
+#ifdef PROMISCUOUS_INET
+#include <netinet/in_promisc.h>
+#endif
 
 #include <machine/in_cksum.h>
 
@@ -134,6 +142,11 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 #ifdef IPSEC
 	int no_route_but_check_spd = 0;
 #endif
+#ifdef PROMISCUOUS_INET
+	struct ifl2info *l2i_tag = NULL;
+	struct llentry lle_dst, lle_src;
+	int ispromisc = 0;
+#endif
 	M_ASSERTPKTHDR(m);
 
 	if (inp != NULL) {
@@ -144,6 +157,61 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 			m->m_flags |= M_FLOWID;
 		}
 	}
+
+#ifdef PROMISCUOUS_INET
+	if ((inp && (inp->inp_flags2 & INP_PROMISC)) || 
+	    (l2i_tag = (struct ifl2info *)m_tag_locate(m,
+						       MTAG_PROMISCINET,
+						       MTAG_PROMISCINET_L2INFO,
+						       NULL))) {
+		struct in_l2info *l2i;
+		unsigned int fib;
+		uint8_t *daddr, *saddr;
+
+		if (l2i_tag) {
+			/*
+			 * This is a packet that has been turned around
+			 * after reception, such as a TCP SYN packet being
+			 * recycled as a RST, so the l2 info and fib come
+			 * from the mbuf, not the (probably nonexistent)
+			 * connection context.
+			 */
+			l2i = &l2i_tag->ifl2i_info;
+			fib = M_GETFIB(m);
+		} else {
+			l2i = (struct in_l2info *)inp->inp_l2info;
+			fib = inp->inp_fibnum;
+		}
+
+		daddr = l2i->inl2i_foreign_addr;
+		saddr = l2i->inl2i_local_addr;
+
+		ro = &iproute;
+		bzero(ro, sizeof (*ro));
+		
+		memset(&lle_dst, 0, sizeof(lle_dst));
+		lle_dst.la_flags |= LLE_VALID;
+		
+		LIST_NEXT(&lle_dst, lle_next) = &lle_src;
+		ro->ro_lle = &lle_dst;
+			
+		memcpy(&lle_dst.ll_addr.mac16, daddr,
+		       ETHER_ADDR_LEN);
+		memcpy(&lle_src.ll_addr.mac16, saddr,
+		       ETHER_ADDR_LEN);
+
+		ifp = ifnet_byfib_ref(fib);
+		if (NULL == ifp) {
+			IPSTAT_INC(ips_noroute);
+			error = EHOSTUNREACH;
+			printf("dropping packet (no if for fib)");
+			goto bad;
+		}
+		
+		isbroadcast = 0;
+		ispromisc = 1;
+	}
+#endif /* PROMISCUOUS_INET */
 
 	if (ro == NULL) {
 		ro = &iproute;
@@ -238,6 +306,7 @@ again:
 		    (ia = ifatoia(ifa_ifwithdstaddr(sintosa(dst)))) == NULL) {
 			IPSTAT_INC(ips_noroute);
 			error = ENETUNREACH;
+			printf("dropping packet (send ones)");
 			goto bad;
 		}
 		ip->ip_dst.s_addr = INADDR_BROADCAST;
@@ -250,6 +319,7 @@ again:
 		    (ia = ifatoia(ifa_ifwithnet(sintosa(dst), 0))) == NULL) {
 			IPSTAT_INC(ips_noroute);
 			error = ENETUNREACH;
+			printf("dropping packet (route to if)");
 			goto bad;
 		}
 		ifp = ia->ia_ifp;
@@ -264,7 +334,11 @@ again:
 		ifp = imo->imo_multicast_ifp;
 		IFP_TO_IA(ifp, ia);
 		isbroadcast = 0;	/* fool gcc */
-	} else {
+	} else 
+#ifdef PROMISCUOUS_INET
+		if (!ispromisc)
+#endif
+	{
 		/*
 		 * We want to do any cloning requested by the link layer,
 		 * as this is probably required in all cases for correct
@@ -295,6 +369,7 @@ again:
 #endif
 			IPSTAT_INC(ips_noroute);
 			error = EHOSTUNREACH;
+			printf("dropping packet (no route inp=%p)", inp);
 			goto bad;
 		}
 		ia = ifatoia(rte->rt_ifa);
@@ -356,6 +431,7 @@ again:
 			if ((ifp->if_flags & IFF_MULTICAST) == 0) {
 				IPSTAT_INC(ips_noroute);
 				error = ENETUNREACH;
+				printf("dropping packet (no multicast on if)");
 				goto bad;
 			}
 		}
@@ -451,6 +527,7 @@ again:
 		error = ENOBUFS;
 		IPSTAT_INC(ips_odropped);
 		ifp->if_snd.ifq_drops += n;
+		printf("dropping packet (no room in send queue)");
 		goto bad;
 	}
 
@@ -462,15 +539,18 @@ again:
 	if (isbroadcast) {
 		if ((ifp->if_flags & IFF_BROADCAST) == 0) {
 			error = EADDRNOTAVAIL;
+			printf("dropping packet (broadcast not enabled on this if)");
 			goto bad;
 		}
 		if ((flags & IP_ALLOWBROADCAST) == 0) {
 			error = EACCES;
+			printf("dropping packet (broadcast not allowed)");
 			goto bad;
 		}
 		/* don't allow broadcast messages to be fragmented */
 		if (ip->ip_len > mtu) {
 			error = EMSGSIZE;
+			printf("dropping packet (broadcast too large)");
 			goto bad;
 		}
 		m->m_flags |= M_BCAST;
@@ -582,6 +662,7 @@ passout:
 		if ((ifp->if_flags & IFF_LOOPBACK) == 0) {
 			IPSTAT_INC(ips_badaddr);
 			error = EADDRNOTAVAIL;
+			printf("dropping packet (localhost addr)");
 			goto bad;
 		}
 	}
@@ -645,6 +726,7 @@ passout:
 	if ((ip->ip_off & IP_DF) || (m->m_pkthdr.csum_flags & CSUM_TSO)) {
 		error = EMSGSIZE;
 		IPSTAT_INC(ips_cantfrag);
+		printf("dropping packet (DF is set/no TSO on large packet)");
 		goto bad;
 	}
 
@@ -653,8 +735,10 @@ passout:
 	 * on return, m will point to a list of packets to be sent.
 	 */
 	error = ip_fragment(ip, &m, mtu, ifp->if_hwassist, sw_csum);
-	if (error)
+	if (error) {
+		printf("dropping packet (fragmentation failed)");
 		goto bad;
+	}
 	for (; m; m = m0) {
 		m0 = m->m_nextpkt;
 		m->m_nextpkt = 0;
@@ -669,7 +753,6 @@ passout:
 			 * to avoid confusing upper layers.
 			 */
 			m->m_flags &= ~(M_PROTOFLAGS);
-
 			error = (*ifp->if_output)(ifp, m,
 			    (struct sockaddr *)dst, ro);
 		} else
@@ -685,8 +768,19 @@ done:
 	}
 	if (ia != NULL)
 		ifa_free(&ia->ia_ifa);
+
+#ifdef PROMISCUOUS_INET
+	if (inp && (inp->inp_flags2 & INP_PROMISC) && ifp) {
+		if_rele(ifp);
+	}
+#endif
+
 	return (error);
 bad:
+	printf(" src=%s hastag=%u\n", inet_ntoa(ip->ip_src), m_tag_locate(m,
+									  MTAG_PROMISCINET,
+									  MTAG_PROMISCINET_L2INFO,
+									  NULL) ? 1 : 0);
 	m_freem(m);
 	goto done;
 }
@@ -935,6 +1029,54 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				INP_WUNLOCK(inp);
 				error = 0;
 				break;
+			case SO_PROMISC:
+#ifdef PROMISCUOUS_INET
+				INP_WLOCK(inp);
+				if ((so->so_options & SO_PROMISC) != 0)
+					inp->inp_flags2 |= INP_PROMISC;
+				else
+					inp->inp_flags2 &= ~INP_PROMISC;
+				INP_WUNLOCK(inp);
+				error = 0;
+#else
+				error = ENOPROTOOPT;
+#endif /* PROMISCUOUS_INET */
+				break;
+			case SO_L2INFO:
+#ifdef PROMISCUOUS_INET
+			{
+				struct in_l2info *l2i;
+
+				SOCK_LOCK_ASSERT(so);
+				
+				/*
+				 * The INFO lock is obtained when modifying
+				 * inp->inp_l2info so that inpcb hash
+				 * lookups do not have to acquire the inp
+				 * lock on each bucket entry.
+				 */
+				INP_INFO_RLOCK(inp->inp_pcbinfo);
+				INP_WLOCK(inp);
+				l2i = (struct in_l2info *)inp->inp_l2info;
+				memcpy(l2i->inl2i_local_addr, so->so_l2info->inl2i_local_addr,
+				       IN_L2INFO_ADDR_MAX);
+				memcpy(l2i->inl2i_foreign_addr, so->so_l2info->inl2i_foreign_addr,
+				       IN_L2INFO_ADDR_MAX);
+
+				l2i->inl2i_tagmask = so->so_l2info->inl2i_tagmask;
+				l2i->inl2i_tagcnt = so->so_l2info->inl2i_tagcnt;
+				memcpy(l2i->inl2i_tags,
+				       so->so_l2info->inl2i_tags,
+				       so->so_l2info->inl2i_tagcnt * sizeof(so->so_l2info->inl2i_tags[0]));
+				INP_WUNLOCK(inp);
+				INP_INFO_RUNLOCK(inp->inp_pcbinfo);
+				error = 0;
+				break;
+			}
+#else
+			error = ENOPROTOOPT;
+			break;
+#endif /* PROMISCUOUS_INET */
 			default:
 				break;
 			}
@@ -1136,6 +1278,13 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		}
 #endif /* IPSEC */
 
+#ifdef PROMISCUOUS_INET
+		case IP_SYNFILTER:
+		case IP_SYNFILTER_RESULT:
+			error = syn_filter_setopt(so, sopt);
+			break;
+#endif /* PROMISCUOUS_INET */
+
 		default:
 			error = ENOPROTOOPT;
 			break;
@@ -1265,6 +1414,12 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			break;
 		}
 #endif /* IPSEC */
+
+#ifdef PROMISCUOUS_INET
+		case IP_SYNFILTER:
+			error = syn_filter_getopt(so, sopt);
+			break;
+#endif /* PROMISCUOUS_INET */
 
 		default:
 			error = ENOPROTOOPT;

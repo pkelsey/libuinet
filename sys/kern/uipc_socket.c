@@ -107,6 +107,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/uipc_socket.c 233353 2012-03-23 11:26
 #include "opt_inet6.h"
 #include "opt_zero.h"
 #include "opt_compat.h"
+#include "opt_promiscinet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -141,6 +142,10 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/uipc_socket.c 233353 2012-03-23 11:26
 #ifdef MAC
 #include <security/mac/mac_framework.h>
 #endif /* MAC */
+
+#ifdef PROMISCUOUS_INET
+#include <netinet/in_promisc.h>
+#endif
 
 #include <vm/uma.h>
 
@@ -298,6 +303,15 @@ soalloc(struct vnet *vnet)
 		return (NULL);
 	}
 #endif
+#ifdef PROMISCUOUS_INET
+	if (in_promisc_socket_init(so, M_NOWAIT) != 0) {
+#ifdef MAC
+		mac_socket_destroy(so);
+#endif
+		uma_zfree(socket_zone, so);
+		return (NULL);
+	}
+#endif /* PROMISCUOUS_INET */
 	SOCKBUF_LOCK_INIT(&so->so_snd, "so_snd");
 	SOCKBUF_LOCK_INIT(&so->so_rcv, "so_rcv");
 	sx_init(&so->so_snd.sb_sx, "so_snd_sx");
@@ -347,6 +361,9 @@ sodealloc(struct socket *so)
 	/* remove acccept filter if one is present. */
 	if (so->so_accf != NULL)
 		do_setopt_accept_filter(so, NULL);
+#endif
+#ifdef PROMISCUOUS_INET
+	in_promisc_socket_destroy(so);
 #endif
 #ifdef MAC
 	mac_socket_destroy(so);
@@ -471,6 +488,9 @@ sonewconn(struct socket *head, int connstatus)
 	so->so_cred = crhold(head->so_cred);
 #ifdef MAC
 	mac_socket_newconn(head, so);
+#endif
+#ifdef PROMISCUOUS_INET
+	in_promisc_socket_newconn(head, so);
 #endif
 	knlist_init_mtx(&so->so_rcv.sb_sel.si_note, SOCKBUF_MTX(&so->so_rcv));
 	knlist_init_mtx(&so->so_snd.sb_sel.si_note, SOCKBUF_MTX(&so->so_snd));
@@ -2445,6 +2465,9 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 #ifdef MAC
 	struct mac extmac;
 #endif
+#ifdef PROMISCUOUS_INET
+	struct in_l2info l2info;
+#endif
 
 	CURVNET_SET(so->so_vnet);
 	error = 0;
@@ -2528,6 +2551,70 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 			if (error)
 				goto bad;
 			so->so_user_cookie = val32;
+			break;
+
+		case SO_L2INFO:
+#ifdef PROMISCUOUS_INET
+			error = sooptcopyin(sopt, &l2info, sizeof l2info,
+					    sizeof l2info);
+			if (error)
+				goto bad;
+
+			if ((so->so_proto->pr_domain->dom_family == PF_INET) ||
+			    (so->so_proto->pr_domain->dom_family == PF_INET6)) {
+				
+				if (l2info.inl2i_tagcnt > IN_L2INFO_MAX_TAGS) {
+					error = EINVAL;
+					goto bad;
+				}
+				
+				SOCK_LOCK(so);
+				memcpy(so->so_l2info->inl2i_local_addr, l2info.inl2i_local_addr,
+				       IN_L2INFO_ADDR_MAX);
+				memcpy(so->so_l2info->inl2i_foreign_addr, l2info.inl2i_foreign_addr,
+				       IN_L2INFO_ADDR_MAX);
+
+				so->so_l2info->inl2i_tagmask = l2info.inl2i_tagmask;
+				so->so_l2info->inl2i_tagcnt = l2info.inl2i_tagcnt;
+				memcpy(so->so_l2info->inl2i_tags,
+				       l2info.inl2i_tags,
+				       l2info.inl2i_tagcnt * sizeof(l2info.inl2i_tags[0]));
+
+				/* Note: ignore error */
+				if (so->so_proto->pr_ctloutput)
+					(*so->so_proto->pr_ctloutput)(so, sopt);
+				SOCK_UNLOCK(so);
+			} else {
+				error = ENOPROTOOPT;
+			}
+#else
+			error = EOPNOTSUPP;
+#endif /* PROMISCUOUS_INET */
+			break;
+
+		case SO_PROMISC:
+#ifdef PROMISCUOUS_INET
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+					    sizeof optval);
+			if (error) {
+				goto bad;
+			}
+			SOCK_LOCK(so);
+			if (optval)
+				so->so_options |= sopt->sopt_name;
+			else
+				so->so_options &= ~sopt->sopt_name;
+			SOCK_UNLOCK(so);
+
+			if ((so->so_proto->pr_domain->dom_family == PF_INET) ||
+			    (so->so_proto->pr_domain->dom_family == PF_INET6)) {
+				/* Note: ignore error */
+				if (so->so_proto->pr_ctloutput)
+					(*so->so_proto->pr_ctloutput)(so, sopt);
+			}
+#else
+			error = EOPNOTSUPP;
+#endif
 			break;
 
 		case SO_SNDBUF:
@@ -2680,6 +2767,32 @@ sooptcopyout(struct sockopt *sopt, const void *buf, size_t len)
 	return (error);
 }
 
+/*
+ * Kernel version of getsockopt(2).
+ *
+ * XXX: optlen is size_t, not socklen_t
+ */
+int
+so_getsockopt(struct socket *so, int level, int optname, void *optval,
+    size_t *optlen)
+{
+	struct sockopt sopt;
+	int error;
+
+	sopt.sopt_level = level;
+	sopt.sopt_name = optname;
+	sopt.sopt_dir = SOPT_GET;
+	sopt.sopt_val = optval;
+	sopt.sopt_valsize = *optlen;
+	sopt.sopt_td = NULL;
+
+	error = sogetopt(so, &sopt);
+
+	*optlen = sopt.sopt_valsize;
+
+	return (error);
+}
+
 int
 sogetopt(struct socket *so, struct sockopt *sopt)
 {
@@ -2688,6 +2801,9 @@ sogetopt(struct socket *so, struct sockopt *sopt)
 	struct	timeval tv;
 #ifdef MAC
 	struct mac extmac;
+#endif
+#ifdef PROMISCUOUS_INET
+	struct in_l2info l2info;
 #endif
 
 	CURVNET_SET(so->so_vnet);
@@ -2745,6 +2861,32 @@ integer:
 			so->so_error = 0;
 			SOCK_UNLOCK(so);
 			goto integer;
+
+		case SO_L2INFO:
+#ifdef PROMISCUOUS_INET
+			if ((so->so_proto->pr_domain->dom_family == PF_INET) ||
+			    (so->so_proto->pr_domain->dom_family == PF_INET6)) {
+				SOCK_LOCK(so);
+				memcpy(l2info.inl2i_local_addr, so->so_l2info->inl2i_local_addr,
+				       IN_L2INFO_ADDR_MAX);
+				memcpy(l2info.inl2i_foreign_addr, so->so_l2info->inl2i_foreign_addr,
+				       IN_L2INFO_ADDR_MAX);
+
+				l2info.inl2i_tagmask = so->so_l2info->inl2i_tagmask;
+				l2info.inl2i_tagcnt = so->so_l2info->inl2i_tagcnt;
+				memcpy(l2info.inl2i_tags,
+				       so->so_l2info->inl2i_tags,
+				       so->so_l2info->inl2i_tagcnt * sizeof(so->so_l2info->inl2i_tags[0]));
+				SOCK_UNLOCK(so);
+
+				error = sooptcopyout(sopt, &l2info, sizeof l2info);
+			} else {
+				error = ENOPROTOOPT;
+			}
+#else
+			error = EOPNOTSUPP;
+#endif
+			break;
 
 		case SO_SNDBUF:
 			optval = so->so_snd.sb_hiwat;

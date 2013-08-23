@@ -24,29 +24,57 @@
  */
 
 
-#ifndef	_UINET_CONFIG_INTERNAL_H_
-#define	_UINET_CONFIG_INTERNAL_H_
 
-
-#include <sys/queue.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
 #include <sys/socket.h>
+#include <sys/socketvar.h>
+#include <sys/sockio.h>
 
 #include <net/if.h>
 
-
-struct uinet_config_if {
-	TAILQ_ENTRY(uinet_config_if) link;
-	char spec[IF_NAMESIZE];
-	char name[IF_NAMESIZE];
-	char basename[IF_NAMESIZE];
-	unsigned int unit;
-	unsigned int queue;
-	int cpu;
-	unsigned int cdom;
-};
+#include "uinet_api.h"
 
 
-struct uinet_config_if *uinet_config_if_next(struct uinet_config_if *cur);
 
+int
+uinet_interface_up(const char *canonical_name, unsigned int qno)
+{
+	struct socket *cfg_so;
+	struct thread *td = curthread;
+	struct ifreq ifr;
+	int error;
+	char ifname[IF_NAMESIZE];
 
-#endif /* _UINET_CONFIG_INTERNAL_H_ */
+	error = socreate(PF_INET, &cfg_so, SOCK_DGRAM, 0, td->td_ucred, td);
+	if (0 != error) {
+		printf("Socket creation failed (%d)\n", error);
+		return (1);
+	}
+
+	snprintf(ifname, sizeof(ifname), "%s:%u", canonical_name, qno);
+	strcpy(ifr.ifr_name, ifname);
+
+	
+	/* set interface to UP */
+
+	error = ifioctl(cfg_so, SIOCGIFFLAGS, (caddr_t)&ifr, td);
+	if (0 != error) {
+		printf("SSIOCGIFFLAGS failed %d\n", error);
+		return (1);
+	}
+
+	ifr.ifr_flags |= IFF_UP;
+	error = ifioctl(cfg_so, SIOCSIFFLAGS, (caddr_t)&ifr, td);
+	if (0 != error) {
+		printf("SSIOCSIFFLAGS failed %d\n", error);
+		return (1);
+	}
+
+	soclose(cfg_so);
+
+	return (0);
+	
+}

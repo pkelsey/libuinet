@@ -32,6 +32,7 @@
 __FBSDID("$FreeBSD: release/9.1.0/sys/kern/uipc_debug.c 192802 2009-05-26 09:19:21Z pjd $");
 
 #include "opt_ddb.h"
+#include "opt_promiscinet.h"
 
 #include <sys/param.h>
 #include <sys/domain.h>
@@ -144,6 +145,12 @@ db_print_sooptions(short so_options)
 		db_printf("%sSO_NO_DDP", comma ? ", " : "");
 		comma = 1;
 	}
+#ifdef PROMISCUOUS_INET
+	if (so_options & SO_PROMISC) {
+		db_printf("%sSO_PROMISC", comma ? ", " : "");
+		comma = 1;
+	}
+#endif
 }
 
 static void

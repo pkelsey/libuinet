@@ -44,6 +44,10 @@
 #include <pthread.h>
 #include <spawn.h>
 
+#include "uinet_api.h"
+#include "uinet_config.h"
+
+
 pid_t     getpid(void);
 char *strndup(const char *str, size_t len);
 unsigned int     sleep(unsigned int seconds);
@@ -55,33 +59,50 @@ extern void mi_startup(void);
 extern void uinet_init_thread0(void);
 extern void mutex_init(void);
 
-int uinet_init(void);
 pthread_mutex_t init_lock;
 pthread_cond_t init_cond;
 
 int
-uinet_init(void)
+uinet_init(unsigned int ncpus, unsigned int nmbclusters)
 {
 	struct thread *td;
+	char tmpbuf[32];
+	int boot_pages;
+	int num_hash_buckets;
+	caddr_t v;
 
-	printf("uinet_init starting\n");
+	printf("uinet starting: cpus=%u nmbclusters=%u\n", ncpus, nmbclusters);
 
-	/* XXX need to get this from OS */
-	mp_ncpus = 1;
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", nmbclusters);
+	setenv("kern.ipc.nmbclusters", tmpbuf);
+
+	boot_pages = 16;
+
+	mp_ncpus = ncpus;
 
         /* vm_init bits */
         ncallout = 64;
 	
         pcpup = malloc(sizeof(struct pcpu), M_DEVBUF, M_ZERO);
         pcpu_init(pcpup, 0, sizeof(struct pcpu));
-        kern_timeout_callwheel_alloc(malloc(512*1024, M_DEVBUF, M_ZERO));
+
+	
+	/* first get size required, then alloc memory, then give that memory to the second call */
+	v = 0;
+        v = kern_timeout_callwheel_alloc(v);
+	kern_timeout_callwheel_alloc(malloc(round_page(v), M_DEVBUF, M_ZERO));
         kern_timeout_callwheel_init();
+
 	uinet_init_thread0();
-        uma_startup(malloc(40*4096, M_DEVBUF, M_ZERO), 40);
+
+        uma_startup(malloc(boot_pages*PAGE_SIZE, M_DEVBUF, M_ZERO), boot_pages);
 	uma_startup2();
-	/* XXX fix this magic 64 to something a bit more dynamic & sensible */
-	uma_page_slab_hash = malloc(sizeof(struct uma_page)*64, M_DEVBUF, M_ZERO);
-	uma_page_mask = 64-1;
+
+	/* XXX any need to tune this? */
+	num_hash_buckets = 8192;  /* power of 2.  32 bytes per bucket on a 64-bit system, so no need to skimp */
+	uma_page_slab_hash = malloc(sizeof(struct uma_page)*num_hash_buckets, M_DEVBUF, M_ZERO);
+	uma_page_mask = num_hash_buckets - 1;
+
 	pthread_mutex_init(&init_lock, NULL);
 	pthread_cond_init(&init_cond, NULL);
 	mutex_init();
@@ -94,5 +115,14 @@ uinet_init(void)
 	 * before continuing
 	 */
 	sleep(1);
+
+	/*
+	 * Don't respond with a reset to TCP segments that the stack will
+	 * not claim nor with an ICMP port unreachable message to UDP
+	 * datagrams that the stack will not claim.
+	 */
+	uinet_config_blackhole(UINET_BLACKHOLE_TCP_ALL);
+	uinet_config_blackhole(UINET_BLACKHOLE_UDP_ALL);
+
 	return (0);
 }

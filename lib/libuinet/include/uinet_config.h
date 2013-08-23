@@ -28,6 +28,15 @@
 #define	_UINET_CONFIG_H_
 
 
+typedef enum {
+	UINET_BLACKHOLE_TCP_NONE,	/* disable TCP blackholing (default) */
+	UINET_BLACKHOLE_TCP_SYN_ONLY,	/* only blackhole unwanted SYNs */
+	UINET_BLACKHOLE_TCP_ALL,	/* blackhole all unwanted TCP segments */
+	UINET_BLACKHOLE_UDP_NONE,	/* diable UDP blackholing (default) */
+	UINET_BLACKHOLE_UDP_ALL,	/* blackhole all unwanted UDP datagrams */
+} uinet_blackhole_t;
+
+
 /*
  *  Add an interface to the config.  If called twice for the same interface,
  *  the second config replaces the first.
@@ -53,5 +62,10 @@
  */
 int uinet_config_if(const char *ifname, int cpu, unsigned int cdom);
 
+
+/*
+ *  Configure UDP and TCP blackholing.
+ */
+int uinet_config_blackhole(uinet_blackhole_t action);
 
 #endif /* _UINET_CONFIG_H_ */

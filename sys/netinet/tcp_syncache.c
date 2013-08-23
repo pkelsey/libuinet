@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_syncache.c 238247 2012-07-08 1
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
 #include "opt_pcbgroup.h"
+#include "opt_promiscinet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -58,6 +59,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_syncache.c 238247 2012-07-08 1
 #include <vm/uma.h>
 
 #include <net/if.h>
+#ifdef PROMISCUOUS_INET
+#include <net/if_promiscinet.h>
+#endif
 #include <net/route.h>
 #include <net/vnet.h>
 
@@ -66,6 +70,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_syncache.c 238247 2012-07-08 1
 #include <netinet/ip.h>
 #include <netinet/in_var.h>
 #include <netinet/in_pcb.h>
+#ifdef PROMISCUOUS_INET
+#include <netinet/in_promisc.h>
+#endif
 #include <netinet/ip_var.h>
 #include <netinet/ip_options.h>
 #ifdef INET6
@@ -216,6 +223,11 @@ syncache_free(struct syncache *sc)
 		crfree(sc->sc_cred);
 #ifdef MAC
 	mac_syncache_destroy(&sc->sc_label);
+#endif
+
+#ifdef PROMISCUOUS_INET
+	if (sc->sc_l2tag) 
+		m_tag_free(sc->sc_l2tag);
 #endif
 
 	uma_zfree(V_tcp_syncache.zone, sc);
@@ -666,6 +678,32 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	INP_WLOCK(inp);
 	INP_HASH_WLOCK(&V_tcbinfo);
 
+#ifdef PROMISCUOUS_INET
+	if (inp->inp_flags2 & INP_PROMISC) {
+		struct ifl2info *l2i_tag;
+		struct in_l2info *l2i, *inp_l2i;
+		
+		l2i_tag = (struct ifl2info *)m_tag_locate(m,
+							  MTAG_PROMISCINET,
+							  MTAG_PROMISCINET_L2INFO,
+							  NULL);
+		KASSERT(l2i_tag != NULL,
+			("%s: No MTAG_PROMISCINET_L2INFO on mbuf", __func__));
+
+		l2i = &l2i_tag->ifl2i_info;
+		inp_l2i = (struct in_l2info *)inp->inp_l2info;
+
+		memcpy(inp_l2i->inl2i_foreign_addr, l2i->inl2i_foreign_addr, IN_L2INFO_ADDR_MAX);
+		memcpy(inp_l2i->inl2i_local_addr, l2i->inl2i_local_addr, IN_L2INFO_ADDR_MAX);
+		inp_l2i->inl2i_tagmask = l2i->inl2i_tagmask;
+		inp_l2i->inl2i_tagcnt = l2i->inl2i_tagcnt;
+		memcpy(inp_l2i->inl2i_tags,
+		       l2i->inl2i_tags,
+		       l2i->inl2i_tagcnt * sizeof(l2i->inl2i_tags[0]));
+		
+	}
+#endif /* PROMISCUOUS_INET */
+
 	/* Insert new socket into PCB hash list. */
 	inp->inp_inc.inc_flags = sc->sc_inc.inc_flags;
 #ifdef INET6
@@ -1039,6 +1077,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	u_int32_t flowtmp;
 	u_int ltflags;
 	int win, sb_hiwat, ip_ttl, ip_tos;
+#ifdef PROMISCUOUS_INET
+	int promisc_listen, synfilter;
+	struct m_tag *l2tag;
+#endif
 	char *s;
 #ifdef INET6
 	int autoflowlabel = 0;
@@ -1072,6 +1114,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	win = sbspace(&so->so_rcv);
 	sb_hiwat = so->so_rcv.sb_hiwat;
 	ltflags = (tp->t_flags & (TF_NOOPT | TF_SIGNATURE));
+#ifdef PROMISCUOUS_INET
+	promisc_listen = inp->inp_flags2 & INP_PROMISC;
+	synfilter = inp->inp_flags2 & INP_SYNFILTER;
+#endif
 
 	/* By the time we drop the lock these should no longer be used. */
 	so = NULL;
@@ -1161,6 +1207,60 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		SCH_UNLOCK(sch);
 		goto done;
 	}
+
+#ifdef PROMISCUOUS_INET
+	if (promisc_listen) {
+		l2tag = m_tag_locate(m,
+				     MTAG_PROMISCINET,
+				     MTAG_PROMISCINET_L2INFO,
+				     NULL);
+	}
+
+	if (synfilter && !(inc->inc_flags & INC_SYNFILTERED)) {
+		struct syn_filter_cbarg cbarg;
+		int decision;
+		struct ifl2info *l2info_tag = (struct ifl2info *)l2tag;
+
+		cbarg.inc = *inc;
+		
+		/* The INC_SYNFILTERED flag exists to prevent re-entry to
+		 * this code path when the initial syn filter response is
+		 * SYN_DEFER.  In the SYN_DEFER case, when the deferred
+		 * decision is SYNF_ACCEPT, the mbuf will be resubmitted to
+		 * this routine, and in that case, we want it to pass
+		 * through the syncache logic without refiltering.
+		 */
+		cbarg.inc.inc_flags |= INC_SYNFILTERED;
+		cbarg.to = *to;
+		cbarg.th = *th;
+		cbarg.m = m;
+		cbarg.l2i = &l2info_tag->ifl2i_info;
+
+		decision = syn_filter_run_callback(inp, &cbarg);
+		if (SYNF_ACCEPT != decision) {
+			SCH_UNLOCK(sch);
+
+#ifdef MAC
+			/* ensure MAC label is freed on way out */
+			sc = &scs;
+#endif
+			if (SYNF_DEFER == decision) {
+				/*
+				 * The decision will be returned later via
+				 * the IP_SYNFILTER_RESULT socket option.
+				 */
+
+				/* ensure mbuf is not freed on way out */
+				m = NULL;
+			}
+
+			if (ipopts)
+				(void) m_free(ipopts);
+
+			goto done;
+		}
+	}
+#endif /* PROMISCUOUS_INET */
 
 	sc = uma_zalloc(V_tcp_syncache.zone, M_NOWAIT | M_ZERO);
 	if (sc == NULL) {
@@ -1295,6 +1395,23 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 			    (htonl(ip6_randomflowlabel()) & IPV6_FLOWLABEL_MASK);
 #endif
 	}
+
+#ifdef PROMISCUOUS_INET
+	if (promisc_listen) {
+		struct m_tag *l2tag;
+		
+		l2tag = m_tag_locate(m,
+				     MTAG_PROMISCINET,
+				     MTAG_PROMISCINET_L2INFO,
+				     NULL);
+
+		if (l2tag) {
+			m_tag_unlink(m, l2tag);	
+			sc->sc_l2tag = l2tag;
+		}
+	}
+#endif
+
 	SCH_UNLOCK(sch);
 
 	/*
@@ -1363,6 +1480,16 @@ syncache_respond(struct syncache *sc)
 #ifdef MAC
 	mac_syncache_create_mbuf(sc->sc_label, m);
 #endif
+
+#ifdef PROMISCUOUS_INET
+	if (sc->sc_l2tag) {
+		struct m_tag *tagcopy;
+
+		tagcopy = m_tag_copy(sc->sc_l2tag, M_NOWAIT);
+		m_tag_prepend(m, tagcopy);
+	}
+#endif
+
 	m->m_data += max_linkhdr;
 	m->m_len = tlen;
 	m->m_pkthdr.len = tlen;

@@ -33,6 +33,7 @@
 #include "opt_compat.h"
 #include "opt_inet6.h"
 #include "opt_inet.h"
+#include "opt_promiscinet.h"
 
 #include <sys/param.h>
 #include <sys/types.h>
@@ -258,6 +259,50 @@ ifnet_byindex_ref(u_short idx)
 	IFNET_RUNLOCK_NOSLEEP();
 	return (ifp);
 }
+
+#ifdef PROMISCUOUS_INET
+struct ifnet *
+ifnet_byfib_locked(unsigned int fib)
+{
+	unsigned int i;
+	struct ifnet *ifp;
+
+	for (i = 0; i <= V_if_index; i++) {
+		ifp = V_ifindex_table[i].ife_ifnet;
+		if (ifp && ifp != IFNET_HOLD && ifp->if_fib == fib)
+			return (ifp);
+	}
+
+	return (NULL);
+}
+
+struct ifnet *
+ifnet_byfib(unsigned int fib)
+{
+	struct ifnet *ifp;
+
+	IFNET_RLOCK_NOSLEEP();
+	ifp = ifnet_byfib_locked(fib);
+	IFNET_RUNLOCK_NOSLEEP();
+	return (ifp);
+}
+
+struct ifnet *
+ifnet_byfib_ref(unsigned int fib)
+{
+	struct ifnet *ifp;
+
+	IFNET_RLOCK_NOSLEEP();
+	ifp = ifnet_byfib_locked(fib);
+	if (ifp == NULL || (ifp->if_flags & IFF_DYING)) {
+		IFNET_RUNLOCK_NOSLEEP();
+		return (NULL);
+	}
+	if_ref(ifp);
+	IFNET_RUNLOCK_NOSLEEP();
+	return (ifp);
+}
+#endif /* PROMISCUOUS_INET */
 
 /*
  * Allocate an ifindex array entry; return 0 on success or an error on

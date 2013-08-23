@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_usrreq.c 241133 2012-10-02 13:
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_tcpdebug.h"
+#include "opt_promiscinet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -361,7 +362,11 @@ tcp_usr_listen(struct socket *so, int backlog, struct thread *td)
 	SOCK_LOCK(so);
 	error = solisten_proto_check(so);
 	INP_HASH_WLOCK(&V_tcbinfo);
+#ifdef PROMISCUOUS_INET
+	if (error == 0 && inp->inp_lport == 0 && (inp->inp_flags2 & INP_PROMISC) == 0)
+#else
 	if (error == 0 && inp->inp_lport == 0)
+#endif
 		error = in_pcbbind(inp, (struct sockaddr *)0, td->td_ucred);
 	INP_HASH_WUNLOCK(&V_tcbinfo);
 	if (error == 0) {

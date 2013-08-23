@@ -130,6 +130,7 @@ int uinet_config_if(const char *ifname, int cpu, unsigned int cdom)
 	cfg->unit = unit;
 	cfg->queue = queue;
 	cfg->cpu = cpu;
+	cfg->cdom = cdom;
 
 	TAILQ_INSERT_TAIL(&if_conf, cfg, link);
 
@@ -146,3 +147,4 @@ uinet_config_if_next(struct uinet_config_if *cur)
 		return (TAILQ_NEXT(cur, link));
 	}
 }
+

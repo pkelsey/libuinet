@@ -24,29 +24,13 @@
  */
 
 
-#ifndef	_UINET_CONFIG_INTERNAL_H_
-#define	_UINET_CONFIG_INTERNAL_H_
+#ifndef	_UINET_API_H_
+#define	_UINET_API_H_
 
 
-#include <sys/queue.h>
-#include <sys/socket.h>
+int uinet_init(unsigned int ncpus, unsigned int nmbclusters);
 
-#include <net/if.h>
-
-
-struct uinet_config_if {
-	TAILQ_ENTRY(uinet_config_if) link;
-	char spec[IF_NAMESIZE];
-	char name[IF_NAMESIZE];
-	char basename[IF_NAMESIZE];
-	unsigned int unit;
-	unsigned int queue;
-	int cpu;
-	unsigned int cdom;
-};
+int uinet_interface_up(const char *canonical_name, unsigned int qno);
 
 
-struct uinet_config_if *uinet_config_if_next(struct uinet_config_if *cur);
-
-
-#endif /* _UINET_CONFIG_INTERNAL_H_ */
+#endif /* _UINET_API_H_ */

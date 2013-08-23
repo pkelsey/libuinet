@@ -2858,8 +2858,9 @@ dodata:							/* XXX */
 			SOCKBUF_LOCK(&so->so_rcv);
 			if (so->so_rcv.sb_state & SBS_CANTRCVMORE)
 				m_freem(m);
-			else
+			else {
 				sbappendstream_locked(&so->so_rcv, m);
+			}
 			/* NB: sorwakeup_locked() does an implicit unlock. */
 			sorwakeup_locked(so);
 		} else {

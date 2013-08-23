@@ -480,6 +480,10 @@ __END_DECLS
 #define	MCAST_BLOCK_SOURCE		84   /* block a source */
 #define	MCAST_UNBLOCK_SOURCE		85   /* unblock a source */
 
+/* Promiscuous INET SYN filter API */
+#define IP_SYNFILTER			90   /* syn_filter_optarg; attach/detach/query SYN filter */
+#define IP_SYNFILTER_RESULT		91   /* syn_filter_cbarg; deliver deferred filter result */
+
 /*
  * Defaults and limits for options
  */

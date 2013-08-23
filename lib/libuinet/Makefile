@@ -86,9 +86,11 @@ VPATH+= $S/libkern
 
 
 UINET_SRCS+=			\
+	uinet_api.c		\
 	uinet_arc4random.c	\
 	uinet_clock.c		\
 	uinet_config.c		\
+	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
 	uinet_if_netmap.c	\
 	uinet_init.c		\
@@ -227,6 +229,7 @@ NETINET_SRCS+=		\
 	in.c		\
 	in_mcast.c	\
 	in_pcb.c	\
+	in_promisc.c	\
 	in_proto.c	\
 	in_rmx.c	\
 	ip_encap.c	\

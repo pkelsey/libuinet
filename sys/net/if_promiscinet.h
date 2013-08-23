@@ -1,4 +1,4 @@
-/*
+/*-
  * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,30 +23,32 @@
  * SUCH DAMAGE.
  */
 
-
-#ifndef	_UINET_CONFIG_INTERNAL_H_
-#define	_UINET_CONFIG_INTERNAL_H_
-
-
-#include <sys/queue.h>
-#include <sys/socket.h>
-
-#include <net/if.h>
+#ifndef _NET_IF_PROMISCINET_H_
+#define _NET_IF_PROMISCINET_H_
 
 
-struct uinet_config_if {
-	TAILQ_ENTRY(uinet_config_if) link;
-	char spec[IF_NAMESIZE];
-	char name[IF_NAMESIZE];
-	char basename[IF_NAMESIZE];
-	unsigned int unit;
-	unsigned int queue;
-	int cpu;
-	unsigned int cdom;
+#ifdef _KERNEL
+
+#include <sys/mbuf.h>
+
+
+#include <net/ethernet.h>
+#include <netinet/in_promisc.h>
+
+
+#define MTAG_PROMISCINET	1366240237
+#define MTAG_PROMISCINET_L2INFO	0
+
+
+#define IF_PROMISCINET_MAX_ETHER_VLANS	IN_L2INFO_MAX_TAGS
+
+struct ifl2info {
+	struct m_tag ifl2i_mtag;	/* must be first in the struct */
+	struct in_l2info ifl2i_info;
 };
 
+#define MTAG_PROMISCINET_L2INFO_LEN (sizeof(struct ifl2info) - sizeof(struct m_tag))
 
-struct uinet_config_if *uinet_config_if_next(struct uinet_config_if *cur);
+#endif /* _KERNEL */
 
-
-#endif /* _UINET_CONFIG_INTERNAL_H_ */
+#endif /* !_NET_IF_PROMISCINET_H_ */

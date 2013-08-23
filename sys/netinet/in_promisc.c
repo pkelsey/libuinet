@@ -1,0 +1,619 @@
+/*-
+ * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED.  IN NO EVENT SHALL AUTHOR OR CONTRIBUTORS BE LIABLE
+ * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+ * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+ * OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+ * HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+ * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+ * SUCH DAMAGE.
+ */
+
+/*
+ * Kernel support routines for Promiscuous INET functionality.
+ */
+
+#include "opt_promiscinet.h"
+
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/queue.h>
+#include <sys/refcount.h>
+#include <sys/socket.h>
+#include <sys/socketvar.h>
+#include <sys/sysctl.h>
+#include <sys/syslog.h>
+#include <sys/systm.h>
+#include <vm/uma.h>
+
+#include <net/if.h>
+
+#include <netinet/in.h>
+#include <netinet/in_pcb.h>
+#include <netinet/in_promisc.h>
+#include <netinet/in_var.h>
+#include <netinet/tcp_syncache.h>
+
+
+struct syn_filter_internal {
+	struct syn_filter params;	/* must be first in struct */
+	unsigned int refcount;
+	SLIST_ENTRY(syn_filter_internal) next;
+};
+
+struct syn_filter_instance {
+	struct syn_filter_internal *sfi;
+	char ctor_arg[SYNF_ARG_MAX];
+	void *instance_arg;
+};
+
+static void syn_filter_run_destructor(struct inpcb *inp);
+
+static struct mtx syn_filter_mtx;
+MTX_SYSINIT(syn_filter, &syn_filter_mtx, "syn_filter_mtx", MTX_DEF);
+
+#define	SYN_FILTER_LOCK()		mtx_lock(&syn_filter_mtx)
+#define	SYN_FILTER_UNLOCK()		mtx_unlock(&syn_filter_mtx)
+#define SYN_FILTER_ASSERT_LOCKED()	mtx_assert(&syn_filter_mtx, MA_OWNED);
+
+static SLIST_HEAD(, syn_filter_internal) syn_filter_head =
+	SLIST_HEAD_INITIALIZER(syn_filter_head);
+
+MALLOC_DEFINE(M_SYNF, "synf", "SYN filter data");
+
+static uma_zone_t zone_label;
+static int syn_filters_unloadable = 0;
+
+SYSCTL_NODE(_net_inet, OID_AUTO, synf, CTLFLAG_RW, 0, "SYN filters");
+SYSCTL_INT(_net_inet_synf, OID_AUTO, unloadable, CTLFLAG_RW, &syn_filters_unloadable, 0,
+	   "Allow unload of SYN filters (not recommended)");
+
+
+static void
+in_promisc_init(void)
+{
+	zone_label = uma_zcreate("in_l2info", sizeof(struct in_l2info),
+				 NULL, NULL, NULL, NULL,
+				 UMA_ALIGN_PTR, 0);
+}
+
+
+struct in_l2info *
+in_promisc_l2info_alloc(int flags)
+{
+	return (uma_zalloc(zone_label, flags | M_ZERO));
+}
+
+
+void
+in_promisc_l2info_free(struct in_l2info *l2info)
+{
+	uma_zfree(zone_label, l2info);
+}
+
+
+int
+in_promisc_tagcmp(struct in_l2info *l2info1, struct in_l2info *l2info2)
+{
+	uint32_t tagcnt1, tagcnt2;
+	uint32_t i;
+
+	tagcnt1 = l2info1 ? l2info1->inl2i_tagcnt : 0;
+	tagcnt2 = l2info2 ? l2info2->inl2i_tagcnt : 0;
+
+	if (tagcnt1 != tagcnt2)
+		return (1);
+
+	for (i = 0; i < tagcnt1; i++) {
+		if ((l2info1->inl2i_tags[i] & l2info1->inl2i_tagmask) !=
+		    (l2info2->inl2i_tags[i] & l2info2->inl2i_tagmask))
+			return (1);
+	}
+
+	return (0);
+}
+
+
+int
+in_promisc_socket_init(struct socket *so, int flags)
+{
+	so->so_l2info = in_promisc_l2info_alloc(flags);
+	if (NULL == so->so_l2info)
+		return (ENOMEM);
+
+	return (0);
+}
+
+
+void
+in_promisc_socket_destroy(struct socket *so)
+{
+	if (so->so_l2info != NULL) {
+		in_promisc_l2info_free(so->so_l2info);
+		so->so_l2info = NULL;
+	}
+}
+
+
+void
+in_promisc_socket_newconn(struct socket *head, struct socket *so)
+{
+	so->so_l2info->inl2i_tagmask = head->so_l2info->inl2i_tagmask;
+	so->so_l2info->inl2i_tagcnt = head->so_l2info->inl2i_tagcnt;
+	memcpy(so->so_l2info->inl2i_tags, head->so_l2info->inl2i_tags,
+	       head->so_l2info->inl2i_tagcnt * sizeof(head->so_l2info->inl2i_tags[0]));
+}
+
+
+int
+in_promisc_inpcb_init(struct inpcb *inp, int flags)
+{
+	inp->inp_l2info = in_promisc_l2info_alloc(flags);
+	if (NULL == inp->inp_l2info)
+		return (ENOMEM);
+
+	if (inp->inp_socket->so_options & SO_PROMISC)
+		inp->inp_flags2 |= INP_PROMISC;
+
+	return (0);
+}
+
+
+void
+in_promisc_inpcb_destroy(struct inpcb *inp)
+{
+	INP_WLOCK_ASSERT(inp);
+
+	if (inp->inp_l2info != NULL) {
+		in_promisc_l2info_free(inp->inp_l2info);
+		inp->inp_l2info = NULL;
+	}
+
+	syn_filter_run_destructor(inp);
+}
+
+
+static struct syn_filter_internal *
+syn_filter_get_locked(const char *name)
+{
+	struct syn_filter_internal *p;
+
+	SYN_FILTER_ASSERT_LOCKED();
+
+	SLIST_FOREACH(p, &syn_filter_head, next)
+		if (strcmp(p->params.synf_name, name) == 0)
+			break;
+
+	return (p);
+}
+
+
+static struct syn_filter_internal *
+syn_filter_alloc(struct syn_filter *params)
+{
+	struct syn_filter_internal *sfi;
+
+	sfi = malloc(sizeof(*sfi), M_SYNF, M_WAITOK);
+	if (NULL != sfi) {
+		memcpy(&sfi->params, params, sizeof(*params));
+		refcount_init(&sfi->refcount, 1);
+	}
+
+	return (sfi);
+}
+
+
+static void
+syn_filter_free(struct syn_filter_internal *sfi)
+{
+	free(sfi, M_SYNF);
+}
+
+
+static void *
+syn_filter_attach(const char *name)
+{
+	struct syn_filter_internal *sfi;
+
+	SYN_FILTER_LOCK();
+	sfi = syn_filter_get_locked(name);
+	if (sfi) {
+		refcount_acquire(&sfi->refcount);
+	}
+	SYN_FILTER_UNLOCK();
+
+	return (sfi);
+}
+
+
+static void
+syn_filter_detach_locked(struct syn_filter_internal *sfi)
+{
+	SYN_FILTER_ASSERT_LOCKED();	
+	if (refcount_release(&sfi->refcount)) {
+		SLIST_REMOVE(&syn_filter_head, sfi, syn_filter_internal, next);
+		syn_filter_free(sfi);
+	}
+}
+
+
+static void
+syn_filter_detach(struct syn_filter_internal *sfi)
+{
+	SYN_FILTER_LOCK();
+	syn_filter_detach_locked(sfi);
+	SYN_FILTER_UNLOCK();
+}
+
+
+static int
+syn_filter_null_callback(struct inpcb *inp, void *inst_arg,
+			 struct syn_filter_cbarg *arg)
+{
+	return (SYNF_REJECT);
+}
+
+
+/*
+ * Run the filter callback safely with respect to whether the filters are
+ * unloadable.
+ */
+int
+syn_filter_run_callback(struct inpcb *inp, struct syn_filter_cbarg *arg)
+{
+	struct syn_filter_instance *sfinst;
+	struct syn_filter_internal *sfi;
+	int result = SYNF_ACCEPT;
+
+	INP_RLOCK(inp);
+
+	sfinst = (struct syn_filter_instance *)inp->inp_synf;
+	if (sfinst) {
+		sfi = sfinst->sfi;
+		if (syn_filters_unloadable) {
+			/*
+			 * N.B. This serializes execution of all SYN filter
+			 * routines in the system.
+			 */
+			SYN_FILTER_LOCK();
+			result = sfi->params.synf_callback(inp,
+							   sfinst->instance_arg,
+							   arg);
+			SYN_FILTER_UNLOCK();
+		} else {
+			result = sfi->params.synf_callback(inp,
+							   sfinst->instance_arg,
+							   arg);	
+		}
+	}
+
+	INP_RUNLOCK(inp);
+
+	return (result);
+}
+
+
+/*
+ * Run the filter constructor safely with respect to whether the filters are
+ * unloadable.
+ */
+static void *
+syn_filter_run_constructor(struct inpcb *inp)
+{
+	struct syn_filter_instance *sfinst;
+	struct syn_filter_internal *sfi;
+	void *result = inp;  /* Default result is anything non-NULL as NULL
+			      * indicates failure.
+			      */
+
+	INP_WLOCK_ASSERT(inp);
+
+	sfinst = (struct syn_filter_instance *)inp->inp_synf;
+	sfi = sfinst->sfi;
+	if (syn_filters_unloadable) {
+		/*
+		 * N.B. This serializes execution of all SYN filter routines
+		 * in the system.
+		 */
+		SYN_FILTER_LOCK();
+		if (sfi->params.synf_create)
+			result = sfi->params.synf_create(inp, sfinst->ctor_arg);
+		SYN_FILTER_UNLOCK();
+	} else {
+		if (sfi->params.synf_create)
+			result = sfi->params.synf_create(inp, sfinst->ctor_arg);	
+	}
+
+	return (result);
+}
+
+
+/*
+ * Run the filter destructor safely with respect to whether the filters are
+ * unloadable.
+ */
+static void
+syn_filter_run_destructor(struct inpcb *inp)
+{
+	struct syn_filter_instance *sfinst;
+	struct syn_filter_internal *sfi;
+
+	INP_WLOCK_ASSERT(inp);
+
+	sfinst = (struct syn_filter_instance *)inp->inp_synf;
+	if (sfinst) {
+		sfi = sfinst->sfi;
+		if (syn_filters_unloadable) {
+			/*
+			 * N.B. This serializes execution of all SYN filter
+			 * routines in the system.
+			 */
+			SYN_FILTER_LOCK();
+			if (sfi->params.synf_destroy)
+				sfi->params.synf_destroy(inp);
+			syn_filter_detach_locked(sfi);
+			SYN_FILTER_UNLOCK();
+		} else {
+			if (sfi->params.synf_destroy)
+				sfi->params.synf_destroy(inp);	
+			syn_filter_detach(sfi);
+		}
+
+		free(sfinst, M_SYNF);
+		inp->inp_synf = NULL;
+	}
+
+	inp->inp_flags2 &= ~INP_SYNFILTER;
+}
+
+
+static int
+syn_filter_add(struct syn_filter *sf)
+{
+	struct syn_filter_internal *p;
+	int error = 0;
+
+	SYN_FILTER_LOCK();
+	SLIST_FOREACH(p, &syn_filter_head, next)
+		if (strcmp(p->params.synf_name, sf->synf_name) == 0)  {
+			if (p->params.synf_callback != syn_filter_null_callback) {
+				SYN_FILTER_UNLOCK();
+				return (EEXIST);
+			} else {
+				p->params.synf_callback = sf->synf_callback;
+				SYN_FILTER_UNLOCK();
+				return (0);
+			}
+		}
+				
+	if (NULL == p) {
+		p = syn_filter_alloc(sf);
+		if (NULL != p)
+			SLIST_INSERT_HEAD(&syn_filter_head, p, next);
+		else
+			error = ENOMEM;
+	}
+	SYN_FILTER_UNLOCK();
+
+	return (error);
+}
+
+
+static int
+syn_filter_del(const char *name)
+{
+	struct syn_filter_internal *sfi;
+
+	SYN_FILTER_LOCK();
+	sfi = syn_filter_get_locked(name);
+	if (sfi) {
+		/*
+		 * Redirect the filter callback to the null_callback to
+		 * handle the case where the filter is still attached to a
+		 * socket when the module is removed.
+		 */
+		sfi->params.synf_callback = syn_filter_null_callback;
+		syn_filter_detach_locked(sfi);
+	} else {
+		log(LOG_WARNING, "Attempt to remove non-existent SYN filter %s", name);
+	}
+	SYN_FILTER_UNLOCK();
+
+	return (0);
+}
+
+
+int
+syn_filter_generic_mod_event(module_t mod, int event, void *data)
+{
+	struct syn_filter *sf = (struct syn_filter *)data;
+	int error;
+
+	switch (event) {
+	case MOD_LOAD:
+		error = syn_filter_add(sf);
+		break;
+
+	case MOD_UNLOAD:
+		if (syn_filters_unloadable)
+			error = syn_filter_del(sf->synf_name);
+		else
+			error = EOPNOTSUPP;
+
+		break;
+
+	case MOD_SHUTDOWN:
+		error = 0;
+		break;
+
+	default:
+		error = EOPNOTSUPP;
+		break;
+	}
+
+	return (error);
+}
+
+
+int
+syn_filter_getopt(struct socket *so, struct sockopt *sopt)
+{
+	struct inpcb *inp = sotoinpcb(so);
+	struct syn_filter_instance *sfinst;
+	struct syn_filter_internal *sfi;
+	struct syn_filter_optarg *sfa_out;
+	int error = 0;
+
+	sfa_out = malloc(sizeof(*sfa_out), M_TEMP, M_WAITOK | M_ZERO);
+
+	if ((so->so_options & SO_PROMISC) == 0) {
+		error = EINVAL;
+		goto out;
+	}
+
+	INP_RLOCK(inp);
+	sfinst = (struct syn_filter_instance *)inp->inp_synf;
+	sfi = sfinst->sfi;
+	if (sfi) {
+		strcpy(sfa_out->sfa_name, sfi->params.synf_name);
+		strcpy(sfa_out->sfa_arg, sfinst->ctor_arg);
+	} else {
+		sfa_out->sfa_name[0] = '\0';
+		sfa_out->sfa_arg[0] = '\0';
+	}
+	INP_RUNLOCK(inp);
+
+out:
+	if (0 == error)
+		error = sooptcopyout(sopt, sfa_out, sizeof(*sfa_out));
+	free(sfa_out, M_TEMP);
+	return (error);
+}
+
+
+int
+syn_filter_setopt(struct socket *so, struct sockopt *sopt)
+{
+	struct inpcb *inp = sotoinpcb(so);
+	int error = 0;
+
+	if ((so->so_options & SO_PROMISC) == 0) {
+		return (EINVAL);
+	}
+
+	switch (sopt->sopt_name) {
+	case IP_SYNFILTER:
+	{
+		struct syn_filter_optarg *sfa;
+		struct syn_filter_internal *sfi;
+		struct syn_filter_instance *sfinst = NULL;
+
+		/*
+		 * Handle the simple delete case first.
+		 */
+		if (sopt->sopt_val == NULL) {
+			INP_WLOCK(inp);
+			syn_filter_run_destructor(inp);
+			INP_WUNLOCK(inp);
+
+			return (0);
+		}
+
+		sfa = malloc(sizeof(*sfa), M_TEMP, M_WAITOK);
+		sfinst = malloc(sizeof(*sfinst), M_SYNF, M_WAITOK);
+
+		error = sooptcopyin(sopt, sfa, sizeof *sfa, sizeof *sfa);
+		if (error) {
+			free(sfa, M_TEMP);
+			return (error);
+		}
+
+		sfa->sfa_name[sizeof(sfa->sfa_name)-1] = '\0';
+		sfa->sfa_arg[sizeof(sfa->sfa_arg)-1] = '\0';
+
+		INP_WLOCK(inp);
+
+		/* Must delete the old one before installing a new one. */
+		if (NULL != inp->inp_synf) {
+			error = EINVAL;
+			goto out;
+		}
+
+		sfi = syn_filter_attach(sfa->sfa_name);
+
+		if (NULL == sfi) {
+			error = ENOENT;
+			goto out;
+		}
+	
+		sfinst->sfi = sfi;
+		strcpy(sfinst->ctor_arg, sfa->sfa_arg);
+
+		inp->inp_synf = sfinst;
+		sfinst->instance_arg = syn_filter_run_constructor(inp);
+
+		if (NULL == sfinst->instance_arg) {
+			syn_filter_detach(sfi);
+			inp->inp_synf = NULL;
+			error = EINVAL;
+			goto out;
+		}
+
+		inp->inp_flags2 |= INP_SYNFILTER;
+		sfinst = NULL;
+	out:
+		INP_WUNLOCK(inp);
+
+		if (NULL != sfinst)
+			free(sfinst, M_SYNF);
+
+		free(sfa, M_TEMP);
+		break;
+	}
+
+	case IP_SYNFILTER_RESULT:
+	{
+		struct syn_filter_cbarg cbarg;
+
+		error = sooptcopyin(sopt, &cbarg, sizeof cbarg, sizeof cbarg);
+		if (error) {
+			return (error);
+		}
+
+		if (SYNF_REJECT == cbarg.decision) {
+			m_freem(cbarg.m);
+		} else if (SYNF_ACCEPT == cbarg.decision) {
+			INP_WLOCK(inp);
+			syncache_add(&cbarg.inc, &cbarg.to, &cbarg.th, inp, &so, cbarg.m);
+		
+			/* syncache_add performs the INP_WUNLOCK(inp) */
+		} else {
+			error = EINVAL;
+		}
+
+		break;
+	}
+
+	}
+
+	return (error);
+}
+
+
+SYSINIT(in_promisc, SI_SUB_PROTO_DOMAIN, SI_ORDER_ANY, in_promisc_init, NULL);

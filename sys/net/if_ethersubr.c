@@ -36,6 +36,7 @@
 #include "opt_ipx.h"
 #include "opt_netgraph.h"
 #include "opt_mbuf_profiling.h"
+#include "opt_promiscinet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -64,6 +65,10 @@
 #include <net/if_llatbl.h>
 #include <net/pf_mtag.h>
 #include <net/vnet.h>
+
+#ifdef PROMISCUOUS_INET
+#include <net/if_promiscinet.h>
+#endif
 
 #if defined(INET) || defined(INET6)
 #include <netinet/in.h>
@@ -193,6 +198,14 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 	switch (dst->sa_family) {
 #ifdef INET
 	case AF_INET:
+#ifdef PROMISCUOUS_INET
+		if (ifp->if_flags & IFF_PROMISCINET) {
+			(void)memcpy(esrc,
+				     &(LIST_NEXT(lle, lle_next)->ll_addr.mac16),
+				     sizeof (esrc));
+			hdrcmplt = 1;
+		}
+#endif
 		if (lle != NULL && (lle->la_flags & LLE_VALID))
 			memcpy(edst, &lle->ll_addr.mac16, sizeof(edst));
 		else
@@ -231,6 +244,14 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 #endif
 #ifdef INET6
 	case AF_INET6:
+#ifdef PROMISCUOUS_INET
+		if (ifp->if_flags & IFF_PROMISCINET) {
+			(void)memcpy(esrc,
+				     &(LIST_NEXT(lle, lle_next)->ll_addr.mac16),
+				     sizeof (esrc));
+			hdrcmplt = 1;
+		}
+#endif
 		if (lle != NULL && (lle->la_flags & LLE_VALID))
 			memcpy(edst, &lle->ll_addr.mac16, sizeof(edst));
 		else
@@ -669,6 +690,113 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		}
 	}
 
+
+#ifdef PROMISCUOUS_INET
+	struct ifl2info *l2info_tag;
+	struct in_l2info *l2info;
+
+	l2info_tag = (struct ifl2info *)m_tag_alloc(MTAG_PROMISCINET,
+						    MTAG_PROMISCINET_L2INFO,
+						    MTAG_PROMISCINET_L2INFO_LEN,
+						    M_NOWAIT);
+	if (NULL == l2info_tag) {
+#ifdef DIAGNOSTIC
+		if_printf(ifp, "cannot allocate MTAG_PROMISCINET_L2INFO\n");
+#endif
+		ifp->if_ierrors++;
+		m_freem(m);
+		CURVNET_RESTORE();
+		return;
+	}
+
+	m_tag_prepend(m, &l2info_tag->ifl2i_mtag);
+
+	l2info = &l2info_tag->ifl2i_info;
+
+	memcpy(l2info->inl2i_local_addr, eh->ether_dhost, ETHER_ADDR_LEN);
+	memcpy(l2info->inl2i_foreign_addr, eh->ether_shost, ETHER_ADDR_LEN);
+	l2info->inl2i_tagmask = htonl(0x00000fff);
+	l2info->inl2i_tagcnt = 0;
+
+	/* 
+	 * If the interface is in IFF_PROMISCINET mode and the hardware
+	 * processed an 802.1Q tag, copy it to the l2info mbuf tag and clear
+	 * the M_VLANTAG flag.
+	 */
+	if ((ifp->if_flags & IFF_PROMISCINET) && (m->m_flags & M_VLANTAG)) {
+		uint32_t *tdata = &l2info->inl2i_tags[l2info->inl2i_tagcnt];
+
+		*tdata = htonl((ETHERTYPE_VLAN << 16) | m->m_pkthdr.ether_vtag);
+		l2info->inl2i_tagcnt++;
+		m->m_flags &= ~M_VLANTAG;
+	}
+
+	/*
+	 * If the interface is in IFF_PROMISCINET mode, remove all VLAN tags
+	 * and add them to the l2info mbuf tag.
+	 */
+	if ((ifp->if_flags & IFF_PROMISCINET) && (m->m_flags & M_VLANTAG) == 0 &&
+	    (etype == ETHERTYPE_VLAN)) {
+		int needed;
+		int td_avail;
+		int vlan_bytes;
+		struct ether_vlan_header *evl;
+		struct ether_vlan_encap {
+			uint16_t evl_encap_proto;
+			uint16_t evl_tag;
+		} *pm;
+
+		needed = min(m->m_pkthdr.len, ETHER_HDR_LEN +
+			     (IF_PROMISCINET_MAX_ETHER_VLANS *
+			      ETHER_VLAN_ENCAP_LEN));
+
+		if (m->m_len < needed &&
+		    (m = m_pullup(m, needed)) == NULL) {
+#ifdef DIAGNOSTIC
+			if_printf(ifp, "cannot pullup VLAN header(s)\n");
+#endif
+			ifp->if_ierrors++;
+			m_freem(m);
+			CURVNET_RESTORE();
+			return;
+		}
+
+		evl = mtod(m, struct ether_vlan_header *);
+		pm = (struct ether_vlan_encap *)&evl->evl_encap_proto;
+		td_avail = (IN_L2INFO_MAX_TAGS - l2info->inl2i_tagcnt) * ETHER_VLAN_ENCAP_LEN;
+		vlan_bytes = 0;
+		while ((vlan_bytes + ETHER_VLAN_ENCAP_LEN + ETHER_HDR_LEN <= m->m_len) &&
+		       (htons(ETHERTYPE_VLAN) == pm->evl_encap_proto) &&
+		       (vlan_bytes + ETHER_VLAN_ENCAP_LEN <= td_avail)) {
+
+			pm++;
+			vlan_bytes += ETHER_VLAN_ENCAP_LEN;
+		} 
+
+		if ((vlan_bytes + ETHER_HDR_LEN > m->m_len) ||
+		    (htons(ETHERTYPE_VLAN) == pm->evl_encap_proto)) {
+#ifdef DIAGNOSTIC
+			if_printf(ifp, "malformed packet or too many VLAN headers\n");
+#endif
+			ifp->if_ierrors++;
+			m_freem(m);
+			CURVNET_RESTORE();
+			return;
+		}
+
+		memcpy(&l2info->inl2i_tags[l2info->inl2i_tagcnt],
+		       &evl->evl_encap_proto, vlan_bytes);
+		l2info->inl2i_tagcnt += vlan_bytes / ETHER_VLAN_ENCAP_LEN;
+
+		memmove(mtod(m, uint8_t *) + vlan_bytes, mtod(m, uint8_t *),
+			ETHER_ADDR_LEN * 2);
+		m_adj(m, vlan_bytes);
+
+		/* pm is now overlaying the post-VLAN header EtherType field */
+		etype = ntohs(pm->evl_encap_proto);
+	}
+#endif /* PROMISCUOUS_INET */
+
 	/*
 	 * If the hardware did not process an 802.1Q tag, do this now,
 	 * to allow 802.1P priority frames to be passed to the main input
@@ -692,9 +820,9 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		evl = mtod(m, struct ether_vlan_header *);
 		m->m_pkthdr.ether_vtag = ntohs(evl->evl_tag);
 		m->m_flags |= M_VLANTAG;
-
+		
 		bcopy((char *)evl, (char *)evl + ETHER_VLAN_ENCAP_LEN,
-		    ETHER_HDR_LEN - ETHER_TYPE_LEN);
+		      ETHER_HDR_LEN - ETHER_TYPE_LEN);
 		m_adj(m, ETHER_VLAN_ENCAP_LEN);
 	}
 

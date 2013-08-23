@@ -34,6 +34,8 @@
 #define _NETINET_TCP_SYNCACHE_H_
 #ifdef _KERNEL
 
+#include "opt_promiscinet.h"
+
 struct toeopt;
 
 void	 syncache_init(void);
@@ -81,7 +83,9 @@ struct syncache {
 #endif			
 	struct label	*sc_label;		/* MAC label reference */
 	struct ucred	*sc_cred;		/* cred cache for jail checks */
-
+#ifdef PROMISCUOUS_INET
+	struct m_tag	*sc_l2tag;		/* L2 info from SYN packet */
+#endif
 	u_int32_t	sc_spare[2];		/* UTO */
 };
 

@@ -832,6 +832,11 @@ extern	struct sx ifnet_sxlock;
 struct ifnet	*ifnet_byindex(u_short idx);
 struct ifnet	*ifnet_byindex_locked(u_short idx);
 struct ifnet	*ifnet_byindex_ref(u_short idx);
+#ifdef PROMISCUOUS_INET
+struct ifnet	*ifnet_byfib(unsigned int fib);
+struct ifnet	*ifnet_byfib_locked(unsigned int fib);
+struct ifnet	*ifnet_byfib_ref(unsigned int fib);
+#endif
 
 /*
  * Given the index, ifaddr_byindex() returns the one and only
