@@ -1397,18 +1397,9 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	}
 
 #ifdef PROMISCUOUS_INET
-	if (promisc_listen) {
-		struct m_tag *l2tag;
-		
-		l2tag = m_tag_locate(m,
-				     MTAG_PROMISCINET,
-				     MTAG_PROMISCINET_L2INFO,
-				     NULL);
-
-		if (l2tag) {
-			m_tag_unlink(m, l2tag);	
-			sc->sc_l2tag = l2tag;
-		}
+	if (promisc_listen && l2tag) {
+		m_tag_unlink(m, l2tag);	
+		sc->sc_l2tag = l2tag;
 	}
 #endif
 
