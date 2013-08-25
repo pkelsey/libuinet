@@ -657,6 +657,7 @@ int	 tcp_ctloutput(struct socket *, struct sockopt *);
 struct tcpcb *
 	 tcp_drop(struct tcpcb *, int);
 void	 tcp_drain(void);
+void	 tcp_tcbinfo_hashstats(unsigned int *min, unsigned int *avg, unsigned int *max);
 void	 tcp_init(void);
 #ifdef VIMAGE
 void	 tcp_destroy(void);

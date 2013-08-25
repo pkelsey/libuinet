@@ -76,7 +76,17 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters)
 	snprintf(tmpbuf, sizeof(tmpbuf), "%u", nmbclusters);
 	setenv("kern.ipc.nmbclusters", tmpbuf);
 
-	boot_pages = 16;
+	/* Assuming maxsockets will be set to nmbclusters, the following
+	 * sets the TCP tcbhash size so that perfectly uniform hashing would
+	 * result in a maximum bucket depth of about 16.
+	 */
+	num_hash_buckets = 1;
+	while (num_hash_buckets < nmbclusters / 16)
+		num_hash_buckets <<= 1;
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", num_hash_buckets);	
+	setenv("net.inet.tcp.tcbhashsize", tmpbuf);
+
+	boot_pages = 16;  /* number of pages made available for uma to bootstrap itself */
 
 	mp_ncpus = ncpus;
 

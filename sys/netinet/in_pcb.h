@@ -609,6 +609,9 @@ void	in_pcbinfo_destroy(struct inpcbinfo *);
 void	in_pcbinfo_init(struct inpcbinfo *, const char *, struct inpcbhead *,
 	    int, int, char *, uma_init, uma_fini, uint32_t, u_int);
 
+void	in_pcbinfo_hashstats(struct inpcbinfo *pcbinfo, unsigned int *min,
+	    unsigned int *avg, unsigned int *max);
+
 struct inpcbgroup *
 	in_pcbgroup_byhash(struct inpcbinfo *, u_int, uint32_t);
 struct inpcbgroup *

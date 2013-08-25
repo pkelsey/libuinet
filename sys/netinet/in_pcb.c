@@ -266,6 +266,50 @@ in_pcbinfo_destroy(struct inpcbinfo *pcbinfo)
 	INP_INFO_LOCK_DESTROY(pcbinfo);
 }
 
+
+void
+in_pcbinfo_hashstats(struct inpcbinfo *pcbinfo, unsigned int *min,
+		     unsigned int *avg, unsigned int *max)
+{
+	unsigned int bucket;
+	unsigned int bucket_count;
+	unsigned int occupied;
+	unsigned int lmin, lsum, lmax;
+	struct inpcb *inp;
+	struct inpcbhead *head;
+
+	INP_HASH_WLOCK(pcbinfo);
+
+	lmin = (unsigned int)-1;
+	lsum = 0;
+	lmax = 0;
+	occupied = 0;
+
+	for (bucket = 0; bucket <= pcbinfo->ipi_hashmask; bucket++) {
+
+		bucket_count = 0;
+
+		head = &pcbinfo->ipi_hashbase[bucket];
+		LIST_FOREACH(inp, head, inp_hash) {
+			bucket_count++;
+		}
+
+		if (bucket_count < lmin) lmin = bucket_count;
+
+		if (bucket_count > 0) {
+			lsum += bucket_count;
+			occupied++;
+		}
+		if (bucket_count > lmax) lmax = bucket_count;
+	}
+	
+	*min = lmin;
+	*avg = lsum / occupied;
+	*max = lmax;
+
+	INP_HASH_WUNLOCK(pcbinfo);
+}
+
 /*
  * Allocate a PCB and associate it with the socket.
  * On success return with the PCB locked.
@@ -1793,13 +1837,13 @@ in_pcblookup_hash_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr,
 
 #ifdef PROMISCUOUS_INET
 static uint16_t
-in_pcbhash_promisc(uint32_t faddr, uint16_t lport, uint16_t fport,
+in_pcbhash_promisc(uint32_t laddr, uint32_t faddr, uint16_t lport, uint16_t fport,
 		   uint16_t fibnum, struct in_l2info *l2i, uint16_t mask)
 {
 	uint32_t hash;
 	uint32_t i;
 
-	hash = faddr ^ ntohs((lport) ^ (fport)) ^ fibnum;
+	hash = laddr ^ faddr ^ ntohs((lport) ^ (fport)) ^ fibnum;
 	i = l2i->inl2i_tagcnt;
 	while (i--) {
 		hash ^= ntohl(l2i->inl2i_tags[i]) & l2i->inl2i_tagmask;
@@ -1863,8 +1907,8 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 	/*
 	 * First look for an exact match.
 	 */
-	hash = in_pcbhash_promisc(faddr.s_addr, lport, fport, ifp->if_fib, l2i,
-				  pcbinfo->ipi_hashmask);
+	hash = in_pcbhash_promisc(laddr.s_addr, faddr.s_addr, lport, fport,
+				  ifp->if_fib, l2i, pcbinfo->ipi_hashmask);
 	head = &pcbinfo->ipi_hashbase[hash];
 	LIST_FOREACH(inp, head, inp_hash) {
 #ifdef INET6
@@ -1897,14 +1941,18 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 	 */
 	if ((lookupflags & INPLOOKUP_WILDCARD) != 0) {
 		int i;
+		uint16_t lport_to_match;
+		struct in_addr laddr_to_match;
+
 #ifdef INET6
 		struct inpcb *local_wild_mapped = NULL;
 #endif
 		/*
 		 * Order of socket selection
 		 *	1. specific local addr, specific local port
-		 *	2. INADDR_ANY, specific local port
-		 *	3. INADDR_ANY, IN_PROMISC_PORT_ANY
+		 *	2. INADDR_ANY         , specific local port
+		 *	3. specific local addr, IN_PROMISC_PORT_ANY
+		 *	4. INADDR_ANY         , IN_PROMISC_PORT_ANY
 		 *
 		 * fib must always match
 		 * tag sets must always match
@@ -1912,19 +1960,26 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 
 		
 		/*
-		 * First pass, look for a match with a specific local port,
-		 * preferring a match against a specific local address to a
-		 * match against INADDR_ANY.
+		 * First pass, look for a match with a specific local
+		 * address and specific local port.
 		 *
-		 * Second pass, look for a match with a wildcard local port,
-		 * preferring a match against a specific local address to a
-		 * match against INADDR_ANY.
+		 * Second pass, look for a match with a specific local
+		 * address and a wildcard local port.
+		 *
+		 * Third pass, look for a match with a local address of
+		 * INADDR_ANY and a specific local port.
+		 *
+		 * Fourth pass, look for a match with a local address of
+		 * INADDR_ANY and a wildcard local port.
 		 */
 
-		for (i = 0; i < 2; i++) {
-			hash = in_pcbhash_promisc(INADDR_ANY, lport,
-						  IN_PROMISC_PORT_ANY, ifp->if_fib,
-						  l2i, pcbinfo->ipi_hashmask);
+		for (i = 0; i < 4; i++) {
+			laddr_to_match.s_addr = (i & 0x01) ? laddr.s_addr : INADDR_ANY;
+			lport_to_match = (i & 0x10) ? IN_PROMISC_PORT_ANY : lport;
+
+			hash = in_pcbhash_promisc(laddr_to_match.s_addr, INADDR_ANY,
+						  lport_to_match, IN_PROMISC_PORT_ANY,
+						  ifp->if_fib, l2i, pcbinfo->ipi_hashmask);
 
 			head = &pcbinfo->ipi_hashbase[hash];
 			LIST_FOREACH(inp, head, inp_hash) {
@@ -1935,7 +1990,8 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 #endif
 
 				if (inp->inp_faddr.s_addr != INADDR_ANY ||
-				    inp->inp_lport != lport ||
+				    inp->inp_laddr.s_addr != laddr_to_match.s_addr ||
+				    inp->inp_lport != lport_to_match ||
 				    inp->inp_fibnum != ifp->if_fib)
 					continue;
 				
@@ -1950,9 +2006,6 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 				if (0 != in_promisc_tagcmp(inp->inp_l2info, l2i))
 					continue;
 				
-				if (inp->inp_laddr.s_addr == laddr.s_addr)
-					return (inp);
-				
 				if (inp->inp_laddr.s_addr == INADDR_ANY) {
 #ifdef INET6
 					/* XXX inp locking, NULL check */
@@ -1961,6 +2014,8 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 					else
 #endif /* INET6 */
 						return (inp);
+				} else {
+					return (inp);
 				}
 			}
 			
@@ -2127,15 +2182,23 @@ in_pcbinshash_internal(struct inpcb *inp, int do_pcbgroup_update)
 	hashkey_faddr = inp->inp_faddr.s_addr;
 
 #ifdef PROMISCUOUS_INET
-	if (inp->inp_flags2 & INP_PROMISC)
-		hashkey = in_pcbhash_promisc(hashkey_faddr, inp->inp_lport,
-		     inp->inp_fport, inp->inp_fibnum, inp->inp_l2info,
-		     pcbinfo->ipi_hashmask);
-	else
+	if (inp->inp_flags2 & INP_PROMISC) {
+		u_int32_t hashkey_laddr;
+
+#ifdef INET6
+		if (inp->inp_vflag & INP_IPV6)
+			hashkey_laddr = inp->in6p_laddr.s6_addr32[3] /* XXX */;
+		else
+#endif /* INET6 */
+		hashkey_laddr = inp->inp_laddr.s_addr;
+
+		hashkey = in_pcbhash_promisc(hashkey_laddr, hashkey_faddr,
+		     inp->inp_lport, inp->inp_fport, inp->inp_fibnum,
+		     inp->inp_l2info, pcbinfo->ipi_hashmask);
+	} else
 #endif /* PROMISCUOUS_INET */
 	hashkey = INP_PCBHASH(hashkey_faddr,
 		 inp->inp_lport, inp->inp_fport, pcbinfo->ipi_hashmask);
-//	printf("ins: hashkey=0x%04x\n", hashkey);
 
 	pcbhash = &pcbinfo->ipi_hashbase[hashkey];
 
@@ -2232,16 +2295,24 @@ in_pcbrehash_mbuf(struct inpcb *inp, struct mbuf *m)
 	hashkey_faddr = inp->inp_faddr.s_addr;
 
 #ifdef PROMISCUOUS_INET
-	if (inp->inp_flags2 & INP_PROMISC)
-		hashkey = in_pcbhash_promisc(hashkey_faddr, inp->inp_lport,
-		     inp->inp_fport, inp->inp_fibnum, inp->inp_l2info,
-		     pcbinfo->ipi_hashmask);
-	else
+	if (inp->inp_flags2 & INP_PROMISC) {
+		u_int32_t hashkey_laddr;
+
+#ifdef INET6
+		if (inp->inp_vflag & INP_IPV6)
+			hashkey_laddr = inp->in6p_laddr.s6_addr32[3] /* XXX */;
+		else
+#endif /* INET6 */
+		hashkey_laddr = inp->inp_laddr.s_addr;
+
+		hashkey = in_pcbhash_promisc(hashkey_laddr, hashkey_faddr,
+		     inp->inp_lport, inp->inp_fport, inp->inp_fibnum,
+		     inp->inp_l2info, pcbinfo->ipi_hashmask);
+	} else
 #endif /* PROMISCUOUS_INET */
 	hashkey = INP_PCBHASH(hashkey_faddr,
 			      inp->inp_lport, inp->inp_fport, pcbinfo->ipi_hashmask);
 
-	printf("rehashing: hashkey=0x%04x\n", hashkey);
 	head = &pcbinfo->ipi_hashbase[hashkey];
 
 	LIST_REMOVE(inp, inp_hash);

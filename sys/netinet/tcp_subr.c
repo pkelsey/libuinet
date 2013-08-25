@@ -283,6 +283,12 @@ tcp_inpcb_init(void *mem, int size, int flags)
 }
 
 void
+tcp_tcbinfo_hashstats(unsigned int *min, unsigned int *avg, unsigned int *max)
+{
+	in_pcbinfo_hashstats(&V_tcbinfo, min, avg, max);
+}
+
+void
 tcp_init(void)
 {
 	int hashsize;
