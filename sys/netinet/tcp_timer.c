@@ -193,7 +193,6 @@ tcp_timer_delack(void *xtp)
 
 	tp->t_flags |= TF_ACKNOW;
 	TCPSTAT_INC(tcps_delack);
-	printf("sending delayed ack\n");
 	(void) tcp_output(tp);
 	INP_WUNLOCK(inp);
 	CURVNET_RESTORE();
