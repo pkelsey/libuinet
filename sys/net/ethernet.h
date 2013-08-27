@@ -328,15 +328,15 @@ struct ether_addr {
 #define	ETHERTYPE_PPPOE		0x8864	/* PPP Over Ethernet Session Stage */
 #define	ETHERTYPE_LANPROBE	0x8888	/* HP LanProbe test? */
 #define	ETHERTYPE_PAE		0x888e	/* EAPOL PAE/802.1x */
-#define ETHERTYPE_QINQ_STD	0x88A8  /* 802.1ad QinQ */
+#define	ETHERTYPE_QINQ_STD	0x88A8  /* 802.1ad QinQ */
 #define	ETHERTYPE_LOOPBACK	0x9000	/* Loopback: used to test interfaces */
 #define	ETHERTYPE_LBACK		ETHERTYPE_LOOPBACK	/* DEC MOP loopback */
 #define	ETHERTYPE_XNSSM		0x9001	/* 3Com (Formerly Bridge Communications), XNS Systems Management */
 #define	ETHERTYPE_TCPSM		0x9002	/* 3Com (Formerly Bridge Communications), TCP/IP Systems Management */
 #define	ETHERTYPE_BCLOOP	0x9003	/* 3Com (Formerly Bridge Communications), loopback detection */
-#define ETHERTYPE_QINQ_VENDOR1	0x9100  /* Vendor-specific QinQ */
-#define ETHERTYPE_QINQ_VENDOR2	0x9200  /* Vendor-specific QinQ */
-#define ETHERTYPE_QINQ_VENDOR3	0x9300  /* Vendor-specific QinQ */
+#define	ETHERTYPE_QINQ_VENDOR1	0x9100  /* Vendor-specific QinQ */
+#define	ETHERTYPE_QINQ_VENDOR2	0x9200  /* Vendor-specific QinQ */
+#define	ETHERTYPE_QINQ_VENDOR3	0x9300  /* Vendor-specific QinQ */
 #define	ETHERTYPE_DEBNI		0xAAAA	/* DECNET? Used by VAX 6220 DEBNI */
 #define	ETHERTYPE_SONIX		0xFAF5	/* Sonix Arpeggio */
 #define	ETHERTYPE_VITAL		0xFF00	/* BBN VITAL-LanBridge cache wakeups */
