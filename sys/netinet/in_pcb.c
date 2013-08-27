@@ -1844,9 +1844,11 @@ in_pcbhash_promisc(uint32_t laddr, uint32_t faddr, uint16_t lport, uint16_t fpor
 	uint32_t i;
 
 	hash = laddr ^ faddr ^ ntohs((lport) ^ (fport)) ^ fibnum;
-	i = l2i->inl2i_tagcnt;
-	while (i--) {
-		hash ^= ntohl(l2i->inl2i_tags[i]) & l2i->inl2i_tagmask;
+	if (l2i) {
+		i = l2i->inl2i_tagcnt;
+		while (i--) {
+			hash ^= ntohl(l2i->inl2i_tags[i]) & l2i->inl2i_tagmask;
+		}
 	}
 	hash ^= hash >> 16;
 	
@@ -1943,46 +1945,56 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 		int i;
 		uint16_t lport_to_match;
 		struct in_addr laddr_to_match;
-
+		int any_tag_flag;
 #ifdef INET6
 		struct inpcb *local_wild_mapped = NULL;
 #endif
+		uint16_t hash_history[8];
+
 		/*
 		 * Order of socket selection
-		 *	1. specific local addr, specific local port
-		 *	2. INADDR_ANY         , specific local port
-		 *	3. specific local addr, IN_PROMISC_PORT_ANY
-		 *	4. INADDR_ANY         , IN_PROMISC_PORT_ANY
+		 *	1. specific local addr, specific local port, specific tags
+		 *	2. INADDR_ANY         , specific local port, specific tags
+		 *	3. specific local addr, IN_PROMISC_PORT_ANY, specific tags
+		 *	4. INADDR_ANY         , IN_PROMISC_PORT_ANY, specific tags
+		 *	5. specific local addr, specific local port, any tags
+		 *	6. INADDR_ANY         , specific local port, any tags
+		 *	7. specific local addr, IN_PROMISC_PORT_ANY, any tags
+		 *	8. INADDR_ANY         , IN_PROMISC_PORT_ANY, any tags
 		 *
 		 * fib must always match
-		 * tag sets must always match
+		 *
+		 * Note that in the case of an incoming packet with no tags,
+		 * the hashes computed for the first four search phases will
+		 * be identical to the hashes computed for the second four
+		 * search phases.
 		 */
 
-		
-		/*
-		 * First pass, look for a match with a specific local
-		 * address and specific local port.
-		 *
-		 * Second pass, look for a match with a specific local
-		 * address and a wildcard local port.
-		 *
-		 * Third pass, look for a match with a local address of
-		 * INADDR_ANY and a specific local port.
-		 *
-		 * Fourth pass, look for a match with a local address of
-		 * INADDR_ANY and a wildcard local port.
-		 */
+		for (i = 0; i < 8; i++) {
+			laddr_to_match.s_addr = (i & 0x01) ? INADDR_ANY : laddr.s_addr;
+			lport_to_match = (i & 0x02) ? IN_PROMISC_PORT_ANY : lport;
+			any_tag_flag = (i & 0x04) ? INL2I_TAG_ANY : 0;
 
-		for (i = 0; i < 4; i++) {
-			laddr_to_match.s_addr = (i & 0x01) ? laddr.s_addr : INADDR_ANY;
-			lport_to_match = (i & 0x10) ? IN_PROMISC_PORT_ANY : lport;
-
-			hash = in_pcbhash_promisc(laddr_to_match.s_addr, INADDR_ANY,
-						  lport_to_match, IN_PROMISC_PORT_ANY,
-						  ifp->if_fib, l2i, pcbinfo->ipi_hashmask);
+			if (l2i->inl2i_tagcnt || !any_tag_flag) {
+				hash = hash_history[i] =
+				    in_pcbhash_promisc(laddr_to_match.s_addr, INADDR_ANY,
+						       lport_to_match, IN_PROMISC_PORT_ANY,
+						       ifp->if_fib, any_tag_flag ? NULL : l2i,
+						       pcbinfo->ipi_hashmask);
+			} else {
+				/* There are no tags on the inbound packet
+				 * and we are in the second four phases of
+				 * search.  In this case, we don't have to
+				 * recompute the hashes as they are
+				 * identical to those computed for the first
+				 * four phases.
+				 */
+				hash = hash_history[i - 4];
+			}
 
 			head = &pcbinfo->ipi_hashbase[hash];
 			LIST_FOREACH(inp, head, inp_hash) {
+				struct in_l2info *inp_l2i = inp->inp_l2info;
 #ifdef INET6
 				/* XXX inp locking */
 				if ((inp->inp_vflag & INP_IPV4) == 0)
@@ -1992,6 +2004,7 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 				if (inp->inp_faddr.s_addr != INADDR_ANY ||
 				    inp->inp_laddr.s_addr != laddr_to_match.s_addr ||
 				    inp->inp_lport != lport_to_match ||
+				    (inp_l2i->inl2i_flags & INL2I_TAG_ANY) != any_tag_flag || 
 				    inp->inp_fibnum != ifp->if_fib)
 					continue;
 				
@@ -2003,7 +2016,8 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 				if (prison_flag(inp->inp_cred, PR_IP4))
 					continue;
 				
-				if (0 != in_promisc_tagcmp(inp->inp_l2info, l2i))
+				if (!(inp_l2i->inl2i_flags & INL2I_TAG_ANY) &&
+				    (0 != in_promisc_tagcmp(inp->inp_l2info, l2i)))
 					continue;
 				
 				if (inp->inp_laddr.s_addr == INADDR_ANY) {
@@ -2018,8 +2032,6 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 					return (inp);
 				}
 			}
-			
-			lport = IN_PROMISC_PORT_ANY;
 		}
 #ifdef INET6
 		if (local_wild_mapped != NULL)

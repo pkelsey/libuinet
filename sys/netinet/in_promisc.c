@@ -108,6 +108,24 @@ in_promisc_l2info_free(struct in_l2info *l2info)
 }
 
 
+void
+in_promisc_l2info_copy(struct in_l2info *dst, struct in_l2info *src)
+{
+	memcpy(dst->inl2i_local_addr, src->inl2i_local_addr,
+	       IN_L2INFO_ADDR_MAX);
+	memcpy(dst->inl2i_foreign_addr, src->inl2i_foreign_addr,
+	       IN_L2INFO_ADDR_MAX);
+
+	dst->inl2i_flags = src->inl2i_flags;
+
+	dst->inl2i_tagcnt = src->inl2i_tagcnt;
+	dst->inl2i_tagmask = src->inl2i_tagmask;
+	memcpy(dst->inl2i_tags,
+	       src->inl2i_tags,
+	       src->inl2i_tagcnt * sizeof(src->inl2i_tags[0]));
+}
+
+
 int
 in_promisc_tagcmp(struct in_l2info *l2info1, struct in_l2info *l2info2)
 {
@@ -154,6 +172,8 @@ in_promisc_socket_destroy(struct socket *so)
 void
 in_promisc_socket_newconn(struct socket *head, struct socket *so)
 {
+	so->so_l2info->inl2i_flags = head->so_l2info->inl2i_flags & ~INL2I_TAG_ANY;
+
 	so->so_l2info->inl2i_tagmask = head->so_l2info->inl2i_tagmask;
 	so->so_l2info->inl2i_tagcnt = head->so_l2info->inl2i_tagcnt;
 	memcpy(so->so_l2info->inl2i_tags, head->so_l2info->inl2i_tags,

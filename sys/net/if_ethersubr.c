@@ -175,6 +175,9 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 	struct pf_mtag *t;
 	int loop_copy = 1;
 	int hlen;	/* link layer header length */
+#ifdef PROMISCUOUS_INET
+	struct ifl2info *l2i_tag = NULL;
+#endif
 
 	if (ro != NULL) {
 		if (!(m->m_flags & (M_BCAST | M_MCAST)))
@@ -198,12 +201,14 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 	switch (dst->sa_family) {
 #ifdef INET
 	case AF_INET:
+		type = htons(ETHERTYPE_IP);
 #ifdef PROMISCUOUS_INET
 		if (ifp->if_flags & IFF_PROMISCINET) {
-			(void)memcpy(esrc,
-				     &(LIST_NEXT(lle, lle_next)->ll_addr.mac16),
-				     sizeof (esrc));
-			hdrcmplt = 1;
+			l2i_tag = (struct ifl2info *)m_tag_locate(m,
+								  MTAG_PROMISCINET,
+								  MTAG_PROMISCINET_L2INFO,
+								  NULL);
+			break;
 		}
 #endif
 		if (lle != NULL && (lle->la_flags & LLE_VALID))
@@ -212,7 +217,6 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 			error = arpresolve(ifp, rt0, m, dst, edst, &lle);
 		if (error)
 			return (error == EWOULDBLOCK ? 0 : error);
-		type = htons(ETHERTYPE_IP);
 		break;
 	case AF_ARP:
 	{
@@ -244,12 +248,14 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 #endif
 #ifdef INET6
 	case AF_INET6:
+		type = htons(ETHERTYPE_IPV6);
 #ifdef PROMISCUOUS_INET
 		if (ifp->if_flags & IFF_PROMISCINET) {
-			(void)memcpy(esrc,
-				     &(LIST_NEXT(lle, lle_next)->ll_addr.mac16),
-				     sizeof (esrc));
-			hdrcmplt = 1;
+			l2i_tag = (struct ifl2info *)m_tag_locate(m,
+								  MTAG_PROMISCINET,
+								  MTAG_PROMISCINET_L2INFO,
+								  NULL);
+			break;
 		}
 #endif
 		if (lle != NULL && (lle->la_flags & LLE_VALID))
@@ -258,7 +264,6 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 			error = nd6_storelladdr(ifp, m, dst, (u_char *)edst, &lle);
 		if (error)
 			return error;
-		type = htons(ETHERTYPE_IPV6);
 		break;
 #endif
 #ifdef IPX
@@ -340,6 +345,39 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 		return (if_simloop(ifp, m, dst->sa_family, 0));
 	}
 
+
+#ifdef PROMISCUOUS_INET
+	if (l2i_tag) {
+		struct in_l2info *l2i = &l2i_tag->ifl2i_info;
+		unsigned int num_tag_bytes;
+		uint8_t *d;
+		
+		num_tag_bytes = l2i->inl2i_tagcnt * sizeof(l2i->inl2i_tags[0]);
+
+		M_PREPEND(m, ETHER_HDR_LEN + num_tag_bytes, M_DONTWAIT);
+		if (m == NULL)
+			senderr(ENOBUFS);
+
+		d = mtod(m, uint8_t *);
+		eh = (struct ether_header *)d;
+		
+		(void)memcpy(d, l2i->inl2i_foreign_addr, ETHER_ADDR_LEN);
+		d += ETHER_ADDR_LEN;
+
+		(void)memcpy(d, l2i->inl2i_local_addr, ETHER_ADDR_LEN);
+		d += ETHER_ADDR_LEN;
+
+		if (num_tag_bytes) {
+			(void)memcpy(d, l2i->inl2i_tags, num_tag_bytes);
+			d += num_tag_bytes;
+		}
+
+		(void)memcpy(d, &type, sizeof(eh->ether_type));
+
+		goto linkhdr_added;
+	}
+#endif
+
 	/*
 	 * Add local net header.  If no space in first mbuf,
 	 * allocate another.
@@ -357,6 +395,10 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 	else
 		(void)memcpy(eh->ether_shost, IF_LLADDR(ifp),
 			sizeof(eh->ether_shost));
+
+#ifdef PROMISCUOUS_INET
+linkhdr_added:
+#endif
 
 	/*
 	 * If a simplex interface, and the packet is being sent to our
@@ -725,18 +767,19 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 	 */
 	if ((ifp->if_flags & IFF_PROMISCINET) && (m->m_flags & M_VLANTAG)) {
 		uint32_t *tdata = &l2info->inl2i_tags[l2info->inl2i_tagcnt];
-
+		printf("hw decap'd vlan etype=0x%04x\n", etype);
 		*tdata = htonl((ETHERTYPE_VLAN << 16) | m->m_pkthdr.ether_vtag);
 		l2info->inl2i_tagcnt++;
 		m->m_flags &= ~M_VLANTAG;
 	}
 
+
 	/*
 	 * If the interface is in IFF_PROMISCINET mode, remove all VLAN tags
 	 * and add them to the l2info mbuf tag.
 	 */
-	if ((ifp->if_flags & IFF_PROMISCINET) && (m->m_flags & M_VLANTAG) == 0 &&
-	    (etype == ETHERTYPE_VLAN)) {
+	if ((ifp->if_flags & IFF_PROMISCINET) && !(m->m_flags & M_VLANTAG) &&
+	    ETHERTYPE_IS_VLAN(etype)) {
 		int needed;
 		int td_avail;
 		int vlan_bytes;
@@ -766,7 +809,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		td_avail = (IN_L2INFO_MAX_TAGS - l2info->inl2i_tagcnt) * ETHER_VLAN_ENCAP_LEN;
 		vlan_bytes = 0;
 		while ((vlan_bytes + ETHER_VLAN_ENCAP_LEN + ETHER_HDR_LEN <= m->m_len) &&
-		       (htons(ETHERTYPE_VLAN) == pm->evl_encap_proto) &&
+		       ETHERTYPE_IS_VLAN(ntohs(pm->evl_encap_proto)) &&
 		       (vlan_bytes + ETHER_VLAN_ENCAP_LEN <= td_avail)) {
 
 			pm++;

@@ -2569,16 +2569,7 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 				}
 				
 				SOCK_LOCK(so);
-				memcpy(so->so_l2info->inl2i_local_addr, l2info.inl2i_local_addr,
-				       IN_L2INFO_ADDR_MAX);
-				memcpy(so->so_l2info->inl2i_foreign_addr, l2info.inl2i_foreign_addr,
-				       IN_L2INFO_ADDR_MAX);
-
-				so->so_l2info->inl2i_tagmask = l2info.inl2i_tagmask;
-				so->so_l2info->inl2i_tagcnt = l2info.inl2i_tagcnt;
-				memcpy(so->so_l2info->inl2i_tags,
-				       l2info.inl2i_tags,
-				       l2info.inl2i_tagcnt * sizeof(l2info.inl2i_tags[0]));
+				in_promisc_l2info_copy(so->so_l2info, &l2info);
 
 				/* Note: ignore error */
 				if (so->so_proto->pr_ctloutput)
@@ -2867,16 +2858,7 @@ integer:
 			if ((so->so_proto->pr_domain->dom_family == PF_INET) ||
 			    (so->so_proto->pr_domain->dom_family == PF_INET6)) {
 				SOCK_LOCK(so);
-				memcpy(l2info.inl2i_local_addr, so->so_l2info->inl2i_local_addr,
-				       IN_L2INFO_ADDR_MAX);
-				memcpy(l2info.inl2i_foreign_addr, so->so_l2info->inl2i_foreign_addr,
-				       IN_L2INFO_ADDR_MAX);
-
-				l2info.inl2i_tagmask = so->so_l2info->inl2i_tagmask;
-				l2info.inl2i_tagcnt = so->so_l2info->inl2i_tagcnt;
-				memcpy(l2info.inl2i_tags,
-				       so->so_l2info->inl2i_tags,
-				       so->so_l2info->inl2i_tagcnt * sizeof(so->so_l2info->inl2i_tags[0]));
+				in_promisc_l2info_copy(&l2info, so->so_l2info);
 				SOCK_UNLOCK(so);
 
 				error = sooptcopyout(sopt, &l2info, sizeof l2info);

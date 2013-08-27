@@ -144,7 +144,6 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 #endif
 #ifdef PROMISCUOUS_INET
 	struct ifl2info *l2i_tag = NULL;
-	struct llentry lle_dst, lle_src;
 	int ispromisc = 0;
 #endif
 	M_ASSERTPKTHDR(m);
@@ -159,46 +158,31 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 	}
 
 #ifdef PROMISCUOUS_INET
-	if ((inp && (inp->inp_flags2 & INP_PROMISC)) || 
-	    (l2i_tag = (struct ifl2info *)m_tag_locate(m,
-						       MTAG_PROMISCINET,
-						       MTAG_PROMISCINET_L2INFO,
-						       NULL))) {
-		struct in_l2info *l2i;
+	l2i_tag = (struct ifl2info *)m_tag_locate(m,
+						  MTAG_PROMISCINET,
+						  MTAG_PROMISCINET_L2INFO,
+						  NULL);
+
+	if ((inp && (inp->inp_flags2 & INP_PROMISC)) || l2i_tag) {
 		unsigned int fib;
-		uint8_t *daddr, *saddr;
 
 		if (l2i_tag) {
 			/*
 			 * This is a packet that has been turned around
 			 * after reception, such as a TCP SYN packet being
-			 * recycled as a RST, so the l2 info and fib come
-			 * from the mbuf, not the (probably nonexistent)
-			 * connection context.
+			 * recycled as a RST, so fib comes from the mbuf,
+			 * not the (probably nonexistent) connection
+			 * context.
 			 */
-			l2i = &l2i_tag->ifl2i_info;
 			fib = M_GETFIB(m);
 		} else {
-			l2i = (struct in_l2info *)inp->inp_l2info;
 			fib = inp->inp_fibnum;
+
+			if (0 != if_promiscinet_add_tag(m, inp->inp_l2info)) {
+				printf("dropping packet (tag add failed)\n");
+				goto bad;
+			}
 		}
-
-		daddr = l2i->inl2i_foreign_addr;
-		saddr = l2i->inl2i_local_addr;
-
-		ro = &iproute;
-		bzero(ro, sizeof (*ro));
-		
-		memset(&lle_dst, 0, sizeof(lle_dst));
-		lle_dst.la_flags |= LLE_VALID;
-		
-		LIST_NEXT(&lle_dst, lle_next) = &lle_src;
-		ro->ro_lle = &lle_dst;
-			
-		memcpy(&lle_dst.ll_addr.mac16, daddr,
-		       ETHER_ADDR_LEN);
-		memcpy(&lle_src.ll_addr.mac16, saddr,
-		       ETHER_ADDR_LEN);
 
 		ifp = ifnet_byfib_ref(fib);
 		if (NULL == ifp) {
@@ -806,6 +790,9 @@ ip_fragment(struct ip *ip, struct mbuf **m_frag, int mtu,
 	int firstlen;
 	struct mbuf **mnext;
 	int nfrags;
+#ifdef PROMISCUOUS_INET
+	struct ifl2info *l2i_tag;
+#endif
 
 	if (ip->ip_off & IP_DF) {	/* Fragmentation not allowed */
 		IPSTAT_INC(ips_cantfrag);
@@ -817,6 +804,13 @@ ip_fragment(struct ip *ip, struct mbuf **m_frag, int mtu,
 	 */
 	if (len < 8)
 		return EMSGSIZE;
+
+#ifdef PROMISCUOUS_INET
+	l2i_tag = (struct ifl2info *)m_tag_locate(m0,
+						  MTAG_PROMISCINET,
+						  MTAG_PROMISCINET_L2INFO,
+						  NULL);
+#endif /* PROMISCUOUS_INET */
 
 	/*
 	 * If the interface will not calculate checksums on
@@ -926,6 +920,17 @@ smart_frag_failure:
 		m->m_pkthdr.rcvif = NULL;
 #ifdef MAC
 		mac_netinet_fragment(m0, m);
+#endif
+
+#ifdef PROMISCUOUS_INET
+		if (l2i_tag) {
+			if (0 != if_promiscinet_add_tag(m, &l2i_tag->ifl2i_info)) {
+				m_free(m);
+				error = ENOMEM;
+				IPSTAT_INC(ips_odropped);
+				goto done;
+			}
+		}
 #endif
 		m->m_pkthdr.csum_flags = m0->m_pkthdr.csum_flags;
 		mhip->ip_off = htons(mhip->ip_off);
@@ -1045,8 +1050,6 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			case SO_L2INFO:
 #ifdef PROMISCUOUS_INET
 			{
-				struct in_l2info *l2i;
-
 				SOCK_LOCK_ASSERT(so);
 				
 				/*
@@ -1057,17 +1060,9 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				 */
 				INP_INFO_RLOCK(inp->inp_pcbinfo);
 				INP_WLOCK(inp);
-				l2i = (struct in_l2info *)inp->inp_l2info;
-				memcpy(l2i->inl2i_local_addr, so->so_l2info->inl2i_local_addr,
-				       IN_L2INFO_ADDR_MAX);
-				memcpy(l2i->inl2i_foreign_addr, so->so_l2info->inl2i_foreign_addr,
-				       IN_L2INFO_ADDR_MAX);
 
-				l2i->inl2i_tagmask = so->so_l2info->inl2i_tagmask;
-				l2i->inl2i_tagcnt = so->so_l2info->inl2i_tagcnt;
-				memcpy(l2i->inl2i_tags,
-				       so->so_l2info->inl2i_tags,
-				       so->so_l2info->inl2i_tagcnt * sizeof(so->so_l2info->inl2i_tags[0]));
+				in_promisc_l2info_copy((struct in_l2info *)inp->inp_l2info, so->so_l2info);
+
 				INP_WUNLOCK(inp);
 				INP_INFO_RUNLOCK(inp->inp_pcbinfo);
 				error = 0;

@@ -23,34 +23,28 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _NET_IF_PROMISCINET_H_
-#define _NET_IF_PROMISCINET_H_
+#include <sys/param.h>
 
+#include <net/if_promiscinet.h>
 
-#ifdef _KERNEL
-
-#include <sys/mbuf.h>
-
-
-#include <net/ethernet.h>
 #include <netinet/in_promisc.h>
 
 
-#define MTAG_PROMISCINET	1366240237
-#define MTAG_PROMISCINET_L2INFO	0
+int if_promiscinet_add_tag(struct mbuf *m, struct in_l2info *l2i)
+{
+	struct ifl2info *l2info_tag;
 
+	l2info_tag = (struct ifl2info *)m_tag_alloc(MTAG_PROMISCINET,
+						    MTAG_PROMISCINET_L2INFO,
+						    MTAG_PROMISCINET_L2INFO_LEN,
+						    M_NOWAIT);
+	if (NULL == l2info_tag) {
+		return (ENOMEM);
+	}
 
-#define IF_PROMISCINET_MAX_ETHER_VLANS	IN_L2INFO_MAX_TAGS
+	in_promisc_l2info_copy(&l2info_tag->ifl2i_info, l2i);
 
-struct ifl2info {
-	struct m_tag ifl2i_mtag;	/* must be first in the struct */
-	struct in_l2info ifl2i_info;
-};
+	m_tag_prepend(m, &l2info_tag->ifl2i_mtag);
 
-#define MTAG_PROMISCINET_L2INFO_LEN (sizeof(struct ifl2info) - sizeof(struct m_tag))
-
-int if_promiscinet_add_tag(struct mbuf *m, struct in_l2info *l2i);
-
-#endif /* _KERNEL */
-
-#endif /* !_NET_IF_PROMISCINET_H_ */
+	return (0);
+}

@@ -198,7 +198,8 @@ KERN_MSRCS+=		\
 
 
 LIBKERN_SRCS+=		\
-	bcd.c
+	bcd.c		\
+	inet_ntoa.c
 
 
 MACHINE_SRCS+=		\
@@ -213,6 +214,7 @@ NET_SRCS+=		\
 	if_ethersubr.c	\
 	if_loop.c	\
 	if_llatbl.c	\
+	if_promiscinet.c\
 	netisr.c	\
 	pfil.c		\
 	radix.c		\

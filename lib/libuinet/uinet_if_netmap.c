@@ -289,6 +289,10 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	/*
 	 * Disable TCP and checksum offload, which can impact throughput
 	 * and also cause packets to be dropped or modified gratuitously.
+	 *
+	 * Also disable VLAN offload/filtering - we want to talk straight to
+	 * the wire.
+	 *
 	 */
 
 	error = if_netmap_set_offload(sc, false);
@@ -751,9 +755,9 @@ if_netmap_set_offload(struct if_netmap_softc *sc, bool on)
 	}
 
 	if (on)
-		ifr.ifr_reqcap |= IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE;
+		ifr.ifr_reqcap |= IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO;
 	else
-		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE);
+		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
 
 	rv = ioctl(sc->fd, SIOCSIFCAP, &ifr);
 	if (rv == -1) {
