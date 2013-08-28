@@ -1847,7 +1847,7 @@ in_pcbhash_promisc(uint32_t laddr, uint32_t faddr, uint16_t lport, uint16_t fpor
 	if (l2i) {
 		i = l2i->inl2i_tagcnt;
 		while (i--) {
-			hash ^= ntohl(l2i->inl2i_tags[i]) & l2i->inl2i_tagmask;
+			hash ^= ntohl(l2i->inl2i_tags[i]) & ntohl(l2i->inl2i_tagmask);
 		}
 	}
 	hash ^= hash >> 16;
@@ -1866,7 +1866,7 @@ in_pcbporthash_promisc(uint16_t lport, uint16_t fibnum, struct in_l2info *l2i,
 	hash = ntohs(lport) ^ fibnum;
 	i = l2i->inl2i_tagcnt;
 	while (i--) {
-		hash ^= ntohl(l2i->inl2i_tags[i]) & l2i->inl2i_tagmask;
+		hash ^= ntohl(l2i->inl2i_tags[i]) & ntohl(l2i->inl2i_tagmask);
 	}
 	hash ^= hash >> 16;
 	
