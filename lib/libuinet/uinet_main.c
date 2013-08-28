@@ -54,7 +54,7 @@
 
 
 
-typedef enum { CS_INIT, CS_CONNECTED, CS_DONE } conn_state_t;
+typedef enum { CS_INIT, CS_RETRY,CS_CONNECTING, CS_CONNECTED, CS_DISCONNECTING, CS_DONE } conn_state_t;
 
 struct server_context;
 
@@ -71,10 +71,19 @@ struct server_conn {
 
 struct client_conn {
 	TAILQ_ENTRY(client_conn) client_queue;
-	int active;
 	struct client_context *client;
 	struct socket *so;
 	conn_state_t conn_state;
+	conn_state_t last_conn_state;
+	unsigned int fib;
+	char *local_mac;
+	char *foreign_mac;
+	uint32_t vlan_stack[IN_L2INFO_MAX_TAGS];
+	int vlan_stack_depth;
+	in_addr_t local_addr;
+	uint16_t local_port;
+	in_addr_t foreign_addr;
+	uint16_t foreign_port;
 	struct sockaddr_in local_sin;
 	struct sockaddr_in remote_sin;
 };
@@ -86,8 +95,16 @@ struct client_context {
 	struct client_conn_listhead queue;
 	struct mtx lock;
 	int notify;
+	int interleave;
 	uint8_t wirebuf[1024];
 	uint8_t verifybuf[1024];
+	unsigned int connecting;
+	unsigned int connected;
+	unsigned int disconnecting;
+	unsigned int retrying;
+	unsigned int connects;
+	unsigned int disconnects;
+	unsigned int retries;
 };
 
 
@@ -118,55 +135,63 @@ struct test_config {
 	char *local_mac;
 	char *foreign_mac;
 	uint32_t vlan_start;
-        int num_vlans;
+        unsigned int num_vlans;
+	int vlan_stack_depth;
 	char * syn_filter_name;
 };
 
 
-#define TEST_PASSIVE(name, fib, ip, port, vlanstart, nvlans, synfilter)	\
-	TEST_PASSIVE_N(name, fib, ip, 1, port, 1, vlanstart, nvlans, synfilter)
+#define TEST_PASSIVE(name, fib, ip, port, vlanstart, nvlans, vlanstackdepth, synfilter)	\
+	TEST_PASSIVE_N(name, fib, ip, 1, port, 1, vlanstart, nvlans, vlanstackdepth, synfilter)
 
-#define TEST_PASSIVE_N(name, fib, ip, nips, port, nports, vlanstart, nvlans, synfilter) \
-	{ (name), TEST_TYPE_PASSIVE, (fib), (ip), (nips), (port), (nports), 0, 0, 0, 0, NULL, NULL, (vlanstart), (nvlans), (synfilter) }
+#define TEST_PASSIVE_N(name, fib, ip, nips, port, nports, vlanstart, nvlans, vlanstackdepth, synfilter) \
+	{ (name), TEST_TYPE_PASSIVE, (fib), (ip), (nips), (port), (nports), 0, 0, 0, 0, NULL, NULL, (vlanstart), (nvlans), (vlanstackdepth), (synfilter) }
 
-#define TEST_ACTIVE(name, fib, localip, localport, foreignip, foreignport, localmac, foreignmac, vlanstart, nvlans) \
-	TEST_ACTIVE_N(name, fib, localip, 1, localport, 1, foreignip, 1, foreignport, 1, localmac, foreignmac, vlanstart, nvlans)
+#define TEST_ACTIVE(name, fib, localip, localport, foreignip, foreignport, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth) \
+	TEST_ACTIVE_N(name, fib, localip, 1, localport, 1, foreignip, 1, foreignport, 1, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth)
 
-#define TEST_ACTIVE_N(name, fib, localip, nlocalips, localport, nlocalports, foreignip, nforeignips, foreignport, nforeignports, localmac, foreignmac, vlanstart, nvlans) \
-	{ (name), TEST_TYPE_ACTIVE, (fib), (localip), (nlocalips), (localport), (nlocalports), (foreignip), (nforeignips), (foreignport), (nforeignports),(localmac), (foreignmac), (vlanstart), (nvlans) }
+#define TEST_ACTIVE_N(name, fib, localip, nlocalips, localport, nlocalports, foreignip, nforeignips, foreignport, nforeignports, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth) \
+	{ (name), TEST_TYPE_ACTIVE, (fib), (localip), (nlocalips), (localport), (nlocalports), (foreignip), (nforeignips), (foreignport), (nforeignports),(localmac), (foreignmac), (vlanstart), (nvlans), (vlanstackdepth) }
 
 #define VLANS(...) { __VA_ARGS__ }
 
 
-extern int get_kernel_stack_if_params(const char *ifname,
-				      struct sockaddr_in *addr,
-				      struct sockaddr_in *baddr,
-				      struct sockaddr_in *netmask);
+static int dobind(struct socket *so, in_addr_t addr, in_port_t port);
+static int doconnect(struct socket *so, in_addr_t addr, in_port_t port);
+static struct socket * create_test_socket(unsigned int test_type, unsigned int fib,
+					  const char *local_mac, const char *foreign_mac,
+					  const uint32_t *vlan_stack, int vlan_stack_depth,
+					  const char *syn_filter_name, void *upcall_arg);
 
 
 struct test_config tests[] = {
 
-	TEST_PASSIVE("sp. ip, sp. port, sp. tags, filt.", 1, "10.0.0.1",                2222, 42,  3, "uinet_test"), 
-	TEST_PASSIVE("any ip, sp. port, sp. tags, filt.", 1,  "0.0.0.0",                2222, 42,  1, "uinet_test"), 
-	TEST_PASSIVE("sp. ip, any port, sp. tags, filt.", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 42,  1, "uinet_test"), 
-	TEST_PASSIVE("any ip, any port, sp. tags, filt.", 1,  "0.0.0.0", IN_PROMISC_PORT_ANY, 42,  1, "uinet_test"), 
-	TEST_PASSIVE("sp. ip, sp. port, any tags, filt.", 1, "10.0.0.1",                2222,  0, -1, "uinet_test"), 
-	TEST_PASSIVE("any ip, sp. port, any tags, filt.", 1,  "0.0.0.0",                2222,  0, -1, "uinet_test"), 
-	TEST_PASSIVE("sp. ip, any port, any tags, filt.", 1, "10.0.0.1", IN_PROMISC_PORT_ANY,  0, -1, "uinet_test"), 
-	TEST_PASSIVE("any ip, any port, any tags, filt.", 1,  "0.0.0.0", IN_PROMISC_PORT_ANY,  0, -1, "uinet_test"), 
+	TEST_PASSIVE("sp. ip, sp. port, sp. tags, filt.", 1, "10.0.0.1",                2222, 42, 1,  3, "uinet_test"), 
+	TEST_PASSIVE("any ip, sp. port, sp. tags, filt.", 1,  "0.0.0.0",                2222, 42, 1,  1, "uinet_test"), 
+	TEST_PASSIVE("sp. ip, any port, sp. tags, filt.", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 42, 1,  1, "uinet_test"), 
+	TEST_PASSIVE("any ip, any port, sp. tags, filt.", 1,  "0.0.0.0", IN_PROMISC_PORT_ANY, 42, 1,  1, "uinet_test"), 
+	TEST_PASSIVE("sp. ip, sp. port, any tags, filt.", 1, "10.0.0.1",                2222,  0, 1, -1, "uinet_test"), 
+	TEST_PASSIVE("any ip, sp. port, any tags, filt.", 1,  "0.0.0.0",                2222,  0, 1, -1, "uinet_test"), 
+	TEST_PASSIVE("sp. ip, any port, any tags, filt.", 1, "10.0.0.1", IN_PROMISC_PORT_ANY,  0, 1, -1, "uinet_test"), 
+	TEST_PASSIVE("any ip, any port, any tags, filt.", 1,  "0.0.0.0", IN_PROMISC_PORT_ANY,  0, 1, -1, "uinet_test"), 
 
-	TEST_ACTIVE("one, tags", 1, "10.20.0.1", 1234, "10.0.0.1", 2222, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 42, 3) ,
+	TEST_ACTIVE("one, tags", 1, "10.20.0.1", 1234, "10.0.0.1", 2222, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 42, 1, 3) ,
 
 
-	TEST_PASSIVE("any port, filtered", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 0, 0, "uinet_test"), 
-	TEST_PASSIVE("any ip, any port, filtered", 1, "0.0.0.0", IN_PROMISC_PORT_ANY, 0, 0, "uinet_test"), 
-	TEST_PASSIVE("any port", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 0, 0, NULL), 
-	TEST_PASSIVE_N("many any port", 1, "10.0.0.1", 10000, IN_PROMISC_PORT_ANY, 1, 42, 2, NULL), 
-	TEST_PASSIVE_N("many specific port", 1, "10.0.0.1", 66, 1, 1000, 0, 0, NULL), 
+	TEST_PASSIVE("any port, filtered", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 0, 1, 0, "uinet_test"), 
+	TEST_PASSIVE("any ip, any port, filtered", 1, "0.0.0.0", IN_PROMISC_PORT_ANY, 0, 1, 0, "uinet_test"), 
+	TEST_PASSIVE("any port", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 0, 1, 0, NULL), 
+	TEST_PASSIVE("any port, many vlans", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 22, 1000000, 2, NULL), 
+	TEST_PASSIVE_N("many any port", 1, "10.0.0.1", 10000, IN_PROMISC_PORT_ANY, 1, 0, 1, 0, NULL), 
+	TEST_PASSIVE_N("many any port, many vlans", 1, "10.0.0.1", 100, IN_PROMISC_PORT_ANY, 1, 22, 100, 1, NULL), 
+	TEST_PASSIVE_N("many specific port", 1, "10.0.0.1", 66, 1, 1000, 0, 1, 0, NULL), 
 
-	TEST_ACTIVE("one", 1, "10.20.0.1", 1234, "10.0.0.1", 2222, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 0) ,
-	TEST_ACTIVE_N("one local, many foreign", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 10000, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 42, 2),
-	TEST_ACTIVE_N("many local, many foreign", 1, "10.20.0.1", 2, 1234, 1, "10.0.0.1", 1, 1, 40000, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 0) 
+	TEST_ACTIVE("one", 1, "10.20.0.1", 1234, "10.0.0.1", 2222, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0) ,
+	TEST_ACTIVE_N("one local, many foreign", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1000, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
+	TEST_ACTIVE_N("one local, many foreign", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 10000, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
+	TEST_ACTIVE_N("one local, many foreign, many vlans", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 100, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 100, 1),
+
+	TEST_ACTIVE_N("many local, many foreign", 1, "10.20.0.1", 2, 1234, 1, "10.0.0.1", 1, 1, 40000, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0) 
 };
 
 
@@ -209,7 +234,9 @@ loopback_thread(void *arg)
 		uio.uio_td = curthread;
 		error = soreceive(so, NULL, &uio, NULL, NULL, &rcv_flags);
 		if ((0 != error) && (EAGAIN != error)) {
-			printf("loopback_thread: soreceive failed %d\n", error);
+			if (ECONNRESET != error) {
+				printf("loopback_thread: soreceive failed %d\n", error);
+			}
 			len = 0;
 		} else {
 			len = sizeof(server->copybuf) - uio.uio_resid;
@@ -355,18 +382,15 @@ server_upcall(struct socket *head, void *arg, int waitflag)
 		goto out;
 	}
 
-	sc = malloc(sizeof(struct server_conn), M_DEVBUF, M_WAITOK);
+	sc = malloc(sizeof(struct server_conn), M_DEVBUF, M_WAITOK | M_ZERO);
 	if (NULL == sc) {
 		soclose(so);
 		goto out;
 	}
 	
 	sc->so = so;
-	memset(&sc->local_sin, 0, sizeof(struct sockaddr_in));
-	memset(&sc->remote_sin, 0, sizeof(struct sockaddr_in));
 	sc->conn_state = CS_INIT;
 	sc->server = server;
-	sc->active = 0;
 
 	SOCKBUF_LOCK(&so->so_rcv);
 	soupcall_set(so, SO_RCV, server_conn_established, sc);
@@ -384,97 +408,177 @@ static void
 verify_thread(void *arg)
 {
 	struct client_context *client = (struct client_context *)arg;
-	struct client_conn *cc, *tmpcc;
+	struct client_conn *cc;
 	struct iovec iov;
 	struct uio uio;
 	int error;
 	int rcv_flags = 0;
 	ssize_t len;
 	unsigned int pass, fail;
-	char connstr[64];
+	char connstr[80];
 	char buf1[32], buf2[32];
-
-	mtx_lock(&client->lock);
-	while (NULL == TAILQ_FIRST(&client->queue)) {
-		mtx_sleep(&client->queue, &client->lock, 0, "wclnlk", 0);
-	}
-	mtx_unlock(&client->lock);
+	uint64_t cycle_number = 0;
+	int connection_cycle;
+	int data_cycle;
+	int size, remaining;
+	int i;
 
 	while(1) {
-		printf("verify cycle started\n");
-		mtx_lock(&client->lock);
+		printf("verify cycle %llu started\n", (unsigned long long)cycle_number);
+
 		cc = TAILQ_FIRST(&client->queue);
-		mtx_unlock(&client->lock);
 		
 		pass = 0;
 		fail = 0;
 
 		if (NULL == cc) {
-			printf("No more connections.\n");
+			printf("No connections defined.\n");
 			break;
 		}
 		
-		do {
-			snprintf(connstr, sizeof(connstr), "%s:%u -> %s:%u", 
-				 inet_ntoa_r(cc->local_sin.sin_addr, buf1, sizeof(buf1)), ntohs(cc->local_sin.sin_port),
-				 inet_ntoa_r(cc->remote_sin.sin_addr, buf2, sizeof(buf2)), ntohs(cc->remote_sin.sin_port));
+		connection_cycle =
+		    client->interleave ||
+		    (cycle_number <= 1) ||
+		    (!client->interleave && !(cycle_number & 0x1));
+
+		data_cycle =
+		    client->interleave ||
+		    (!client->interleave && (cycle_number > 1) && (cycle_number & 0x1));
+
+		TAILQ_FOREACH(cc, &client->queue, client_queue) {
+			remaining = sizeof(connstr);
+			size = snprintf(connstr, sizeof(connstr), "%s:%u -> %s:%u vlans=[ ", 
+					inet_ntoa_r(cc->local_sin.sin_addr, buf1, sizeof(buf1)), ntohs(cc->local_sin.sin_port),
+					inet_ntoa_r(cc->remote_sin.sin_addr, buf2, sizeof(buf2)), ntohs(cc->remote_sin.sin_port));
+			for (i = 0; i < cc->vlan_stack_depth; i++) {
+				remaining = size > remaining ? 0 : remaining - size;
+				if (remaining) {
+					size = snprintf(&connstr[sizeof(connstr) - remaining], remaining, "%u ", cc->vlan_stack[i]);  
+				}
+			}
+			remaining = size > remaining ? 0 : remaining - size;
+			if (remaining) {
+				snprintf(&connstr[sizeof(connstr) - remaining], remaining, "]");	
+			}
 
 			if (client->notify) {
 				printf("verifying %s\n", connstr);
 			}
 
-			snprintf(client->wirebuf, sizeof(client->wirebuf), "testingtesting123");
-			len = strlcpy(client->verifybuf, client->wirebuf, sizeof(client->verifybuf)) + 1;
-			
-			iov.iov_base = client->wirebuf;
-			iov.iov_len = len;
-			uio.uio_iov = &iov;
-			uio.uio_iovcnt = 1;
-			uio.uio_offset = 0;
-			uio.uio_resid = iov.iov_len;
-			uio.uio_segflg = UIO_SYSSPACE;
-			uio.uio_rw = UIO_WRITE;
-			uio.uio_td = curthread;
-			error = sosend(cc->so, NULL, &uio, NULL, NULL, 0, curthread);
-			if (0 != error) {
-				printf("verify_thread: sosend failed %d\n", error);
-			}
-
-			memset(client->wirebuf, 0, len);
-
-			iov.iov_base = client->wirebuf;
-			iov.iov_len = len;
-			uio.uio_iov = &iov;
-			uio.uio_iovcnt = 1;
-			uio.uio_offset = 0;
-			uio.uio_resid = iov.iov_len;
-			uio.uio_segflg = UIO_SYSSPACE;
-			uio.uio_rw = UIO_READ;
-			uio.uio_td = curthread;
-			error = soreceive(cc->so, NULL, &uio, NULL, NULL, &rcv_flags);
-			if (0 != error) {
-				printf("loopback_thread: soreceive failed %d\n", error);
-			} else {
-				if (0 != strcmp(client->verifybuf, client->wirebuf)) {
-					printf("verification failed\n");
-					fail++;
-				} else {
-					pass++;
-				}
-			}
-			
-
 			mtx_lock(&client->lock);
-			cc = TAILQ_NEXT(cc, client_queue);
-			while ((NULL != cc) && (CS_DONE == cc->conn_state)) {
-				tmpcc = cc;
-				cc = TAILQ_NEXT(cc, client_queue);
-				TAILQ_REMOVE(&client->queue, tmpcc, client_queue);
-			}
-			mtx_unlock(&client->lock);
-		} while (NULL != cc);
+			switch (cc->conn_state) {
+			case CS_INIT:
+			case CS_RETRY:
+				if (connection_cycle) {
+					if (CS_INIT == cc->conn_state) {
+						client->connecting++;
+					}
 
-		printf("pass=%u fail=%u\n", pass, fail); 
+					cc->last_conn_state = cc->conn_state;
+					cc->conn_state = CS_CONNECTING;
+					mtx_unlock(&client->lock);
+				
+					if (cc->so) {
+						soclose(cc->so);
+					}
+
+					error = 0;
+					cc->so = create_test_socket(TEST_TYPE_ACTIVE, cc->fib,
+								    cc->local_mac, cc->foreign_mac,
+								    cc->vlan_stack, cc->vlan_stack_depth,
+								    NULL, cc);
+					if (NULL == cc->so) {
+						printf("socket create failed\n");
+						error = EINVAL;
+					} else {
+						if ((error = dobind(cc->so, cc->local_addr, cc->local_port))) {
+							printf("dobind failed\n");
+						} else {
+							if ((error = doconnect(cc->so, cc->foreign_addr, cc->foreign_port))) {
+								printf("doconnect failed\n");
+							}
+						}
+					}
+
+					if (error) {
+						mtx_lock(&client->lock);
+						client->connecting--;
+						client->retrying++;
+						client->retries++;
+
+						cc->last_conn_state = cc->conn_state;
+						cc->conn_state = CS_RETRY;
+						mtx_unlock(&client->lock);
+					}
+				}
+				break;
+			case CS_CONNECTING:
+				mtx_unlock(&client->lock);
+				break;
+			case CS_CONNECTED:
+				if (data_cycle) {
+					mtx_unlock(&client->lock);
+
+					snprintf(client->wirebuf, sizeof(client->wirebuf), "%s", connstr);
+					len = strlcpy(client->verifybuf, client->wirebuf, sizeof(client->verifybuf)) + 1;
+			
+					iov.iov_base = client->wirebuf;
+					iov.iov_len = len;
+					uio.uio_iov = &iov;
+					uio.uio_iovcnt = 1;
+					uio.uio_offset = 0;
+					uio.uio_resid = iov.iov_len;
+					uio.uio_segflg = UIO_SYSSPACE;
+					uio.uio_rw = UIO_WRITE;
+					uio.uio_td = curthread;
+					error = sosend(cc->so, NULL, &uio, NULL, NULL, 0, curthread);
+					if (0 != error) {
+						printf("verify_thread: sosend failed %d\n", error);
+					}
+
+					memset(client->wirebuf, 0, len);
+
+					iov.iov_base = client->wirebuf;
+					iov.iov_len = len;
+					uio.uio_iov = &iov;
+					uio.uio_iovcnt = 1;
+					uio.uio_offset = 0;
+					uio.uio_resid = iov.iov_len;
+					uio.uio_segflg = UIO_SYSSPACE;
+					uio.uio_rw = UIO_READ;
+					uio.uio_td = curthread;
+					error = soreceive(cc->so, NULL, &uio, NULL, NULL, &rcv_flags);
+					if (0 != error) {
+						printf("loopback_thread: soreceive failed %d\n", error);
+					} else {
+						if (0 != strcmp(client->verifybuf, client->wirebuf)) {
+							printf("verification failed\n");
+							fail++;
+						} else {
+							pass++;
+						}
+					}
+				}
+				break;
+			case CS_DISCONNECTING:
+				break;
+			case CS_DONE:
+				break;
+			}
+
+		}
+
+		if (connection_cycle) {
+			printf("connected=%u connecting=%u disconnecting=%u retrying=%u connects=%u disconnects=%u retries=%u\n",
+			       client->connected, client->connecting, client->disconnecting, client->retrying, client->connects,
+			       client->disconnects, client->retries);
+		}
+
+		if (data_cycle) {
+			printf("pass=%u fail=%u\n", pass, fail); 
+		}
+
+		cycle_number++;
 		pause("vrfy", 2*hz);
 	}
 
@@ -487,18 +591,36 @@ static int
 client_upcall(struct socket *so, void *arg, int waitflag)
 {
 	struct client_conn *cc = arg;
-	static unsigned int connected_count = 0;
-	static unsigned int disconnected_count = 0;
+	struct client_context *client = cc->client;
 	struct sockaddr_in *sin;
 	int error;
+	int notify = 0;
 
-	if (CS_INIT == cc->conn_state) {
-		if (so->so_state == SS_ISCONNECTED) {
-			connected_count++;
-			if (0 == (connected_count % 1000)) {
-				printf("connected=%u disconnected=%u\n",
-				       connected_count, disconnected_count);
+	mtx_lock(&client->lock);
+	
+	switch (cc->conn_state) {
+	case CS_INIT:
+	case CS_RETRY:
+		break;
+	case CS_CONNECTING:
+		client->connected++;  /* needs to be out here to count
+				       * properly in the
+				       * transition-to-disconnect(ing)
+				       * cases
+				       */
+		if (so->so_state & SS_ISCONNECTED) {
+			client->connects++;
+			if (CS_INIT == cc->last_conn_state) {
+				client->connecting--;
+			} else {
+				client->retrying--;
 			}
+
+			if (0 == (client->connected % 1000))
+				notify = 1;
+
+			cc->last_conn_state = cc->conn_state;
+			cc->conn_state = CS_CONNECTED;
 
 			sin = NULL;
 			error = (*so->so_proto->pr_usrreqs->pru_peeraddr)(so, (struct sockaddr **)&sin);
@@ -521,25 +643,48 @@ client_upcall(struct socket *so, void *arg, int waitflag)
 				memcpy(&cc->local_sin, sin, sizeof(struct sockaddr_in));
 				free(sin, M_SONAME);
 			}
+			break;
+		} 
+		/* fallthrough */
+	case CS_CONNECTED:
+		if (so->so_state & SS_ISDISCONNECTED) {
+			client->connected--;
+			client->retrying++;
+			client->disconnects++;
+			client->retries++;
 
-			cc->active = 1;
-			cc->so = so;
-			cc->conn_state = CS_CONNECTED;
+			cc->last_conn_state = cc->conn_state;
+			cc->conn_state = CS_RETRY;
+		} else if (so->so_state & SS_ISDISCONNECTING) {
+			client->disconnecting++;
 
-			mtx_lock(&cc->client->lock);
-			TAILQ_INSERT_TAIL(&cc->client->queue, cc, client_queue);
-			wakeup(&cc->client->queue);
-			mtx_unlock(&cc->client->lock);
+			cc->last_conn_state = cc->conn_state;
+			cc->conn_state = CS_DISCONNECTING;
+		} 
+		break;
+	case CS_DISCONNECTING:
+		if (so->so_state & SS_ISDISCONNECTED) {
+			client->connected--;
+			client->disconnecting--;
+			client->retrying++;
+			client->retries++;
+			client->disconnects++;
+
+
+
+			cc->last_conn_state = cc->conn_state;
+			cc->conn_state = CS_RETRY;
 		}
+		break;
+	case CS_DONE:
+		break;
 	}
 
-	if (so->so_state != SS_ISCONNECTED) {
-		printf("client disconnection\n");
-		disconnected_count++;
-		mtx_lock(&cc->client->lock);
-		cc->conn_state = CS_DONE;
-		mtx_unlock(&cc->client->lock);
-	}
+	mtx_unlock(&client->lock);
+
+	if (notify)
+		printf("connected=%u connecting=%u disconnecting=%u retrying=%u connects=%u disconnects=%u retries=%u\n",
+		       client->connected, client->connecting, client->disconnecting, client->retrying, client->connects, client->disconnects, client->retries);
 
 	return (SU_OK);
 }
@@ -705,17 +850,43 @@ mac_aton(const char *macstr, uint8_t *macout)
 }
 
 
+/*
+ * Convert a vlan number (i.e., the nth valid vlan) into a tag stack.
+ * Visualize this as converting the vlan number to base 4094, where each
+ * digit in that base starts at 1, and storing the most signifcant digit at
+ * the lowest index in the stack.
+ */
 static void
-incr_vlan(uint32_t *vlan)
+vlan_number_to_tag_stack(unsigned int vlan_number, uint32_t *tag_stack, int tag_stack_depth)
 {
-	uint32_t tmp;
+	int i;
 
-	tmp = *vlan;
+	if (tag_stack_depth > 0) {
+		for (i = tag_stack_depth - 1; i >= 0; i--) {
+			/* vlan id 0 and 4095 are reserved */
+			tag_stack[i] = (vlan_number % 4094) + 1;
+			vlan_number /= 4094;
+		}
+	}
+}
 
-	tmp++;
-	if (tmp >= 4095) tmp = 1;
 
-	*vlan = tmp;
+static void
+incr_vlan_tag_stack(uint32_t *tag_stack, int tag_stack_depth)
+{
+	int i;
+
+	if (tag_stack_depth > 0) {
+		tag_stack[tag_stack_depth - 1]++;
+		for (i = tag_stack_depth - 1; i >= 0; i--) {
+			if (tag_stack[i] > 4094) {
+				tag_stack[i] -= 4094;
+				if (i > 0) {
+					tag_stack[i - 1]++;
+				}
+			}
+		}
+	}
 }
 
 
@@ -792,7 +963,7 @@ print_test_config(struct test_config *test, int index)
 	unsigned int foreign_length;
 	char local_ip_range[64];
 	char foreign_ip_range[64];
-	uint32_t vlan;
+	uint32_t vlan_tag_stack[IN_L2INFO_MAX_TAGS];
 
 	if (index >= 0) printf("%2u ", index);
 
@@ -804,26 +975,35 @@ print_test_config(struct test_config *test, int index)
 
 	if (TEST_TYPE_PASSIVE == test->type) {
 
-		printf("%-36s PASSIVE num_sockets=%-7u fib=%-2u  local_range=%s%*s nvlans=%-2d tags=",
+		printf("%-36s PASSIVE num_sockets=%-7u fib=%-2u  local_range=%s%*s nvlans=%-2d tag_range=",
 		       test->name,
-		       test->num_local_ips * test->num_local_ports,
+		       test->num_vlans * test->num_local_ips * test->num_local_ports,
 		       test->fib,
 		       local_ip_range,
 		       58 - local_length,
 		       "",
 		       test->num_vlans);
 
-		num_tags = test->num_vlans < 0 ? 0 : test->num_vlans;
-		vlan = test->vlan_start;
+
+		num_tags = (test->vlan_stack_depth < 0) ? 0 : test->vlan_stack_depth;
+
+		vlan_number_to_tag_stack(test->vlan_start, vlan_tag_stack, test->vlan_stack_depth);
+		printf("[");
 		for(tagnum = 0; tagnum < num_tags; tagnum++) {
-			printf(" %u", vlan);
-			incr_vlan(&vlan);
+			printf(" %u", vlan_tag_stack[tagnum]);
 		}
-		printf("\n");
+		printf(" ]...");
+
+		vlan_number_to_tag_stack(test->vlan_start + test->num_vlans - 1, vlan_tag_stack, test->vlan_stack_depth);
+		printf("[");
+		for(tagnum = 0; tagnum < num_tags; tagnum++) {
+			printf(" %u", vlan_tag_stack[tagnum]);
+		}
+		printf(" ]\n");
 	} else {
 		printf("%-36s ACTIVE  num_sockets=%-7u fib=%-2u  local_range=%s\n",
 		       test->name,
-		       test->num_local_ips * test->num_local_ports * test->num_foreign_ips * test->num_foreign_ports,
+		       test->num_vlans * test->num_local_ips * test->num_local_ports * test->num_foreign_ips * test->num_foreign_ports,
 		       test->fib,
 		       local_ip_range);
 
@@ -833,20 +1013,28 @@ print_test_config(struct test_config *test, int index)
 					      test->foreign_port_start,
 					      test->num_foreign_ports);
 
-		printf("%-36s                                      foreign_range=%s%*s nvlans=%-2d tags=",
+		printf("%-36s                                      foreign_range=%s%*s nvlans=%-2d tag_range=",
 		       "",
 		       foreign_ip_range,
 		       58 - foreign_length,
 		       "",
 		       test->num_vlans);
 
-		num_tags = test->num_vlans < 0 ? 0 : test->num_vlans;
-		vlan = test->vlan_start;
+		num_tags = (test->vlan_stack_depth < 0) ? 0 : test->vlan_stack_depth;
+
+		vlan_number_to_tag_stack(test->vlan_start, vlan_tag_stack, test->vlan_stack_depth);
+		printf("[");
 		for(tagnum = 0; tagnum < num_tags; tagnum++) {
-			printf(" %u", vlan);
-			incr_vlan(&vlan);
+			printf(" %u", vlan_tag_stack[tagnum]);
 		}
-		printf("\n");
+		printf(" ]...");
+
+		vlan_number_to_tag_stack(test->vlan_start + test->num_vlans - 1, vlan_tag_stack, test->vlan_stack_depth);
+		printf("[");
+		for(tagnum = 0; tagnum < num_tags; tagnum++) {
+			printf(" %u", vlan_tag_stack[tagnum]);
+		}
+		printf(" ]\n");
 	}
 
 }
@@ -855,7 +1043,7 @@ print_test_config(struct test_config *test, int index)
 static struct socket *
 create_test_socket(unsigned int test_type, unsigned int fib,
 		   const char *local_mac, const char *foreign_mac,
-		   const uint32_t vlan_start, int tag_count,
+		   const uint32_t *vlan_stack, int vlan_stack_depth,
 		   const char *syn_filter_name, void *upcall_arg)
 {
 	int error;
@@ -864,7 +1052,6 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 	struct in_l2info l2i;
 	struct syn_filter_optarg synf;
 	int i;
-	uint32_t vlan;
 
 	error = socreate(PF_INET, &so, SOCK_STREAM, 0, td->td_ucred, td);
 	if (0 != error) {
@@ -906,9 +1093,9 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 
 		so->so_state |= SS_NBIO;
 
-		if (tag_count < 0) {
+		if (vlan_stack_depth < 0) {
 			l2i.inl2i_flags |= INL2I_TAG_ANY;
-			tag_count = 0;
+			vlan_stack_depth = 0;
 		}
 	
 		SOCKBUF_LOCK(&so->so_rcv);
@@ -916,18 +1103,15 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 		SOCKBUF_UNLOCK(&so->so_rcv);
 	}
 
-	l2i.inl2i_tagcnt = tag_count;
-	vlan = vlan_start;
-	for (i = 0; i < tag_count; i++) {
+	l2i.inl2i_tagcnt = vlan_stack_depth;
+	for (i = 0; i < vlan_stack_depth; i++) {
 		uint32_t ethertype;
 
 		/* this is standards compliant to two levels, questionable beyond that */
-		if (0 == i) ethertype = 0x8100;
+		if ((vlan_stack_depth - 1) == i) ethertype = 0x8100;
 		else ethertype = 0x88a8;
 
-		l2i.inl2i_tags[i] = htonl((ethertype << 16) | vlan);
-
-		incr_vlan(&vlan);
+		l2i.inl2i_tags[i] = htonl((ethertype << 16) | vlan_stack[i]);
 	}
 	l2i.inl2i_tagmask = htonl(0x00000fff);  /* XXX assuming 802.1Q */
 		
@@ -950,10 +1134,14 @@ run_test(unsigned int test_num, int verbose)
 {
 	struct socket *so = NULL;
 	struct thread *td = curthread;
-	int error;
+	int error = 0;
 	unsigned int socket_count;
 
 	unsigned int num_tests;
+
+	unsigned int num_vlans;
+	unsigned int vlan_num;
+	uint32_t vlan_tag_stack[IN_L2INFO_MAX_TAGS];
 
 	unsigned int num_local_addrs, num_local_ports;
 	unsigned int local_addr_num, local_port_num;
@@ -982,18 +1170,13 @@ run_test(unsigned int test_num, int verbose)
 	socket_count = 0;
 
 	if (TEST_TYPE_ACTIVE == test->type) {
-		client = malloc(sizeof(struct client_context), M_DEVBUF, M_WAITOK);
+		client = malloc(sizeof(struct client_context), M_DEVBUF, M_WAITOK | M_ZERO);
 		TAILQ_INIT(&client->queue);
 		mtx_init(&client->lock, "clnqlk", NULL, MTX_DEF);
 		client->notify = verbose;
-
-		if (kthread_add(verify_thread, client, NULL, NULL, 0, 0, "verify_cln")) {
-			mtx_destroy(&client->lock);
-			free(client, M_DEVBUF);
-			goto out;
-		}
+		client->interleave = 0;
 	} else {
-		server = malloc(sizeof(struct server_context), M_DEVBUF, M_WAITOK);
+		server = malloc(sizeof(struct server_context), M_DEVBUF, M_WAITOK | M_ZERO);
 		TAILQ_INIT(&server->queue);
 		mtx_init(&server->lock, "svrqlk", NULL, MTX_DEF);
 		server->notify = verbose;
@@ -1005,93 +1188,103 @@ run_test(unsigned int test_num, int verbose)
 		}
 	}
 
+	num_vlans = test->num_vlans < 1 ? 1 : test->num_vlans;
+
 	num_local_addrs = inet_addr(test->local_ip_start) == INADDR_ANY ? 1 : test->num_local_ips;
 	num_local_ports = test->local_port_start == IN_PROMISC_PORT_ANY ? 1 : test->num_local_ports;
 
-	local_addr = inet_addr(test->local_ip_start);
+	vlan_number_to_tag_stack(test->vlan_start, vlan_tag_stack, test->vlan_stack_depth);
 
-	for (local_addr_num = 0; local_addr_num < num_local_addrs; local_addr_num++) {
+	for (vlan_num = 0; vlan_num < num_vlans; vlan_num++) {
 
-		local_port = test->local_port_start;
-		for (local_port_num = 0; local_port_num < num_local_ports; local_port_num++) {
+		local_addr = inet_addr(test->local_ip_start);
 
-			if (TEST_TYPE_ACTIVE == test->type) {
-				num_foreign_addrs = test->num_foreign_ips;
-				num_foreign_ports = test->num_foreign_ports;
+		for (local_addr_num = 0; local_addr_num < num_local_addrs; local_addr_num++) {
 
-				foreign_addr = inet_addr(test->foreign_ip_start);
+			local_port = test->local_port_start;
+			for (local_port_num = 0; local_port_num < num_local_ports; local_port_num++) {
 
-				for (foreign_addr_num = 0; foreign_addr_num < num_foreign_addrs; foreign_addr_num++) {
-					// xxx need to create separate sockets..... refactor....
-					foreign_port = test->foreign_port_start;
-					for (foreign_port_num = 0; foreign_port_num < num_foreign_ports; foreign_port_num++) {
-						struct client_conn *cc;
+				if (TEST_TYPE_ACTIVE == test->type) {
+					num_foreign_addrs = test->num_foreign_ips;
+					num_foreign_ports = test->num_foreign_ports;
 
-						cc = malloc(sizeof(struct client_conn), M_DEVBUF, M_WAITOK);
-						if (NULL == cc) {
-							goto out;
-						}
+					foreign_addr = inet_addr(test->foreign_ip_start);
+
+					for (foreign_addr_num = 0; foreign_addr_num < num_foreign_addrs; foreign_addr_num++) {
+
+						foreign_port = test->foreign_port_start;
+						for (foreign_port_num = 0; foreign_port_num < num_foreign_ports; foreign_port_num++) {
+							struct client_conn *cc;
+
+							cc = malloc(sizeof(struct client_conn), M_DEVBUF, M_WAITOK | M_ZERO);
+							if (NULL == cc) {
+								error = ENOMEM;
+								goto out;
+							}
 						
-						cc->so = NULL;  /* will be filled in by first upcall */
-						memset(&cc->local_sin, 0, sizeof(struct sockaddr_in));
-						memset(&cc->remote_sin, 0, sizeof(struct sockaddr_in));
-						cc->conn_state = CS_INIT;
-						cc->client = client;
-						cc->active = 0;
+							cc->conn_state = CS_INIT;
+							cc->client = client;
+							cc->local_addr = local_addr;
+							cc->local_port = local_port;
+							cc->foreign_addr = foreign_addr;
+							cc->foreign_port = foreign_port;
+							cc->fib = test->fib;
+							cc->local_mac = test->local_mac;
+							cc->foreign_mac = test->foreign_mac;
+							if (test->vlan_stack_depth > 0) {
+								memcpy(cc->vlan_stack, vlan_tag_stack, test->vlan_stack_depth * sizeof(vlan_tag_stack[0]));
+							}
+							cc->vlan_stack_depth = test->vlan_stack_depth;
 
-						so = create_test_socket(TEST_TYPE_ACTIVE, test->fib,
-									test->local_mac, test->foreign_mac,
-									test->vlan_start, test->num_vlans,
-									NULL, cc);
-						if (NULL == so)
-							goto out;
+							socket_count++;
 
-						socket_count++;
+							TAILQ_INSERT_TAIL(&cc->client->queue, cc, client_queue);
 
-						if ((error = dobind(so, local_addr, local_port)))
-							goto out;
+							foreign_port++;
+						}
 
-						if ((error = doconnect(so, foreign_addr, foreign_port)))
-							goto out;
+						incr_in_addr_t(&foreign_addr);
+					}
+				} else {
+					so = create_test_socket(TEST_TYPE_PASSIVE, test->fib,
+								NULL, NULL,
+								vlan_tag_stack, test->vlan_stack_depth,
+								test->syn_filter_name, server);
+					if (NULL == so)
+						goto out;
 
-						if (0 == socket_count % 100)
-							pause("cnct", 10);
+					socket_count++;					
 
-						foreign_port++;
+					if ((error = dobind(so, local_addr, local_port)))
+						goto out;
 
-						so = NULL;
+					if ((error = solisten(so, SOMAXCONN, td))) {
+						printf("Promisc socket listen failed (%d)\n", error);
+						goto out;
 					}
 
-					incr_in_addr_t(&foreign_addr);
-				}
-			} else {
-				so = create_test_socket(TEST_TYPE_PASSIVE, test->fib,
-							NULL, NULL,
-							test->vlan_start, test->num_vlans,
-							test->syn_filter_name, server);
-				if (NULL == so)
-					goto out;
-
-				socket_count++;					
-
-				if ((error = dobind(so, local_addr, local_port)))
-					goto out;
-
-				if ((error = solisten(so, SOMAXCONN, td))) {
-					printf("Promisc socket listen failed (%d)\n", error);
-					goto out;
+					so = NULL;
 				}
 
-				so = NULL;
+				local_port++;
 			}
 
-			local_port++;
+			incr_in_addr_t(&local_addr);
 		}
 
-		incr_in_addr_t(&local_addr);
+		incr_vlan_tag_stack(vlan_tag_stack, test->vlan_stack_depth);
 	}
 
 	printf("created %u sockets\n", socket_count);
+
+	if (TEST_TYPE_ACTIVE == test->type) {
+		if (kthread_add(verify_thread, client, NULL, NULL, 0, 0, "verify_cln")) {
+			printf("Failed to create client thread\n");
+			mtx_destroy(&client->lock);
+			free(client, M_DEVBUF);
+			goto out;
+		}
+	}
 
 out:
 	if (so) 
