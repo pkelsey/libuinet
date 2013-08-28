@@ -53,6 +53,9 @@
 #include "uinet_config.h"
 
 
+/* 12 bits, 0 and 4095 are reserved */
+#define MAX_VLANS_PER_TAG 4094
+
 
 typedef enum { CS_INIT, CS_RETRY,CS_CONNECTING, CS_CONNECTED, CS_DISCONNECTING, CS_DONE } conn_state_t;
 
@@ -852,9 +855,9 @@ mac_aton(const char *macstr, uint8_t *macout)
 
 /*
  * Convert a vlan number (i.e., the nth valid vlan) into a tag stack.
- * Visualize this as converting the vlan number to base 4094, where each
- * digit in that base starts at 1, and storing the most signifcant digit at
- * the lowest index in the stack.
+ * Visualize this as converting the vlan number to base MAX_VLANS_PER_TAG,
+ * where each digit in that base starts at 1, and storing the most
+ * signifcant digit at the lowest index in the stack.
  */
 static void
 vlan_number_to_tag_stack(unsigned int vlan_number, uint32_t *tag_stack, int tag_stack_depth)
@@ -864,8 +867,8 @@ vlan_number_to_tag_stack(unsigned int vlan_number, uint32_t *tag_stack, int tag_
 	if (tag_stack_depth > 0) {
 		for (i = tag_stack_depth - 1; i >= 0; i--) {
 			/* vlan id 0 and 4095 are reserved */
-			tag_stack[i] = (vlan_number % 4094) + 1;
-			vlan_number /= 4094;
+			tag_stack[i] = (vlan_number % MAX_VLANS_PER_TAG) + 1;
+			vlan_number /= MAX_VLANS_PER_TAG;
 		}
 	}
 }
@@ -879,8 +882,8 @@ incr_vlan_tag_stack(uint32_t *tag_stack, int tag_stack_depth)
 	if (tag_stack_depth > 0) {
 		tag_stack[tag_stack_depth - 1]++;
 		for (i = tag_stack_depth - 1; i >= 0; i--) {
-			if (tag_stack[i] > 4094) {
-				tag_stack[i] -= 4094;
+			if (tag_stack[i] > MAX_VLANS_PER_TAG) {
+				tag_stack[i] -= MAX_VLANS_PER_TAG;
 				if (i > 0) {
 					tag_stack[i - 1]++;
 				}
@@ -1139,6 +1142,7 @@ run_test(unsigned int test_num, int verbose)
 
 	unsigned int num_tests;
 
+	uint64_t max_vlans;
 	unsigned int num_vlans;
 	unsigned int vlan_num;
 	uint32_t vlan_tag_stack[IN_L2INFO_MAX_TAGS];
@@ -1189,6 +1193,19 @@ run_test(unsigned int test_num, int verbose)
 	}
 
 	num_vlans = test->num_vlans < 1 ? 1 : test->num_vlans;
+
+	max_vlans = 1;
+	if (test->vlan_stack_depth > 0) {
+		int i;
+
+		for (i = 0; i < test->vlan_stack_depth; i++) {
+			max_vlans *= MAX_VLANS_PER_TAG;
+		}
+	}
+
+	if (num_vlans > max_vlans) {
+		num_vlans = max_vlans;
+	}
 
 	num_local_addrs = inet_addr(test->local_ip_start) == INADDR_ANY ? 1 : test->num_local_ips;
 	num_local_ports = test->local_port_start == IN_PROMISC_PORT_ANY ? 1 : test->num_local_ports;
