@@ -35,7 +35,6 @@
 #include <sys/kthread.h>
 #include <sys/mman.h>
 #include <sys/refcount.h>
-#include <sys/ucred.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/stdint.h>
@@ -47,6 +46,7 @@
 #include <sys/mutex.h>
 #include <sys/sx.h>
 #include <sys/linker.h>
+#include <sys/ucred.h>
 #undef _KERNEL
 
 #include <stdlib.h>
@@ -108,6 +108,10 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	struct mtx *lock;
 	pthread_cond_t *cond; 
 
+	if (NULL == p) {
+		p = &proc0;
+	}
+
 	td = malloc(sizeof(struct thread));
 	if (tdp)
 		*tdp = td;
@@ -119,6 +123,7 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	mtx_init(lock, "thread_lock", NULL, MTX_DEF);
 	td->td_lock = lock;
 	td->td_sleepqueue = (void *)cond;
+	td->td_ucred = crhold(p->p_ucred);
 
 	psa->psa_start_routine = start_routine;
 	psa->psa_arg = arg;
@@ -166,6 +171,8 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	mtx_init(lock, "thread_lock", NULL, MTX_DEF);
 	td->td_lock = lock;
 	td->td_sleepqueue = (void *)cond;
+	td->td_ucred = crhold(proc0.p_ucred);
+
 	psa->psa_start_routine = start_routine;
 	psa->psa_arg = arg;
 	psa->psa_td = td;
