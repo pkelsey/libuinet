@@ -349,10 +349,11 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 #ifdef PROMISCUOUS_INET
 	if (l2i_tag) {
 		struct in_l2info *l2i = &l2i_tag->ifl2i_info;
+		struct in_l2tagstack *l2ts = &l2i->inl2i_tagstack;
 		unsigned int num_tag_bytes;
 		uint8_t *d;
 		
-		num_tag_bytes = l2i->inl2i_tagcnt * sizeof(l2i->inl2i_tags[0]);
+		num_tag_bytes = l2ts->inl2t_cnt * sizeof(l2ts->inl2t_tags[0]);
 
 		M_PREPEND(m, ETHER_HDR_LEN + num_tag_bytes, M_DONTWAIT);
 		if (m == NULL)
@@ -368,7 +369,7 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 		d += ETHER_ADDR_LEN;
 
 		if (num_tag_bytes) {
-			(void)memcpy(d, l2i->inl2i_tags, num_tag_bytes);
+			(void)memcpy(d, l2ts->inl2t_tags, num_tag_bytes);
 			d += num_tag_bytes;
 		}
 
@@ -736,6 +737,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 #ifdef PROMISCUOUS_INET
 	struct ifl2info *l2info_tag;
 	struct in_l2info *l2info;
+	struct in_l2tagstack *l2ts;
 
 	l2info_tag = (struct ifl2info *)m_tag_alloc(MTAG_PROMISCINET,
 						    MTAG_PROMISCINET_L2INFO,
@@ -754,11 +756,12 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 	m_tag_prepend(m, &l2info_tag->ifl2i_mtag);
 
 	l2info = &l2info_tag->ifl2i_info;
+	l2ts = &l2info->inl2i_tagstack;
 
 	memcpy(l2info->inl2i_local_addr, eh->ether_dhost, ETHER_ADDR_LEN);
 	memcpy(l2info->inl2i_foreign_addr, eh->ether_shost, ETHER_ADDR_LEN);
-	l2info->inl2i_tagmask = htonl(0x00000fff);
-	l2info->inl2i_tagcnt = 0;
+	l2ts->inl2t_mask = htonl(0x00000fff);
+	l2ts->inl2t_cnt = 0;
 
 	/* 
 	 * If the interface is in IFF_PROMISCINET mode and the hardware
@@ -766,10 +769,10 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 	 * the M_VLANTAG flag.
 	 */
 	if ((ifp->if_flags & IFF_PROMISCINET) && (m->m_flags & M_VLANTAG)) {
-		uint32_t *tdata = &l2info->inl2i_tags[l2info->inl2i_tagcnt];
+		uint32_t *tdata = &l2ts->inl2t_tags[l2ts->inl2t_cnt];
 		printf("hw decap'd vlan etype=0x%04x\n", etype);
 		*tdata = htonl((ETHERTYPE_VLAN << 16) | m->m_pkthdr.ether_vtag);
-		l2info->inl2i_tagcnt++;
+		l2ts->inl2t_cnt++;
 		m->m_flags &= ~M_VLANTAG;
 	}
 
@@ -806,7 +809,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 
 		evl = mtod(m, struct ether_vlan_header *);
 		pm = (struct ether_vlan_encap *)&evl->evl_encap_proto;
-		td_avail = (IN_L2INFO_MAX_TAGS - l2info->inl2i_tagcnt) * ETHER_VLAN_ENCAP_LEN;
+		td_avail = (IN_L2INFO_MAX_TAGS - l2ts->inl2t_cnt) * ETHER_VLAN_ENCAP_LEN;
 		vlan_bytes = 0;
 		while ((vlan_bytes + ETHER_VLAN_ENCAP_LEN + ETHER_HDR_LEN <= m->m_len) &&
 		       ETHERTYPE_IS_VLAN(ntohs(pm->evl_encap_proto)) &&
@@ -827,9 +830,9 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 			return;
 		}
 
-		memcpy(&l2info->inl2i_tags[l2info->inl2i_tagcnt],
+		memcpy(&l2ts->inl2t_tags[l2ts->inl2t_cnt],
 		       &evl->evl_encap_proto, vlan_bytes);
-		l2info->inl2i_tagcnt += vlan_bytes / ETHER_VLAN_ENCAP_LEN;
+		l2ts->inl2t_cnt += vlan_bytes / ETHER_VLAN_ENCAP_LEN;
 
 		memmove(mtod(m, uint8_t *) + vlan_bytes, mtod(m, uint8_t *),
 			ETHER_ADDR_LEN * 2);

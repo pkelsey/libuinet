@@ -42,7 +42,11 @@ void	 syncache_init(void);
 #ifdef VIMAGE
 void	syncache_destroy(void);
 #endif
+#ifdef PROMISCUOUS_INET
+void	 syncache_unreach(struct in_conninfo *, struct tcphdr *, struct mbuf *);
+#else
 void	 syncache_unreach(struct in_conninfo *, struct tcphdr *);
+#endif /* PROMISCUOUS_INET */
 int	 syncache_expand(struct in_conninfo *, struct tcpopt *,
 	     struct tcphdr *, struct socket **, struct mbuf *);
 int	 tcp_offload_syncache_expand(struct in_conninfo *inc, struct toeopt *toeo,
@@ -53,8 +57,13 @@ void	 tcp_offload_syncache_add(struct in_conninfo *, struct toeopt *,
              struct tcphdr *, struct inpcb *, struct socket **,
              struct toe_usrreqs *tu, void *toepcb);
 
+#ifdef PROMISCUOUS_INET
+void	 syncache_chkrst(struct in_conninfo *, struct tcphdr *, struct mbuf *);
+void	 syncache_badack(struct in_conninfo *, struct mbuf *);
+#else
 void	 syncache_chkrst(struct in_conninfo *, struct tcphdr *);
 void	 syncache_badack(struct in_conninfo *);
+#endif /* PROMISCUOUS_INET */
 int	 syncache_pcbcount(void);
 int	 syncache_pcblist(struct sysctl_req *req, int max_pcbs, int *pcbs_exported);
 
@@ -85,6 +94,7 @@ struct syncache {
 	struct ucred	*sc_cred;		/* cred cache for jail checks */
 #ifdef PROMISCUOUS_INET
 	struct m_tag	*sc_l2tag;		/* L2 info from SYN packet */
+	uint16_t	sc_fib;			/* FIB number for this entry */
 #endif
 	u_int32_t	sc_spare[2];		/* UTO */
 };

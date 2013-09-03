@@ -180,7 +180,13 @@ struct inpcb {
 	u_char	inp_ip_minttl;		/* (i) minimum TTL or drop */
 	uint32_t inp_flowid;		/* (x) flow id / queue id */
 	u_int	inp_refcount;		/* (i) refcount */
+#ifdef PROMISCUOUS_INET
+	void	*inp_pspare[3];		/* (x) route caching / general use */
+	void	*inp_synf;		/* (i) SYN filter instance cookie */
+	struct	in_l2info *inp_l2info;	/* (i/p) L2 details */
+#else
 	void	*inp_pspare[5];		/* (x) route caching / general use */
+#endif
 	u_int	inp_ispare[6];		/* (x) route caching / user cookie /
 					 *     general use */
 
@@ -239,10 +245,6 @@ struct inpcb {
 
 #define	inp_vnet	inp_pcbinfo->ipi_vnet
 
-#ifdef PROMISCUOUS_INET
-#define inp_l2info	inp_pspare[4]	/* (i/p) L2 details */
-#define inp_synf	inp_pspare[3]	/* (i) SYN filter instance cookie */
-#endif
 
 /*
  * The range of the generation count, as used in this implementation, is 9e19.
@@ -549,7 +551,7 @@ void 	inp_4tuple_get(struct inpcb *inp, uint32_t *laddr, uint16_t *lp,
 #define	INP_RT_VALID		0x00000002 /* cached rtentry is valid */
 #define	INP_PCBGROUPWILD	0x00000004 /* in pcbgroup wildcard list */
 #define	INP_REUSEPORT		0x00000008 /* SO_REUSEPORT option is set */
-#define	INP_PROMISC		0x00000010 /* promiscuous listen enabled */
+#define	INP_PROMISC		0x00000010 /* promiscuous inet mode enabled */
 #define	INP_SYNFILTER		0x00000020 /* a SYN filter has been attached */
 
 /*

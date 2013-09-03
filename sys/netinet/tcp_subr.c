@@ -36,6 +36,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_subr.c 238247 2012-07-08 14:21
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
+#include "opt_promiscinet.h"
 #include "opt_tcpdebug.h"
 
 #include <sys/param.h>
@@ -1432,7 +1433,12 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 			inc.inc_lport = th->th_sport;
 			inc.inc_faddr = faddr;
 			inc.inc_laddr = ip->ip_src;
+#ifdef PROMISCUOUS_INET
+			/* XXX need to pass mbuf here */
+			syncache_unreach(&inc, th, NULL);
+#else
 			syncache_unreach(&inc, th);
+#endif /* PROMISCUOUS_INET */
 		}
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 	} else
@@ -1508,7 +1514,12 @@ tcp6_ctlinput(int cmd, struct sockaddr *sa, void *d)
 		inc.inc6_laddr = ip6cp->ip6c_src->sin6_addr;
 		inc.inc_flags |= INC_ISIPV6;
 		INP_INFO_WLOCK(&V_tcbinfo);
+#ifdef PROMISCUOUS_INET
+		/* XXX need to pass mbuf here */
+		syncache_unreach(&inc, &th, NULL);
+#else
 		syncache_unreach(&inc, &th);
+#endif /* PROMISCUOUS_INET */
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 	} else
 		in6_pcbnotify(&V_tcbinfo, sa, 0, (const struct sockaddr *)sa6_src,

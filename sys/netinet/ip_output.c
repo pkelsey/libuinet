@@ -1061,7 +1061,7 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				INP_INFO_RLOCK(inp->inp_pcbinfo);
 				INP_WLOCK(inp);
 
-				in_promisc_l2info_copy((struct in_l2info *)inp->inp_l2info, so->so_l2info);
+				in_promisc_l2info_copy(inp->inp_l2info, so->so_l2info);
 
 				INP_WUNLOCK(inp);
 				INP_INFO_RUNLOCK(inp->inp_pcbinfo);

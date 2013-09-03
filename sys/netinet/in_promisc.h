@@ -53,6 +53,16 @@
 #define IN_L2INFO_MAX_TAGS	16
 #define IN_L2INFO_ADDR_MAX	ETHER_ADDR_LEN
 
+struct in_l2tagstack {
+	uint16_t inl2t_cnt;		/* number of tags stored in
+					 * inl2t_tags */
+	uint32_t inl2t_mask;		/* per-element mask, in network byte
+					 * order, to be applied during
+					 * hashing and comparing */
+	uint32_t inl2t_tags[IN_L2INFO_MAX_TAGS]; /* in network byte order */
+};
+
+
 /* flags for inl2i_flags */
 #define INL2I_TAG_ANY		0x01
 
@@ -60,12 +70,7 @@ struct in_l2info {
 	uint8_t inl2i_local_addr[IN_L2INFO_ADDR_MAX];
 	uint8_t inl2i_foreign_addr[IN_L2INFO_ADDR_MAX];
 	uint16_t inl2i_flags;
-	uint16_t inl2i_tagcnt;		/* number of tags stored in
-					 * inl2i_tagdata */
-	uint32_t inl2i_tagmask;		/* per-element mask, in network byte
-					 * order, to be applied during
-					 * hashing and comparing */
-	uint32_t inl2i_tags[IN_L2INFO_MAX_TAGS]; /* in network byte order */
+	struct in_l2tagstack inl2i_tagstack;
 };
 
 
@@ -148,7 +153,8 @@ struct syn_filter {
 struct in_l2info *in_promisc_l2info_alloc(int flags);
 void in_promisc_l2info_free(struct in_l2info *l2info);
 void in_promisc_l2info_copy(struct in_l2info *dst, struct in_l2info *src);
-int in_promisc_tagcmp(struct in_l2info *l2info1, struct in_l2info *l2info2);
+void in_promisc_l2tagstack_copy(struct in_l2tagstack *dst, struct in_l2tagstack *src);
+int in_promisc_tagcmp(struct in_l2tagstack *l2ts1, struct in_l2tagstack *l2ts2);
 int in_promisc_socket_init(struct socket *so, int flags);
 void in_promisc_socket_destroy(struct socket *so);
 void in_promisc_socket_newconn(struct socket *head, struct socket *so);

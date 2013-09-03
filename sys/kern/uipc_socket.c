@@ -2563,7 +2563,8 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 			if ((so->so_proto->pr_domain->dom_family == PF_INET) ||
 			    (so->so_proto->pr_domain->dom_family == PF_INET6)) {
 				
-				if (l2info.inl2i_tagcnt > IN_L2INFO_MAX_TAGS) {
+				if (l2info.inl2i_tagstack.inl2t_cnt >
+				    IN_L2INFO_MAX_TAGS) {
 					error = EINVAL;
 					goto bad;
 				}

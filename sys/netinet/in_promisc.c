@@ -118,29 +118,32 @@ in_promisc_l2info_copy(struct in_l2info *dst, struct in_l2info *src)
 
 	dst->inl2i_flags = src->inl2i_flags;
 
-	dst->inl2i_tagcnt = src->inl2i_tagcnt;
-	dst->inl2i_tagmask = src->inl2i_tagmask;
-	memcpy(dst->inl2i_tags,
-	       src->inl2i_tags,
-	       src->inl2i_tagcnt * sizeof(src->inl2i_tags[0]));
+	in_promisc_l2tagstack_copy(&dst->inl2i_tagstack, &src->inl2i_tagstack);
+}
+
+
+void
+in_promisc_l2tagstack_copy(struct in_l2tagstack *dst, struct in_l2tagstack *src)
+{
+	memcpy(dst, src, sizeof(*dst));
 }
 
 
 int
-in_promisc_tagcmp(struct in_l2info *l2info1, struct in_l2info *l2info2)
+in_promisc_tagcmp(struct in_l2tagstack *l2ts1, struct in_l2tagstack *l2ts2)
 {
 	uint32_t tagcnt1, tagcnt2;
 	uint32_t i;
 
-	tagcnt1 = l2info1 ? l2info1->inl2i_tagcnt : 0;
-	tagcnt2 = l2info2 ? l2info2->inl2i_tagcnt : 0;
+	tagcnt1 = l2ts1 ? l2ts1->inl2t_cnt : 0;
+	tagcnt2 = l2ts2 ? l2ts2->inl2t_cnt : 0;
 
 	if (tagcnt1 != tagcnt2)
 		return (1);
 
 	for (i = 0; i < tagcnt1; i++) {
-		if ((l2info1->inl2i_tags[i] & l2info1->inl2i_tagmask) !=
-		    (l2info2->inl2i_tags[i] & l2info2->inl2i_tagmask))
+		if ((l2ts1->inl2t_tags[i] & l2ts1->inl2t_mask) !=
+		    (l2ts2->inl2t_tags[i] & l2ts2->inl2t_mask))
 			return (1);
 	}
 
@@ -174,10 +177,8 @@ in_promisc_socket_newconn(struct socket *head, struct socket *so)
 {
 	so->so_l2info->inl2i_flags = head->so_l2info->inl2i_flags & ~INL2I_TAG_ANY;
 
-	so->so_l2info->inl2i_tagmask = head->so_l2info->inl2i_tagmask;
-	so->so_l2info->inl2i_tagcnt = head->so_l2info->inl2i_tagcnt;
-	memcpy(so->so_l2info->inl2i_tags, head->so_l2info->inl2i_tags,
-	       head->so_l2info->inl2i_tagcnt * sizeof(head->so_l2info->inl2i_tags[0]));
+	in_promisc_l2tagstack_copy(&so->so_l2info->inl2i_tagstack,
+				   &head->so_l2info->inl2i_tagstack);
 }
 
 

@@ -134,6 +134,8 @@ struct if_netmap_softc {
 	struct if_netmap_bufinfo_pool rx_bufinfo;
 
 	struct thread *rx_thread;
+	struct mtx tx_lock;
+	unsigned int tx_flag;
 };
 
 
@@ -414,59 +416,80 @@ if_netmap_start(struct ifnet *ifp)
 	u_int pktlen;
 	int rv;
 
-	txr = sc->hw_tx_ring;
-	
-	rv = ioctl(sc->fd, NIOCTXSYNC);
-	if (rv == -1) {
-		perror("could not sync tx descriptors before transmit");
-		return;
+	/* XXX would a separate tx thread would be better here? i think in
+	 * this current approach, a transmitting thread could wind up
+	 * managing the send queue for a long time if other threads keep
+	 * submitting work while it is in the queue drain loop.  that
+	 * doesn't seem right.
+	 */
+	mtx_lock(&sc->tx_lock);
+	while (1 == sc->tx_flag) {
+		mtx_sleep(&sc->tx_flag, &sc->tx_lock, 0, "wtxlk", 0);
 	}
+	sc->tx_flag = 1;
+	mtx_unlock(&sc->tx_lock);
+
+
+	if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
+
+		txr = sc->hw_tx_ring;
 	
-	while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
-
-		avail = txr->avail;
-		cur = txr->cur;
-
-		while (0 == avail) {
-			memset(&pfd, 0, sizeof(pfd));
-
-			pfd.fd = sc->fd;
-			pfd.events = POLLOUT;
-
-			rv = poll(&pfd, 1, -1);
-			if (rv == -1 && errno != EINTR)
-				perror("error from poll for transmit");
-
-			avail = txr->avail;
-		}
-
-		while (avail) {
-			IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
-			avail--;
-
-			pktlen = m_length(m, NULL);
-			KASSERT(pktlen <= txr->nr_buf_size, ("if_netmap_start: packet too large"));
-
-			txr->slot[cur].len = pktlen;
-			m_copydata(m, 0, pktlen, NETMAP_BUF(txr, txr->slot[cur].buf_idx));
-			m_freem(m);
-
-			cur = NETMAP_RING_NEXT(txr, cur);
-
-			if (IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
-				break;
-			}
-		}
-
-		txr->avail = avail;
-		txr->cur = cur;
 		rv = ioctl(sc->fd, NIOCTXSYNC);
 		if (rv == -1) {
-			perror("could not sync tx descriptors after transmit");
-			return;
+			perror("could not sync tx descriptors before transmit");
+			return; // XXX queue may get stuck at this point
+		}
+	
+		while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
+			avail = txr->avail;
+
+			while (0 == avail) {
+				memset(&pfd, 0, sizeof(pfd));
+
+				pfd.fd = sc->fd;
+				pfd.events = POLLOUT;
+				
+				rv = poll(&pfd, 1, -1);
+				if (rv == -1 && errno != EINTR)
+					perror("error from poll for transmit");
+					
+				avail = txr->avail;
+			}
+
+			cur = txr->cur;
+
+			while (avail) {
+				IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
+				avail--;
+
+				pktlen = m_length(m, NULL);
+				KASSERT(pktlen <= txr->nr_buf_size, ("if_netmap_start: packet too large"));
+
+				txr->slot[cur].len = pktlen;
+				m_copydata(m, 0, pktlen, NETMAP_BUF(txr, txr->slot[cur].buf_idx));
+				m_freem(m);
+
+				cur = NETMAP_RING_NEXT(txr, cur);
+
+				if (IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
+					break;
+				}
+			}
+
+			txr->avail = avail;
+			txr->cur = cur;
+			rv = ioctl(sc->fd, NIOCTXSYNC);
+			if (rv == -1) {
+				perror("could not sync tx descriptors after transmit");
+				return;
+			}
 		}
 	}
 
+	mtx_lock(&sc->tx_lock);
+	sc->tx_flag = 0;
+	wakeup_one(&sc->tx_flag);
+	mtx_unlock(&sc->tx_lock);
 	
 }
 
@@ -708,8 +731,8 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	ifp->if_start = if_netmap_start;
 
 	/* XXX what values? */
-	IFQ_SET_MAXLEN(&ifp->if_snd, 50);
-	ifp->if_snd.ifq_drv_maxlen = 50;
+	IFQ_SET_MAXLEN(&ifp->if_snd, sc->req.nr_tx_slots);
+	ifp->if_snd.ifq_drv_maxlen = sc->req.nr_tx_slots;
 
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -724,6 +747,9 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 		if_free(ifp);
 		return (1);
 	}
+
+	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
+	sc->tx_flag = 0;
 
 	if (sc->cfg->cpu >= 0) {
 		sched_bind(sc->rx_thread, sc->cfg->cpu);
@@ -754,10 +780,12 @@ if_netmap_set_offload(struct if_netmap_softc *sc, bool on)
 		return (-1);
 	}
 
+	ifr.ifr_reqcap = ifr.ifr_curcap;
+
 	if (on)
 		ifr.ifr_reqcap |= IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO;
 	else
-		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
+		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
 
 	rv = ioctl(sc->fd, SIOCSIFCAP, &ifr);
 	if (rv == -1) {

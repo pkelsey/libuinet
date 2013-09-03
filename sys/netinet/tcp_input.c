@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_input.c 238247 2012-07-08 14:2
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
+#include "opt_promiscinet.h"
 #include "opt_tcpdebug.h"
 
 #include <sys/param.h>
@@ -75,6 +76,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_input.c 238247 2012-07-08 14:2
 #include <vm/uma.h>
 
 #include <net/if.h>
+#ifdef PROMISCUOUS_INET
+#include <net/if_promiscinet.h>
+#endif /* PROMISCUOUS_INET */
 #include <net/route.h>
 #include <net/vnet.h>
 
@@ -1172,7 +1176,11 @@ relocked:
 		 * causes.
 		 */
 		if (thflags & TH_RST) {
+#ifdef PROMISCUOUS_INET
+			syncache_chkrst(&inc, th, m);
+#else
 			syncache_chkrst(&inc, th);
+#endif /* PROMISCUOUS_INET */
 			goto dropunlock;
 		}
 		/*
@@ -1194,7 +1202,11 @@ relocked:
 				log(LOG_DEBUG, "%s; %s: Listen socket: "
 				    "SYN|ACK invalid, segment rejected\n",
 				    s, __func__);
+#ifdef PROMISCUOUS_INET
+			syncache_badack(&inc, m);	/* XXX: Not needed! */
+#else
 			syncache_badack(&inc);	/* XXX: Not needed! */
+#endif /* PROMISCUOUS_INET */
 			TCPSTAT_INC(tcps_badsyn);
 			rstreason = BANDLIM_RST_OPENPORT;
 			goto dropwithreset;

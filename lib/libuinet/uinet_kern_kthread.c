@@ -130,6 +130,9 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	psa->psa_td = td;
 	
 	pthread_attr_init(&attr); 
+	if (pages) {
+		pthread_attr_setstacksize(&attr, pages * PAGE_SIZE);
+	}
 	error = _pthread_create(&thread, &attr, pthread_start_routine, psa);
 	/*
 	 * Ensure tc_wchan is valid before kthread_add returns, in case the
@@ -178,6 +181,9 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	psa->psa_td = td;
 	
 	pthread_attr_init(&attr); 
+	if (pages) {
+		pthread_attr_setstacksize(&attr, pages * PAGE_SIZE);
+	}
 	error = _pthread_create(&thread, &attr, pthread_start_routine, psa);
 	/*
 	 * Ensure tc_wchan is valid before kthread_add returns, in case the

@@ -47,10 +47,10 @@
 #include <netinet/in.h>
 #include <netinet/in_promisc.h>
 
-#include <arpa/inet.h>
-
 #include "uinet_api.h"
 #include "uinet_config.h"
+
+extern in_addr_t inet_addr(const char *cp);
 
 
 /* 12 bits, 0 and 4095 are reserved */
@@ -124,6 +124,7 @@ struct server_context {
 #define TEST_TYPE_PASSIVE	1
 
 struct test_config {
+	unsigned int num;
 	char *name;
 	unsigned int type;
 	unsigned int fib;
@@ -148,13 +149,13 @@ struct test_config {
 	TEST_PASSIVE_N(name, fib, ip, 1, port, 1, vlanstart, nvlans, vlanstackdepth, synfilter)
 
 #define TEST_PASSIVE_N(name, fib, ip, nips, port, nports, vlanstart, nvlans, vlanstackdepth, synfilter) \
-	{ (name), TEST_TYPE_PASSIVE, (fib), (ip), (nips), (port), (nports), 0, 0, 0, 0, NULL, NULL, (vlanstart), (nvlans), (vlanstackdepth), (synfilter) }
+	{ 0, (name), TEST_TYPE_PASSIVE, (fib), (ip), (nips), (port), (nports), 0, 0, 0, 0, NULL, NULL, (vlanstart), (nvlans), (vlanstackdepth), (synfilter) }
 
 #define TEST_ACTIVE(name, fib, localip, localport, foreignip, foreignport, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth) \
 	TEST_ACTIVE_N(name, fib, localip, 1, localport, 1, foreignip, 1, foreignport, 1, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth)
 
 #define TEST_ACTIVE_N(name, fib, localip, nlocalips, localport, nlocalports, foreignip, nforeignips, foreignport, nforeignports, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth) \
-	{ (name), TEST_TYPE_ACTIVE, (fib), (localip), (nlocalips), (localport), (nlocalports), (foreignip), (nforeignips), (foreignport), (nforeignports),(localmac), (foreignmac), (vlanstart), (nvlans), (vlanstackdepth) }
+	{ 0, (name), TEST_TYPE_ACTIVE, (fib), (localip), (nlocalips), (localport), (nlocalports), (foreignip), (nforeignips), (foreignport), (nforeignports),(localmac), (foreignmac), (vlanstart), (nvlans), (vlanstackdepth) }
 
 #define VLANS(...) { __VA_ARGS__ }
 
@@ -185,14 +186,17 @@ struct test_config tests[] = {
 	TEST_PASSIVE("any ip, any port, filtered", 1, "0.0.0.0", IN_PROMISC_PORT_ANY, 0, 1, 0, "uinet_test"), 
 	TEST_PASSIVE("any port", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 0, 1, 0, NULL), 
 	TEST_PASSIVE("any port, many vlans", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 22, 1000000, 2, NULL), 
-	TEST_PASSIVE_N("many any port", 1, "10.0.0.1", 10000, IN_PROMISC_PORT_ANY, 1, 0, 1, 0, NULL), 
+	TEST_PASSIVE("any port, many vlans", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 22, 2, 2, NULL), 
+	TEST_PASSIVE_N("many any port", 1, "10.0.0.1", 20000, IN_PROMISC_PORT_ANY, 1, 0, 1, 0, NULL), 
 	TEST_PASSIVE_N("many any port, many vlans", 1, "10.0.0.1", 100, IN_PROMISC_PORT_ANY, 1, 22, 100, 1, NULL), 
 	TEST_PASSIVE_N("many specific port", 1, "10.0.0.1", 66, 1, 1000, 0, 1, 0, NULL), 
 
 	TEST_ACTIVE("one", 1, "10.20.0.1", 1234, "10.0.0.1", 2222, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0) ,
 	TEST_ACTIVE_N("one local, many foreign", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1000, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
-	TEST_ACTIVE_N("one local, many foreign", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 10000, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
+	TEST_ACTIVE_N("one local, many foreign", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 20000, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
 	TEST_ACTIVE_N("one local, many foreign, many vlans", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 100, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 100, 1),
+	TEST_ACTIVE_N("one local, one foreign, many vlans", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1, 1, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 1000000, 2),
+	TEST_ACTIVE_N("one local, one foreign, many vlans", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1, 1, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 2, 2),
 
 	TEST_ACTIVE_N("many local, many foreign", 1, "10.20.0.1", 2, 1234, 1, "10.0.0.1", 1, 1, 40000, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0) 
 };
@@ -259,8 +263,8 @@ loopback_thread(void *arg)
 		if ((0 == len) && (SBS_CANTRCVMORE & so->so_rcv.sb_state)) {
 			if (server->notify) {
 				printf("loopback_thread: connection to %s:%u from %s:%u closed\n",
-				       inet_ntoa_r(sc->local_sin.sin_addr, buf1, sizeof(buf1)), ntohs(sc->local_sin.sin_port),
-				       inet_ntoa_r(sc->remote_sin.sin_addr, buf2, sizeof(buf2)), ntohs(sc->remote_sin.sin_port));
+				       inet_ntoa_r(sc->local_sin.sin_addr, buf1), ntohs(sc->local_sin.sin_port),
+				       inet_ntoa_r(sc->remote_sin.sin_addr, buf2), ntohs(sc->remote_sin.sin_port));
 			}
 			sc->conn_state = CS_DONE;
 		}
@@ -327,8 +331,8 @@ server_conn_established(struct socket *so, void *arg, int waitflag)
 	if (sc->server->notify) {
 		char buf1[32], buf2[32];
 		printf("loopback_thread: connection to %s:%u from %s:%u established\n",
-		       inet_ntoa_r(sc->local_sin.sin_addr, buf1, sizeof(buf1)), ntohs(sc->local_sin.sin_port),
-		       inet_ntoa_r(sc->remote_sin.sin_addr, buf2, sizeof(buf2)), ntohs(sc->remote_sin.sin_port));
+		       inet_ntoa_r(sc->local_sin.sin_addr, buf1), ntohs(sc->local_sin.sin_port),
+		       inet_ntoa_r(sc->remote_sin.sin_addr, buf2), ntohs(sc->remote_sin.sin_port));
 	}
 
 	SOCKBUF_LOCK(&so->so_rcv);
@@ -449,10 +453,16 @@ verify_thread(void *arg)
 		    (!client->interleave && (cycle_number > 1) && (cycle_number & 0x1));
 
 		TAILQ_FOREACH(cc, &client->queue, client_queue) {
+			struct in_addr laddr, faddr;
+
 			remaining = sizeof(connstr);
+
+			laddr.s_addr = cc->local_addr;
+			faddr.s_addr = cc->foreign_addr;
 			size = snprintf(connstr, sizeof(connstr), "%s:%u -> %s:%u vlans=[ ", 
-					inet_ntoa_r(cc->local_sin.sin_addr, buf1, sizeof(buf1)), ntohs(cc->local_sin.sin_port),
-					inet_ntoa_r(cc->remote_sin.sin_addr, buf2, sizeof(buf2)), ntohs(cc->remote_sin.sin_port));
+					inet_ntoa_r(laddr, buf1), cc->local_port,
+					inet_ntoa_r(faddr, buf2), cc->foreign_port);
+
 			for (i = 0; i < cc->vlan_stack_depth; i++) {
 				remaining = size > remaining ? 0 : remaining - size;
 				if (remaining) {
@@ -482,6 +492,9 @@ verify_thread(void *arg)
 					mtx_unlock(&client->lock);
 				
 					if (cc->so) {
+						SOCKBUF_LOCK(&cc->so->so_rcv);
+						soupcall_set(cc->so, SO_RCV, NULL, NULL);
+						SOCKBUF_UNLOCK(&cc->so->so_rcv);
 						soclose(cc->so);
 					}
 
@@ -513,6 +526,8 @@ verify_thread(void *arg)
 						cc->conn_state = CS_RETRY;
 						mtx_unlock(&client->lock);
 					}
+				} else {
+					mtx_unlock(&client->lock);
 				}
 				break;
 			case CS_CONNECTING:
@@ -561,6 +576,8 @@ verify_thread(void *arg)
 							pass++;
 						}
 					}
+				} else {
+					mtx_unlock(&client->lock);
 				}
 				break;
 			case CS_DISCONNECTING:
@@ -768,34 +785,19 @@ static void
 print_l2info(const char *name, struct in_l2info *l2i)
 {
 	uint32_t i;
-	
+	struct in_l2tagstack *ts = &l2->inl2i;
+
 	printf("%s.local_addr = ", name); print_macaddr(l2i->inl2i_local_addr); printf("\n");
 	printf("%s.foreign_addr = ", name); print_macaddr(l2i->inl2i_foreign_addr); printf("\n");
-	printf("%s.tags = %u\n", name, l2i->inl2i_tagcnt);
-	for (i = 0; i < l2i->inl2i_tagcnt; i++) {
-		printf("  tag %2u = 0x%08x\n", i, l2i->inl2i_tags[i]);
+	printf("%s.tags = %u\n", name, ts->inl2t_cnt);
+	for (i = 0; i < ts->inl2t_cnt; i++) {
+		printf("  tag %2u = 0x%08x\n", i, ts->inl2t_tags[i]);
 	}
 }
 #endif
 
 static int uinet_test_synf_callback(struct inpcb *inp, void *inst_arg, struct syn_filter_cbarg *arg)
 {
-#if 0
-	int i;
-
-
-	printf("SYN received\n");
-	printf("src addr = %s.%u\n", inet_ntoa(arg->inc.inc_faddr), ntohs(arg->inc.inc_fport));
-	printf("dst addr = %s.%u\n", inet_ntoa(arg->inc.inc_laddr), ntohs(arg->inc.inc_lport));
-	printf("src mac = "); print_macaddr(arg->l2i->inl2i_foreign_addr); printf("\n");
-	printf("dest mac = "); print_macaddr(arg->l2i->inl2i_local_addr); printf("\n");
-	printf("tags(%u) =", arg->l2i->inl2i_tagcnt);
-	for (i = 0; i < arg->l2i->inl2i_tagcnt; i++) {
-		printf(" 0x%08x", arg->l2i->inl2i_tags[i]);
-	}
-	printf("\n");
-
-#endif
 	if (0 == strncmp("10.", inet_ntoa(arg->inc.inc_laddr), 3)) {
 //		printf("ACCEPT\n");
 //		printf("--------------------------------\n");
@@ -942,7 +944,7 @@ ip_range_str(char *buf, unsigned int bufsize, const char *ip_start, unsigned int
 	ip = inet_addr(ip_start);
 	incr_in_addr_t_n(&ip, nips - 1);
 	inaddr.s_addr = ip;
-	inet_ntoa_r(inaddr, ip_end, sizeof(ip_end));
+	inet_ntoa_r(inaddr, ip_end);
 
 	snprintf(port_end, sizeof(port_end), "-%u", port_start + nports - 1);
 	snprintf(port_range, sizeof(port_range), "%u%s",
@@ -958,7 +960,7 @@ ip_range_str(char *buf, unsigned int bufsize, const char *ip_start, unsigned int
 
 
 static void
-print_test_config(struct test_config *test, int index)
+print_test_config(struct test_config *test)
 {
 	unsigned int num_tags;
 	unsigned int tagnum;
@@ -968,7 +970,7 @@ print_test_config(struct test_config *test, int index)
 	char foreign_ip_range[64];
 	uint32_t vlan_tag_stack[IN_L2INFO_MAX_TAGS];
 
-	if (index >= 0) printf("%2u ", index);
+	printf("%2u ", test->num);
 
 	local_length = ip_range_str(local_ip_range, sizeof(local_ip_range),
 				    test->local_ip_start,
@@ -1053,6 +1055,7 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 	struct socket *so;
 	struct thread *td = curthread;
 	struct in_l2info l2i;
+	struct in_l2tagstack *ts = &l2i.inl2i_tagstack;
 	struct syn_filter_optarg synf;
 	int i;
 
@@ -1066,6 +1069,9 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 		goto err;
 	
 	if ((error = setopt_int(so, SOL_SOCKET, SO_SETFIB, fib, "SO_SETFIB")))
+		goto err;
+
+	if ((error = setopt_int(so, SOL_SOCKET, SO_REUSEPORT, fib, "SO_REUSEPORT")))
 		goto err;
 	
 	if ((error = setopt_int(so, IPPROTO_IP, IP_BINDANY, 1, "IP_BINDANY")))
@@ -1106,7 +1112,7 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 		SOCKBUF_UNLOCK(&so->so_rcv);
 	}
 
-	l2i.inl2i_tagcnt = vlan_stack_depth;
+	ts->inl2t_cnt = vlan_stack_depth;
 	for (i = 0; i < vlan_stack_depth; i++) {
 		uint32_t ethertype;
 
@@ -1114,10 +1120,10 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 		if ((vlan_stack_depth - 1) == i) ethertype = 0x8100;
 		else ethertype = 0x88a8;
 
-		l2i.inl2i_tags[i] = htonl((ethertype << 16) | vlan_stack[i]);
+		ts->inl2t_tags[i] = htonl((ethertype << 16) | vlan_stack[i]);
 	}
-	l2i.inl2i_tagmask = htonl(0x00000fff);  /* XXX assuming 802.1Q */
-		
+	ts->inl2t_mask = htonl(0x00000fff);  /* XXX assuming 802.1Q */
+
 	if ((error = so_setsockopt(so, SOL_SOCKET, SO_L2INFO, &l2i, sizeof(l2i)))) {
 		printf("Promisc socket SO_L2INFO set failed (%d)\n", error);
 		goto err;
@@ -1133,15 +1139,12 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 
 
 static int
-run_test(unsigned int test_num, int verbose)
+run_test(struct test_config *test, int verbose)
 {
 	struct socket *so = NULL;
 	struct thread *td = curthread;
 	int error = 0;
 	unsigned int socket_count;
-
-	unsigned int num_tests;
-
 	uint64_t max_vlans;
 	unsigned int num_vlans;
 	unsigned int vlan_num;
@@ -1156,20 +1159,11 @@ run_test(unsigned int test_num, int verbose)
 	unsigned int foreign_addr_num, foreign_port_num;
 	in_addr_t foreign_addr;
 	in_port_t foreign_port;
-	struct test_config *test;
 	struct client_context *client;
 	struct server_context *server;
 
 
-	num_tests = sizeof(tests)/sizeof(tests[0]);
-
-	if (test_num >= num_tests) {
-		return (1);
-	}
-
-	test = &tests[test_num];
-
-	print_test_config(test, test_num);
+	print_test_config(test);
 
 	socket_count = 0;
 
@@ -1185,7 +1179,7 @@ run_test(unsigned int test_num, int verbose)
 		mtx_init(&server->lock, "svrqlk", NULL, MTX_DEF);
 		server->notify = verbose;
 
-		if (kthread_add(loopback_thread, server, NULL, NULL, 0, 0, "loopback_svr")) {
+		if (kthread_add(loopback_thread, server, NULL, NULL, 0, 128*1024/PAGE_SIZE, "loopback_svr")) {
 			mtx_destroy(&server->lock);
 			free(server, M_DEVBUF);
 			goto out;
@@ -1204,6 +1198,7 @@ run_test(unsigned int test_num, int verbose)
 	}
 
 	if (num_vlans > max_vlans) {
+		printf("Limiting number of VLANs to unqiue tag stack limit of %llu\n", (unsigned long long)max_vlans);
 		num_vlans = max_vlans;
 	}
 
@@ -1295,7 +1290,7 @@ run_test(unsigned int test_num, int verbose)
 	printf("created %u sockets\n", socket_count);
 
 	if (TEST_TYPE_ACTIVE == test->type) {
-		if (kthread_add(verify_thread, client, NULL, NULL, 0, 0, "verify_cln")) {
+		if (kthread_add(verify_thread, client, NULL, NULL, 0, 128*1024/PAGE_SIZE, "verify_cln")) {
 			printf("Failed to create client thread\n");
 			mtx_destroy(&client->lock);
 			free(client, M_DEVBUF);
@@ -1313,13 +1308,25 @@ out:
 
 
 static void
+assign_test_numbers(void)
+{
+	unsigned int num_tests, test_num;
+
+	num_tests = sizeof(tests)/sizeof(tests[0]);
+	for (test_num = 0; test_num < num_tests; test_num++) {
+		tests[test_num].num = test_num;
+	}
+}
+
+
+static void
 list_tests(void)
 {
 	unsigned int num_tests, test_num;
 
 	num_tests = sizeof(tests)/sizeof(tests[0]);
 	for (test_num = 0; test_num < num_tests; test_num++) {
-		print_test_config(&tests[test_num], test_num);
+		print_test_config(&tests[test_num]);
 	}
 }
 
@@ -1332,7 +1339,9 @@ usage(const char *progname)
 	printf("    -h         show usage\n");
 	printf("    -i ifname  specify network interface\n");
 	printf("    -l         list all canned tests\n");
+	printf("    -Q depth   override tag stack depth\n");
 	printf("    -t num     run given test number\n");
+	printf("    -V num     override number of vlans\n");
 	printf("    -v         be verbose\n");
 }
 
@@ -1344,10 +1353,17 @@ int main(int argc, char **argv)
 	struct thread *td;
 	char ch;
 	char *progname = argv[0];
+	int num_tests;
 	int test_num = -1;
+	int vlan_stack_depth = -1;
+	int num_vlans = -1;
 	int verbose = 0;
+	struct test_config *test;
 
-	while ((ch = getopt(argc, argv, "hi:lt:v")) != -1) {
+
+	assign_test_numbers();
+
+	while ((ch = getopt(argc, argv, "hi:lQ:t:V:v")) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(progname);
@@ -1358,9 +1374,14 @@ int main(int argc, char **argv)
 		case 'l':
 			list_tests();
 			return (0);
+		case 'Q':
+			vlan_stack_depth = strtol(optarg, NULL, 10);
+			break;
 		case 't':
 			test_num = strtol(optarg, NULL, 10);
-			printf("test_num = %d\n", test_num);
+			break;
+		case 'V':
+			num_vlans = strtol(optarg, NULL, 10);
 			break;
 		case 'v':
 			verbose++;
@@ -1380,6 +1401,13 @@ int main(int argc, char **argv)
 		return (1);
 	}
 
+	num_tests = sizeof(tests)/sizeof(tests[0]);
+
+	if (test_num >= num_tests) {
+		printf("Invalid test number\n");
+		return (1);
+	}
+
 	if (test_num < 0) {
 		printf("Specify a test number\n");
 		return (1);
@@ -1392,7 +1420,7 @@ int main(int argc, char **argv)
 	 * user-kernel facilities before this point (such as referring to
 	 * curthread).
 	 */
-	uinet_init(1, 1100*1024);
+	uinet_init(1, 5100*1024);
 
 	printf("maxusers=%d\n", maxusers);
 	printf("maxfiles=%d\n", maxfiles);
@@ -1406,8 +1434,17 @@ int main(int argc, char **argv)
 		return (1);
 	}
 
+	test = &tests[test_num];
 
-	if (0 != run_test(test_num, verbose)) {
+	if (vlan_stack_depth >= 0) {
+		test->vlan_stack_depth = vlan_stack_depth;
+	}
+	
+	if (num_vlans > 0) {
+		test->num_vlans = num_vlans;
+	}
+
+	if (0 != run_test(test, verbose)) {
 		printf("Test %u failed.\n", test_num);
 		return (1);
 	}

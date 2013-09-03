@@ -138,6 +138,14 @@ static VNET_DEFINE(int, ipport_tcplastcount);
 
 static void	in_pcbremlists(struct inpcb *inp);
 #ifdef INET
+
+#ifdef PROMISCUOUS_INET
+static struct inpcb	*in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo,
+			    struct in_addr faddr, u_int fport_arg, struct in_addr laddr,
+			    u_int lport_arg, int lookupflags, struct ifnet *ifp,
+			    struct mbuf *m, struct inpcb *ctx_inp);
+#endif /* PROMISCUOUS_INET */
+
 static struct inpcb	*in_pcblookup_hash_locked(struct inpcbinfo *pcbinfo,
 			    struct in_addr faddr, u_int fport_arg,
 			    struct in_addr laddr, u_int lport_arg,
@@ -1086,8 +1094,17 @@ in_pcbconnect_setup(struct inpcb *inp, struct sockaddr *nam,
 		if (error)
 			return (error);
 	}
+#ifdef PROMISCUOUS_INET
+	if (inp->inp_flags2 & INP_PROMISC)
+		oinp = in_pcblookup_hash_promisc_locked(inp->inp_pcbinfo, faddr, fport,
+		    laddr, lport, 0, NULL, NULL, inp);
+	else
+		oinp = in_pcblookup_hash_locked(inp->inp_pcbinfo, faddr, fport,
+		    laddr, lport, 0, NULL);
+#else
 	oinp = in_pcblookup_hash_locked(inp->inp_pcbinfo, faddr, fport,
 	    laddr, lport, 0, NULL);
+#endif /* PROMISCUOUS_INET */
 	if (oinp != NULL) {
 		if (oinpp != NULL)
 			*oinpp = oinp;
@@ -1845,9 +1862,11 @@ in_pcbhash_promisc(uint32_t laddr, uint32_t faddr, uint16_t lport, uint16_t fpor
 
 	hash = laddr ^ faddr ^ ntohs((lport) ^ (fport)) ^ fibnum;
 	if (l2i) {
-		i = l2i->inl2i_tagcnt;
+		i = l2i->inl2i_tagstack.inl2t_cnt;
 		while (i--) {
-			hash ^= ntohl(l2i->inl2i_tags[i]) & ntohl(l2i->inl2i_tagmask);
+			hash ^=
+			    ntohl(l2i->inl2i_tagstack.inl2t_tags[i]) &
+			    ntohl(l2i->inl2i_tagstack.inl2t_mask);
 		}
 	}
 	hash ^= hash >> 16;
@@ -1864,9 +1883,11 @@ in_pcbporthash_promisc(uint16_t lport, uint16_t fibnum, struct in_l2info *l2i,
 	uint32_t i;
 
 	hash = ntohs(lport) ^ fibnum;
-	i = l2i->inl2i_tagcnt;
+	i = l2i->inl2i_tagstack.inl2t_cnt;
 	while (i--) {
-		hash ^= ntohl(l2i->inl2i_tags[i]) & ntohl(l2i->inl2i_tagmask);
+		hash ^=
+		    ntohl(l2i->inl2i_tagstack.inl2t_tags[i]) &
+		    ntohl(l2i->inl2i_tagstack.inl2t_mask);
 	}
 	hash ^= hash >> 16;
 	
@@ -1882,12 +1903,13 @@ in_pcbporthash_promisc(uint16_t lport, uint16_t fibnum, struct in_l2info *l2i,
 static struct inpcb *
 in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr,
     u_int fport_arg, struct in_addr laddr, u_int lport_arg, int lookupflags,
-    struct ifnet *ifp, struct mbuf *m)
+    struct ifnet *ifp, struct mbuf *m, struct inpcb *ctx_inp)
 {
 	struct inpcbhead *head;
 	struct inpcb *inp;
 	uint16_t fport = fport_arg, lport = lport_arg;
 	uint16_t hash;
+	uint16_t fib;
 	struct ifl2info *l2i_tag;
 	struct in_l2info *l2i;
 
@@ -1896,21 +1918,31 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 
 	INP_HASH_LOCK_ASSERT(pcbinfo);
 
-	l2i_tag = (struct ifl2info *)m_tag_locate(m,
-						  MTAG_PROMISCINET,
-						  MTAG_PROMISCINET_L2INFO,
-						  NULL);
+	if (m) {
+		fib = M_GETFIB(m);
 
-	KASSERT(l2i_tag != NULL,
-	    ("%s: No MTAG_PROMISCINET_L2INFO on mbuf", __func__));
+		l2i_tag = (struct ifl2info *)m_tag_locate(m,
+							  MTAG_PROMISCINET,
+							  MTAG_PROMISCINET_L2INFO,
+							  NULL);
+
+		KASSERT(l2i_tag != NULL,
+			("%s: No MTAG_PROMISCINET_L2INFO on mbuf", __func__));
 	
-	l2i = &l2i_tag->ifl2i_info;
+		l2i = &l2i_tag->ifl2i_info;
+	} else {
+		KASSERT(ctx_inp != NULL,
+			("%s: Both mbuf and ctx_inp are NULL", __func__));
+
+		fib = ctx_inp->inp_fibnum;
+		l2i = ctx_inp->inp_l2info;
+	}
 
 	/*
 	 * First look for an exact match.
 	 */
 	hash = in_pcbhash_promisc(laddr.s_addr, faddr.s_addr, lport, fport,
-				  ifp->if_fib, l2i, pcbinfo->ipi_hashmask);
+				  fib, l2i, pcbinfo->ipi_hashmask);
 	head = &pcbinfo->ipi_hashbase[hash];
 	LIST_FOREACH(inp, head, inp_hash) {
 #ifdef INET6
@@ -1926,13 +1958,14 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 		if (prison_flag(inp->inp_cred, PR_IP4))
 			continue;
 
-		if (inp->inp_fibnum == ifp->if_fib &&
+		if (inp->inp_fibnum == fib &&
 		    inp->inp_faddr.s_addr == faddr.s_addr &&
 		    inp->inp_laddr.s_addr == laddr.s_addr &&
 		    inp->inp_fport == fport &&
 		    inp->inp_lport == lport) {
 
-			if (0 == in_promisc_tagcmp(inp->inp_l2info, l2i))
+			if (0 == in_promisc_tagcmp(&inp->inp_l2info->inl2i_tagstack,
+						   &l2i->inl2i_tagstack))
 				return (inp);
 		}
 	}
@@ -1975,11 +2008,11 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 			lport_to_match = (i & 0x02) ? IN_PROMISC_PORT_ANY : lport;
 			any_tag_flag = (i & 0x04) ? INL2I_TAG_ANY : 0;
 
-			if (l2i->inl2i_tagcnt || !any_tag_flag) {
+			if (l2i->inl2i_tagstack.inl2t_cnt || !any_tag_flag) {
 				hash = hash_history[i] =
 				    in_pcbhash_promisc(laddr_to_match.s_addr, INADDR_ANY,
 						       lport_to_match, IN_PROMISC_PORT_ANY,
-						       ifp->if_fib, any_tag_flag ? NULL : l2i,
+						       fib, any_tag_flag ? NULL : l2i,
 						       pcbinfo->ipi_hashmask);
 			} else {
 				/* There are no tags on the inbound packet
@@ -2005,7 +2038,7 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 				    inp->inp_laddr.s_addr != laddr_to_match.s_addr ||
 				    inp->inp_lport != lport_to_match ||
 				    (inp_l2i->inl2i_flags & INL2I_TAG_ANY) != any_tag_flag || 
-				    inp->inp_fibnum != ifp->if_fib)
+				    inp->inp_fibnum != fib)
 					continue;
 				
 				/*
@@ -2017,7 +2050,8 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 					continue;
 				
 				if (!(inp_l2i->inl2i_flags & INL2I_TAG_ANY) &&
-				    (0 != in_promisc_tagcmp(inp->inp_l2info, l2i)))
+				    (0 != in_promisc_tagcmp(&inp->inp_l2info->inl2i_tagstack,
+							    &l2i->inl2i_tagstack)))
 					continue;
 				
 				if (inp->inp_laddr.s_addr == INADDR_ANY) {
@@ -2067,7 +2101,7 @@ in_pcblookup_hash(struct inpcbinfo *pcbinfo, struct in_addr faddr,
 #ifdef PROMISCUOUS_INET
 	if (ifp && (ifp->if_flags & IFF_PROMISCINET))
 		inp = in_pcblookup_hash_promisc_locked(pcbinfo, faddr, fport, laddr, lport,
-		    (lookupflags & ~(INPLOOKUP_RLOCKPCB | INPLOOKUP_WLOCKPCB)), ifp, m);
+		    (lookupflags & ~(INPLOOKUP_RLOCKPCB | INPLOOKUP_WLOCKPCB)), ifp, m, NULL);
 	else
 		inp = in_pcblookup_hash_locked(pcbinfo, faddr, fport, laddr, lport,
 		    (lookupflags & ~(INPLOOKUP_RLOCKPCB | INPLOOKUP_WLOCKPCB)), ifp);

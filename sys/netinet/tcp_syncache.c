@@ -128,7 +128,11 @@ SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, syncookies_only, CTLFLAG_RW,
 static void	 syncache_drop(struct syncache *, struct syncache_head *);
 static void	 syncache_free(struct syncache *);
 static void	 syncache_insert(struct syncache *, struct syncache_head *);
+#ifdef PROMISCUOUS_INET
+struct syncache *syncache_lookup(struct in_conninfo *, struct syncache_head **, struct mbuf *);
+#else
 struct syncache *syncache_lookup(struct in_conninfo *, struct syncache_head **);
+#endif /* PROMISCUOUS_INET */
 static int	 syncache_respond(struct syncache *);
 static struct	 socket *syncache_socket(struct syncache *, struct socket *,
 		    struct mbuf *m);
@@ -460,40 +464,158 @@ syncache_timer(void *xsch)
 	CURVNET_RESTORE();
 }
 
+
+#ifdef PROMISCUOUS_INET
+
+static uint32_t
+syncache_hash_promisc(struct in_conninfo *inc, uint16_t fib,
+		      struct in_l2info *l2i, uint32_t mask)
+{
+	uint32_t hash;
+	uint32_t i;
+
+	hash = SYNCACHE_HASH(inc, mask);
+
+	if (l2i) {
+		hash ^=
+		    inc->inc_laddr.s_addr ^
+		    (inc->inc_laddr.s_addr >> 16) ^
+		    fib;
+
+		i = l2i->inl2i_tagstack.inl2t_cnt;
+		while (i--) {
+			hash ^=
+			    l2i->inl2i_tagstack.inl2t_tags[i] &
+			    l2i->inl2i_tagstack.inl2t_mask;
+		}
+	}
+
+	return (hash & mask);
+}
+
+
+#ifdef INET6
+static uint32_t
+syncache_hash_promisc6(struct in_conninfo *inc, uint16_t fib,
+		       struct in_l2info *l2i, uint32_t mask)
+{
+	uint32_t hash;
+	uint32_t i;
+
+	hash = SYNCACHE_HASH6(inc, mask);
+
+	if (l2i) {
+		hash ^=
+		    inc->inc6_laddr.s6_addr32[0] ^
+		    inc->inc6_laddr.s6_addr32[3] ^
+		    fib;
+
+		i = l2i->inl2i_tagstack.inl2t_cnt;
+		while (i--) {
+			hash ^=
+			    l2i->inl2i_tagstack.inl2t_tags[i] &
+			    l2i->inl2i_tagstack.inl2t_mask;
+		}
+	}
+
+	return (hash & mask);
+}
+#endif /* INET6 */
+
+#endif /* PROMISCUOUS_INET */
+
+
 /*
  * Find an entry in the syncache.
  * Returns always with locked syncache_head plus a matching entry or NULL.
  */
 struct syncache *
+#ifdef PROMISCUOUS_INET
+syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp, struct mbuf *m)
+#else
 syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp)
+#endif /* PROMISCUOUS_INET */
 {
 	struct syncache *sc;
 	struct syncache_head *sch;
+	uint32_t hashkey;
+#ifdef PROMISCUOUS_INET
+	struct ifl2info *l2i_tag;
+	struct in_l2info *l2i;
+	struct in_l2tagstack *ts;
+	uint16_t fib;
+#endif /* PROMISCUOUS_INET */
+
+#ifdef PROMISCUOUS_INET
+	fib = M_GETFIB(m);
+
+	l2i_tag = (struct ifl2info *)m_tag_locate(m,
+						  MTAG_PROMISCINET,
+						  MTAG_PROMISCINET_L2INFO,
+						  NULL);
+	l2i = l2i_tag ? &l2i_tag->ifl2i_info : NULL;
+	ts = l2i ? &l2i->inl2i_tagstack : NULL;
+#endif /* PROMISCUOUS_INET */
 
 #ifdef INET6
 	if (inc->inc_flags & INC_ISIPV6) {
-		sch = &V_tcp_syncache.hashbase[
-		    SYNCACHE_HASH6(inc, V_tcp_syncache.hashmask)];
+#ifdef PROMISCUOUS_INET
+		hashkey = syncache_hash_promisc6(inc, fib, l2i, V_tcp_syncache.hashmask);
+#else
+		hashkey = SYNCACHE_HASH6(inc, V_tcp_syncache.hashmask);
+#endif /* PROMISCUOUS_INET */
+		sch = &V_tcp_syncache.hashbase[hashkey];
 		*schp = sch;
 
 		SCH_LOCK(sch);
 
 		/* Circle through bucket row to find matching entry. */
 		TAILQ_FOREACH(sc, &sch->sch_bucket, sc_hash) {
+#ifdef PROMISCUOUS_INET
+			struct ifl2info *sc_l2i_tag;
+			struct in_l2info *sc_l2i;
+			struct in_l2tagstack *sc_ts;
+
+			sc_l2i_tag = (struct ifl2info *)sc->sc_l2tag;
+			sc_l2i = sc_l2i_tag ? &sc_l2i_tag->ifl2i_info : NULL;
+			sc_ts = sc_l2i ? &sc_l2i->inl2i_tagstack : NULL;
+
+			if ((fib != sc->sc_fib) ||
+			    (0 != in_promisc_tagcmp(ts, sc_ts)))
+				continue;
+#endif /* PROMISCUOUS_INET */
 			if (ENDPTS6_EQ(&inc->inc_ie, &sc->sc_inc.inc_ie))
 				return (sc);
 		}
 	} else
 #endif
 	{
-		sch = &V_tcp_syncache.hashbase[
-		    SYNCACHE_HASH(inc, V_tcp_syncache.hashmask)];
+#ifdef PROMISCUOUS_INET
+		hashkey = syncache_hash_promisc(inc, fib, l2i, V_tcp_syncache.hashmask);
+#else
+		hashkey = SYNCACHE_HASH(inc, V_tcp_syncache.hashmask);
+#endif /* PROMISCUOUS_INET */
+		sch = &V_tcp_syncache.hashbase[hashkey];
 		*schp = sch;
 
 		SCH_LOCK(sch);
 
 		/* Circle through bucket row to find matching entry. */
 		TAILQ_FOREACH(sc, &sch->sch_bucket, sc_hash) {
+#ifdef PROMISCUOUS_INET
+			struct ifl2info *sc_l2i_tag;
+			struct in_l2info *sc_l2i;
+			struct in_l2tagstack *sc_ts;
+
+			sc_l2i_tag = (struct ifl2info *)sc->sc_l2tag;
+			sc_l2i = sc_l2i_tag ? &sc_l2i_tag->ifl2i_info : NULL;
+			sc_ts = sc_l2i ? &sc_l2i->inl2i_tagstack : NULL;
+
+			if ((fib != sc->sc_fib) ||
+			    (0 != in_promisc_tagcmp(ts, sc_ts)))
+				continue;
+#endif /* PROMISCUOUS_INET */
+
 #ifdef INET6
 			if (sc->sc_inc.inc_flags & INC_ISIPV6)
 				continue;
@@ -512,13 +634,21 @@ syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp)
  * connection is in the syn cache.  If it is, zap it.
  */
 void
+#ifdef PROMISCUOUS_INET
+syncache_chkrst(struct in_conninfo *inc, struct tcphdr *th, struct mbuf *m)
+#else
 syncache_chkrst(struct in_conninfo *inc, struct tcphdr *th)
+#endif /* PROMISCUOUS_INET */
 {
 	struct syncache *sc;
 	struct syncache_head *sch;
 	char *s = NULL;
 
+#ifdef PROMISCUOUS_INET
+	sc = syncache_lookup(inc, &sch, m);	/* returns locked sch */
+#else
 	sc = syncache_lookup(inc, &sch);	/* returns locked sch */
+#endif /* PROMISCUOUS_INET */
 	SCH_LOCK_ASSERT(sch);
 
 	/*
@@ -586,12 +716,20 @@ done:
 }
 
 void
+#ifdef PROMISCUOUS_INET
+syncache_badack(struct in_conninfo *inc, struct mbuf *m)
+#else
 syncache_badack(struct in_conninfo *inc)
+#endif /* PROMISCUOUS_INET */
 {
 	struct syncache *sc;
 	struct syncache_head *sch;
 
+#ifdef PROMISCUOUS_INET
+	sc = syncache_lookup(inc, &sch, m);	/* returns locked sch */
+#else
 	sc = syncache_lookup(inc, &sch);	/* returns locked sch */
+#endif /* PROMISCUOUS_INET */
 	SCH_LOCK_ASSERT(sch);
 	if (sc != NULL) {
 		syncache_drop(sc, sch);
@@ -601,12 +739,20 @@ syncache_badack(struct in_conninfo *inc)
 }
 
 void
+#ifdef PROMISCUOUS_INET
+syncache_unreach(struct in_conninfo *inc, struct tcphdr *th, struct mbuf *m)
+#else
 syncache_unreach(struct in_conninfo *inc, struct tcphdr *th)
+#endif /* PROMISCUOUS_INET */
 {
 	struct syncache *sc;
 	struct syncache_head *sch;
 
+#ifdef PROMISCUOUS_INET
+	sc = syncache_lookup(inc, &sch, m);	/* returns locked sch */
+#else
 	sc = syncache_lookup(inc, &sch);	/* returns locked sch */
+#endif /* PROMISCUOUS_INET */
 	SCH_LOCK_ASSERT(sch);
 	if (sc == NULL)
 		goto done;
@@ -691,16 +837,9 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 			("%s: No MTAG_PROMISCINET_L2INFO on mbuf", __func__));
 
 		l2i = &l2i_tag->ifl2i_info;
-		inp_l2i = (struct in_l2info *)inp->inp_l2info;
+		inp_l2i = inp->inp_l2info;
 
-		memcpy(inp_l2i->inl2i_foreign_addr, l2i->inl2i_foreign_addr, IN_L2INFO_ADDR_MAX);
-		memcpy(inp_l2i->inl2i_local_addr, l2i->inl2i_local_addr, IN_L2INFO_ADDR_MAX);
-		inp_l2i->inl2i_tagmask = l2i->inl2i_tagmask;
-		inp_l2i->inl2i_tagcnt = l2i->inl2i_tagcnt;
-		memcpy(inp_l2i->inl2i_tags,
-		       l2i->inl2i_tags,
-		       l2i->inl2i_tagcnt * sizeof(l2i->inl2i_tags[0]));
-		
+		in_promisc_l2info_copy(inp_l2i, l2i);
 	}
 #endif /* PROMISCUOUS_INET */
 
@@ -904,6 +1043,7 @@ abort:
 abort2:
 	if (so != NULL)
 		soabort(so);
+
 	return (NULL);
 }
 
@@ -931,7 +1071,11 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	KASSERT((th->th_flags & (TH_RST|TH_ACK|TH_SYN)) == TH_ACK,
 	    ("%s: can handle only ACK", __func__));
 
+#ifdef PROMISCUOUS_INET
+	sc = syncache_lookup(inc, &sch, m);	/* returns locked sch */
+#else
 	sc = syncache_lookup(inc, &sch);	/* returns locked sch */
+#endif /* PROMISCUOUS_INET */
 	SCH_LOCK_ASSERT(sch);
 	if (sc == NULL) {
 		/*
@@ -1158,7 +1302,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	 * how to handle such a case; either ignore it as spoofed, or
 	 * drop the current entry and create a new one?
 	 */
+#ifdef PROMISCUOUS_INET
+	sc = syncache_lookup(inc, &sch, m);	/* returns locked entry */
+#else
 	sc = syncache_lookup(inc, &sch);	/* returns locked entry */
+#endif /* PROMISCUOUS_INET */
 	SCH_LOCK_ASSERT(sch);
 	if (sc != NULL) {
 #ifndef TCP_OFFLOAD_DISABLE
@@ -1397,6 +1545,8 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	}
 
 #ifdef PROMISCUOUS_INET
+	sc->sc_fib = M_GETFIB(m);
+	
 	if (promisc_listen && l2tag) {
 		m_tag_unlink(m, l2tag);	
 		sc->sc_l2tag = l2tag;
