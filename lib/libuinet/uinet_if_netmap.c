@@ -133,9 +133,9 @@ struct if_netmap_softc {
 
 	struct if_netmap_bufinfo_pool rx_bufinfo;
 
+	struct thread *tx_thread;
 	struct thread *rx_thread;
 	struct mtx tx_lock;
-	unsigned int tx_flag;
 };
 
 
@@ -407,8 +407,21 @@ if_netmap_init(void *arg)
 static void
 if_netmap_start(struct ifnet *ifp)
 {
-	struct mbuf *m;
 	struct if_netmap_softc *sc = ifp->if_softc;
+
+	mtx_lock(&sc->tx_lock);
+	ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+	wakeup(&ifp->if_drv_flags);
+	mtx_unlock(&sc->tx_lock);
+}
+
+
+static void
+if_netmap_send(void *arg)
+{
+	struct mbuf *m;
+	struct if_netmap_softc *sc = (struct if_netmap_softc *)arg;
+	struct ifnet *ifp = sc->ifp;
 	struct netmap_ring *txr;
 	struct pollfd pfd;
 	uint32_t avail;
@@ -416,28 +429,20 @@ if_netmap_start(struct ifnet *ifp)
 	u_int pktlen;
 	int rv;
 
-	/* XXX would a separate tx thread would be better here? i think in
-	 * this current approach, a transmitting thread could wind up
-	 * managing the send queue for a long time if other threads keep
-	 * submitting work while it is in the queue drain loop.  that
-	 * doesn't seem right.
-	 */
-	mtx_lock(&sc->tx_lock);
-	while (1 == sc->tx_flag) {
-		mtx_sleep(&sc->tx_flag, &sc->tx_lock, 0, "wtxlk", 0);
-	}
-	sc->tx_flag = 1;
-	mtx_unlock(&sc->tx_lock);
 
-
-	if (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
+	while (1) {
+		mtx_lock(&sc->tx_lock);
+		while (IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
+			ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
+			mtx_sleep(&ifp->if_drv_flags, &sc->tx_lock, 0, "wtxlk", 0);
+		}
+		mtx_unlock(&sc->tx_lock);
 
 		txr = sc->hw_tx_ring;
 	
 		rv = ioctl(sc->fd, NIOCTXSYNC);
 		if (rv == -1) {
 			perror("could not sync tx descriptors before transmit");
-			return; // XXX queue may get stuck at this point
 		}
 	
 		while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
@@ -463,7 +468,7 @@ if_netmap_start(struct ifnet *ifp)
 				avail--;
 
 				pktlen = m_length(m, NULL);
-				KASSERT(pktlen <= txr->nr_buf_size, ("if_netmap_start: packet too large"));
+				KASSERT(pktlen <= txr->nr_buf_size, ("if_netmap_send: packet too large"));
 
 				txr->slot[cur].len = pktlen;
 				m_copydata(m, 0, pktlen, NETMAP_BUF(txr, txr->slot[cur].buf_idx));
@@ -481,15 +486,9 @@ if_netmap_start(struct ifnet *ifp)
 			rv = ioctl(sc->fd, NIOCTXSYNC);
 			if (rv == -1) {
 				perror("could not sync tx descriptors after transmit");
-				return;
 			}
 		}
 	}
-
-	mtx_lock(&sc->tx_lock);
-	sc->tx_flag = 0;
-	wakeup_one(&sc->tx_flag);
-	mtx_unlock(&sc->tx_lock);
 	
 }
 
@@ -584,6 +583,7 @@ if_netmap_receive(void *arg)
 	uint32_t cur;
 	uint32_t avail;
 	uint32_t returned;
+	uint32_t new_reserved;
 	unsigned int n;
 	int rv;
 
@@ -638,6 +638,7 @@ if_netmap_receive(void *arg)
 		}
 
 		cur = rxr->cur;
+		new_reserved = 0;
 		for (n = 0; n < avail; n++) {
 			bi = if_netmap_bufinfo_alloc(&sc->rx_bufinfo);
 			if (NULL == bi) {
@@ -657,6 +658,14 @@ if_netmap_receive(void *arg)
 					 * fills and drops happen anyway? */
 					break;  /* for now, spin the loop */
 				}
+
+				/* Recover this buffer at the far end of the
+				 * reserved trail from prior zero-copy
+				 * activity.
+				 */
+				rxr->slot[sc->hw_rx_rsvd_begin].buf_idx = rxr->slot[cur].buf_idx;
+				rxr->slot[sc->hw_rx_rsvd_begin].flags |= NS_BUF_CHANGED;
+				sc->hw_rx_rsvd_begin = NETMAP_RING_NEXT(rxr, sc->hw_rx_rsvd_begin);
 			} else {
 				/* zero-copy receive */
 
@@ -677,6 +686,8 @@ if_netmap_receive(void *arg)
 				m->m_ext.ref_cnt = &bi->refcnt;
 				m_extadd(m, NETMAP_BUF(rxr, rxr->slot[cur].buf_idx),
 					 rxr->nr_buf_size, if_netmap_free, sc, bi, 0, EXT_EXTREF);
+
+				new_reserved++;
 			}
 
 			cur = NETMAP_RING_NEXT(rxr, cur);
@@ -690,7 +701,7 @@ if_netmap_receive(void *arg)
 		}
 		rxr->avail -= n;
 		rxr->cur = cur;
-		rxr->reserved += n;
+		rxr->reserved += new_reserved;
 
 		if (avail > sc->req.nr_rx_slots) {
 			printf("bogus rxr->avail(2) %u\n", avail);
@@ -741,6 +752,17 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	ether_ifattach(ifp, sc->addr);
 	ifp->if_capabilities = ifp->if_capenable = 0;
 
+
+	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
+
+	if (kthread_add(if_netmap_send, sc, NULL, &sc->tx_thread, 0, 0, "nm_tx")) {
+		printf("Could not start transmit thread for %s\n", sc->cfg->spec);
+		ether_ifdetach(ifp);
+		if_free(ifp);
+		return (1);
+	}
+
+
 	if (kthread_add(if_netmap_receive, sc, NULL, &sc->rx_thread, 0, 0, "nm_rx")) {
 		printf("Could not start receive thread for %s\n", sc->cfg->spec);
 		ether_ifdetach(ifp);
@@ -748,10 +770,8 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 		return (1);
 	}
 
-	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
-	sc->tx_flag = 0;
-
 	if (sc->cfg->cpu >= 0) {
+		sched_bind(sc->tx_thread, sc->cfg->cpu);
 		sched_bind(sc->rx_thread, sc->cfg->cpu);
 	}
 
