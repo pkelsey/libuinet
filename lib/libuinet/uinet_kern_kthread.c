@@ -51,6 +51,8 @@
 
 #include <stdlib.h>
 #include <pthread.h>
+#include <pthread_np.h>
+#include <stdarg.h>
 #include <stdio.h>
 
 __thread struct thread *pcurthread;
@@ -106,7 +108,9 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	struct pthread_start_args *psa;
 	struct thread *td;
 	struct mtx *lock;
-	pthread_cond_t *cond; 
+	pthread_cond_t *cond;
+	char name[32];
+	va_list ap;
 
 	if (NULL == p) {
 		p = &proc0;
@@ -134,6 +138,12 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 		pthread_attr_setstacksize(&attr, pages * PAGE_SIZE);
 	}
 	error = _pthread_create(&thread, &attr, pthread_start_routine, psa);
+
+	va_start(ap, str);
+	vsnprintf(name, sizeof(name), str, ap);
+	va_end(ap);
+	pthread_set_name_np(thread, name);
+
 	/*
 	 * Ensure tc_wchan is valid before kthread_add returns, in case the
 	 * thread has not started yet.
@@ -165,6 +175,8 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	struct pthread_start_args *psa;
 	struct mtx *lock;
 	pthread_cond_t *cond; 
+	char name[32];
+	va_list ap;
 
 	*tdp = td = malloc(sizeof(struct thread));
 	psa = malloc(sizeof(struct pthread_start_args));
@@ -185,6 +197,12 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 		pthread_attr_setstacksize(&attr, pages * PAGE_SIZE);
 	}
 	error = _pthread_create(&thread, &attr, pthread_start_routine, psa);
+
+	va_start(ap, str);
+	vsnprintf(name, sizeof(name), str, ap);
+	va_end(ap);
+	pthread_set_name_np(thread, name);
+
 	/*
 	 * Ensure tc_wchan is valid before kthread_add returns, in case the
 	 * thread has not started yet.
