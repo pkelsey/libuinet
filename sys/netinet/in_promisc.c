@@ -637,4 +637,88 @@ syn_filter_setopt(struct socket *so, struct sockopt *sopt)
 }
 
 
+
+/*
+ * The following is adapted from Austin Appleby's MurmurHash3.[h,cpp],
+ * http://smhasher.googlecode.com/svn, revision 150.  In this use we do not
+ * care about the fact that different results will be obtained for the same
+ * input on different endian platforms, as it is used for internal hashing
+ * (we only care about overall hash quality).  Also, in this use we do not
+ * care about the implementation assumption that unaligned 32-bit reads are
+ * OK, since it will only be applied to 32-bit aligned data.
+ */
+
+
+#define	FORCE_INLINE static inline __attribute__((always_inline))
+
+static inline uint32_t rotl32 ( uint32_t x, int8_t r )
+{
+  return (x << r) | (x >> (32 - r));
+}
+
+#define	ROTL32(x,y)	rotl32(x,y)
+
+
+//-----------------------------------------------------------------------------
+// Finalization mix - force all bits of a hash block to avalanche
+
+FORCE_INLINE uint32_t fmix32 ( uint32_t h )
+{
+  h ^= h >> 16;
+  h *= 0x85ebca6b;
+  h ^= h >> 13;
+  h *= 0xc2b2ae35;
+  h ^= h >> 16;
+
+  return h;
+}
+
+
+//-----------------------------------------------------------------------------
+
+/*
+ * This is MurmurHash3_x86_32 with 32-bit aligned input that is a multiple
+ * of 32-bits in length, so there are no unaligned accesses, nor is there
+ * any need for a tail computation.
+ */
+uint32_t in_promisc_hash32 ( const uint32_t * key, uint32_t mask, int nblocks, uint32_t seed )
+{
+  uint32_t h1 = seed;
+
+  const uint32_t c1 = 0xcc9e2d51;
+  const uint32_t c2 = 0x1b873593;
+
+  //----------
+  // body
+
+  const uint32_t * blocks = key + nblocks;
+
+  for(int i = -nblocks; i; i++)
+  {
+    uint32_t k1 = blocks[i] & mask;
+
+    k1 *= c1;
+    k1 = ROTL32(k1,15);
+    k1 *= c2;
+    
+    h1 ^= k1;
+    h1 = ROTL32(h1,13); 
+    h1 = h1*5+0xe6546b64;
+  }
+
+  //----------
+  // finalization
+
+  h1 ^= (nblocks << 2);
+
+  h1 = fmix32(h1);
+
+  return (h1);
+} 
+
+//-----------------------------------------------------------------------------
+
+
+
+
 SYSINIT(in_promisc, SI_SUB_PROTO_DOMAIN, SI_ORDER_ANY, in_promisc_init, NULL);

@@ -1853,24 +1853,23 @@ in_pcblookup_hash_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr,
 }
 
 #ifdef PROMISCUOUS_INET
-static uint16_t
+static uint32_t
 in_pcbhash_promisc(uint32_t laddr, uint32_t faddr, uint16_t lport, uint16_t fport,
-		   uint16_t fibnum, struct in_l2info *l2i, uint16_t mask)
+		   uint16_t fibnum, struct in_l2info *l2i, uint32_t mask)
 {
+	uint32_t hash_input[4] = { laddr, faddr, (lport << 16) | fport, fibnum };
 	uint32_t hash;
-	uint32_t i;
 
-	hash = laddr ^ faddr ^ ntohs((lport) ^ (fport)) ^ fibnum;
-	if (l2i) {
-		i = l2i->inl2i_tagstack.inl2t_cnt;
-		while (i--) {
-			hash ^=
-			    ntohl(l2i->inl2i_tagstack.inl2t_tags[i]) &
-			    ntohl(l2i->inl2i_tagstack.inl2t_mask);
-		}
+	hash = in_promisc_hash32(hash_input, 0xffffffff,
+				 sizeof(hash_input)/sizeof(hash_input[0]), 0);
+
+	if (l2i && l2i->inl2i_tagstack.inl2t_cnt) {
+		hash = in_promisc_hash32(l2i->inl2i_tagstack.inl2t_tags, 
+					 l2i->inl2i_tagstack.inl2t_mask,
+					 l2i->inl2i_tagstack.inl2t_cnt,
+					 hash);
 	}
-	hash ^= hash >> 16;
-	
+
 	return (hash & mask);
 }
 
@@ -1908,7 +1907,7 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 	struct inpcbhead *head;
 	struct inpcb *inp;
 	uint16_t fport = fport_arg, lport = lport_arg;
-	uint16_t hash;
+	uint32_t hash;
 	uint16_t fib;
 	struct ifl2info *l2i_tag;
 	struct in_l2info *l2i;
@@ -1982,7 +1981,7 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 #ifdef INET6
 		struct inpcb *local_wild_mapped = NULL;
 #endif
-		uint16_t hash_history[8];
+		uint32_t hash_history[8];
 
 		/*
 		 * Order of socket selection
@@ -2212,7 +2211,7 @@ in_pcbinshash_internal(struct inpcb *inp, int do_pcbgroup_update)
 	struct inpcbinfo *pcbinfo = inp->inp_pcbinfo;
 	struct inpcbport *phd;
 	u_int32_t hashkey_faddr;
-	u_int16_t hashkey;
+	u_int32_t hashkey;
 
 	INP_WLOCK_ASSERT(inp);
 	INP_HASH_WLOCK_ASSERT(pcbinfo);

@@ -166,6 +166,7 @@ int syn_filter_getopt(struct socket *so, struct sockopt *sopt);
 int syn_filter_setopt(struct socket *so, struct sockopt *sopt);
 int syn_filter_run_callback(struct inpcb *inp, struct syn_filter_cbarg *arg);
 
+uint32_t in_promisc_hash32(const uint32_t *key, uint32_t mask, int nblocks, uint32_t seed);
 
 #endif /* _KERNEL */
 
