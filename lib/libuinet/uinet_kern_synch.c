@@ -161,11 +161,11 @@ int
 _sleep(void *ident, struct lock_object *lock, int priority,
     const char *wmesg, int timo)
 {
-	sleep_entry_t se;
-	int rv, tick_s;
+	sleep_entry_t se = NULL;
+	int rv = 0, tick_s;
 	struct timespec ts;
 	struct timespec rts;
-	pthread_mutex_t *plock;
+	pthread_mutex_t *plock = NULL;
 
 	if (lock) {
 		plock = &((struct mtx *)lock)->mtx_lock;
@@ -185,8 +185,11 @@ _sleep(void *ident, struct lock_object *lock, int priority,
 		if (lock) {
 			rv = pthread_cond_timedwait(&se->cond, plock, &ts);
 		} else {
-			while ((-1 == nanosleep(&ts, &rts)) && (EINTR == errno)) {
+			while ((-1 == (rv = nanosleep(&ts, &rts))) && (EINTR == errno)) {
 				ts = rts;
+			}
+			if (-1 == rv) {
+				rv = errno;
 			}
 		}
 
