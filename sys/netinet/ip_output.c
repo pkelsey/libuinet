@@ -122,7 +122,7 @@ int
 ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
     struct ip_moptions *imo, struct inpcb *inp)
 {
-	struct ip *ip;
+	struct ip *ip = NULL;
 	struct ifnet *ifp = NULL;	/* keep compiler happy */
 	struct mbuf *m0;
 	int hlen = sizeof (struct ip);
@@ -131,7 +131,7 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 	int error = 0;
 	int nortfree = 0;
 	struct sockaddr_in *dst;
-	struct in_ifaddr *ia;
+	struct in_ifaddr *ia = NULL;
 	int isbroadcast, sw_csum;
 	struct route iproute;
 	struct rtentry *rte;	/* cache for ro->ro_rt */
@@ -179,7 +179,6 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 			fib = inp->inp_fibnum;
 
 			if (0 != if_promiscinet_add_tag(m, inp->inp_l2info)) {
-				printf("dropping packet (tag add failed)\n");
 				goto bad;
 			}
 		}
@@ -188,7 +187,6 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 		if (NULL == ifp) {
 			IPSTAT_INC(ips_noroute);
 			error = EHOSTUNREACH;
-			printf("dropping packet (no if for fib)");
 			goto bad;
 		}
 		
@@ -290,7 +288,6 @@ again:
 		    (ia = ifatoia(ifa_ifwithdstaddr(sintosa(dst)))) == NULL) {
 			IPSTAT_INC(ips_noroute);
 			error = ENETUNREACH;
-			printf("dropping packet (send ones)");
 			goto bad;
 		}
 		ip->ip_dst.s_addr = INADDR_BROADCAST;
@@ -303,7 +300,6 @@ again:
 		    (ia = ifatoia(ifa_ifwithnet(sintosa(dst), 0))) == NULL) {
 			IPSTAT_INC(ips_noroute);
 			error = ENETUNREACH;
-			printf("dropping packet (route to if)");
 			goto bad;
 		}
 		ifp = ia->ia_ifp;
@@ -353,7 +349,6 @@ again:
 #endif
 			IPSTAT_INC(ips_noroute);
 			error = EHOSTUNREACH;
-			printf("dropping packet (no route inp=%p)", inp);
 			goto bad;
 		}
 		ia = ifatoia(rte->rt_ifa);
@@ -415,7 +410,6 @@ again:
 			if ((ifp->if_flags & IFF_MULTICAST) == 0) {
 				IPSTAT_INC(ips_noroute);
 				error = ENETUNREACH;
-				printf("dropping packet (no multicast on if)");
 				goto bad;
 			}
 		}
@@ -511,7 +505,6 @@ again:
 		error = ENOBUFS;
 		IPSTAT_INC(ips_odropped);
 		ifp->if_snd.ifq_drops += n;
-		printf("dropping packet (no room in send queue)");
 		goto bad;
 	}
 
@@ -523,18 +516,15 @@ again:
 	if (isbroadcast) {
 		if ((ifp->if_flags & IFF_BROADCAST) == 0) {
 			error = EADDRNOTAVAIL;
-			printf("dropping packet (broadcast not enabled on this if)");
 			goto bad;
 		}
 		if ((flags & IP_ALLOWBROADCAST) == 0) {
 			error = EACCES;
-			printf("dropping packet (broadcast not allowed)");
 			goto bad;
 		}
 		/* don't allow broadcast messages to be fragmented */
 		if (ip->ip_len > mtu) {
 			error = EMSGSIZE;
-			printf("dropping packet (broadcast too large)");
 			goto bad;
 		}
 		m->m_flags |= M_BCAST;
@@ -646,7 +636,6 @@ passout:
 		if ((ifp->if_flags & IFF_LOOPBACK) == 0) {
 			IPSTAT_INC(ips_badaddr);
 			error = EADDRNOTAVAIL;
-			printf("dropping packet (localhost addr)");
 			goto bad;
 		}
 	}
@@ -710,7 +699,6 @@ passout:
 	if ((ip->ip_off & IP_DF) || (m->m_pkthdr.csum_flags & CSUM_TSO)) {
 		error = EMSGSIZE;
 		IPSTAT_INC(ips_cantfrag);
-		printf("dropping packet (DF is set/no TSO on large packet)");
 		goto bad;
 	}
 
@@ -719,10 +707,9 @@ passout:
 	 * on return, m will point to a list of packets to be sent.
 	 */
 	error = ip_fragment(ip, &m, mtu, ifp->if_hwassist, sw_csum);
-	if (error) {
-		printf("dropping packet (fragmentation failed)");
+	if (error)
 		goto bad;
-	}
+
 	for (; m; m = m0) {
 		m0 = m->m_nextpkt;
 		m->m_nextpkt = 0;
@@ -761,10 +748,6 @@ done:
 
 	return (error);
 bad:
-	printf(" src=%s hastag=%u\n", inet_ntoa(ip->ip_src), m_tag_locate(m,
-									  MTAG_PROMISCINET,
-									  MTAG_PROMISCINET_L2INFO,
-									  NULL) ? 1 : 0);
 	m_freem(m);
 	goto done;
 }

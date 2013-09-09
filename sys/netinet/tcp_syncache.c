@@ -1223,7 +1223,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	int win, sb_hiwat, ip_ttl, ip_tos;
 #ifdef PROMISCUOUS_INET
 	int promisc_listen, synfilter;
-	struct m_tag *l2tag;
+	struct m_tag *l2tag = NULL;
 #endif
 	char *s;
 #ifdef INET6
