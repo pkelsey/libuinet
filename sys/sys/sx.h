@@ -149,6 +149,7 @@ struct sx_args {
  * deferred to 'tougher' functions.
  */
 
+#if !defined(SX_NOINLINE)
 /* Acquire an exclusive lock. */
 static __inline int
 __sx_xlock(struct sx *sx, struct thread *td, int opts, const char *file,
@@ -209,6 +210,8 @@ __sx_sunlock(struct sx *sx, const char *file, int line)
 	    !atomic_cmpset_rel_ptr(&sx->sx_lock, x, x - SX_ONE_SHARER))
 		_sx_sunlock_hard(sx, file, line);
 }
+
+#endif /* SX_NOINLINE */
 
 /*
  * Public interface for lock operations.

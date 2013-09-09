@@ -33,6 +33,7 @@
 #include <sys/mutex.h>
 #include <sys/proc.h>
 
+#include <stdio.h>
 #include <pthread.h>
 
 struct mtx Giant;
@@ -111,7 +112,17 @@ mtx_init(struct mtx *m, const char *name, const char *type, int opts)
 	pthread_mutexattr_t attr;
 
 	lock_init(&m->lock_object, &lock_class_mtx_sleep, name, type, opts);
+
 	pthread_mutexattr_init(&attr);
+
+	if (opts & MTX_RECURSE) {
+		if (0 != pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE)) 
+			printf("Warning: mtx will not be recursive\n");
+	} else {
+		if (0 != pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ADAPTIVE_NP))
+			pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);
+	}
+
 	pthread_mutex_init(&m->mtx_lock, &attr);
 }
 

@@ -49,8 +49,11 @@ struct lock_class lock_class_sx = {
 void
 sx_init_flags(struct sx *sx, const char *description, int opts)
 {
+	int rwopts = 0;
+	
+	if (opts & SX_RECURSE) rwopts |= RW_RECURSE;
 
-	rw_init_flags((struct rwlock *)sx, description, opts);
+	rw_init_flags((struct rwlock *)sx, description, rwopts);
 }
 
 void

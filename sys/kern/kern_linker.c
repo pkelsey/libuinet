@@ -75,7 +75,7 @@ SYSCTL_INT(_debug, OID_AUTO, kld_debug, CTLFLAG_RW,
 #define	KLD_DOWNGRADE()		sx_downgrade(&kld_sx)
 #define	KLD_LOCK_READ()		sx_slock(&kld_sx)
 #define	KLD_UNLOCK_READ()	sx_sunlock(&kld_sx)
-#define	KLD_LOCKED()		sx_xlocked(&kld_sx)
+#define	KLD_TRY_LOCK()		sx_try_xlock(&kld_sx)
 #define	KLD_LOCK_ASSERT() do {						\
 	if (!cold)							\
 		sx_assert(&kld_sx, SX_XLOCKED);				\
@@ -749,11 +749,9 @@ linker_file_lookup_set(linker_file_t file, const char *name,
 {
 	int error, locked;
 
-	locked = KLD_LOCKED();
-	if (!locked)
-		KLD_LOCK();
+	locked = KLD_TRY_LOCK();
 	error = LINKER_LOOKUP_SET(file, name, firstp, lastp, countp);
-	if (!locked)
+	if (locked)
 		KLD_UNLOCK();
 	return (error);
 }
@@ -774,11 +772,9 @@ linker_file_lookup_symbol(linker_file_t file, const char *name, int deps)
 	caddr_t sym;
 	int locked;
 
-	locked = KLD_LOCKED();
-	if (!locked)
-		KLD_LOCK();
+	locked = KLD_TRY_LOCK();
 	sym = linker_file_lookup_symbol_internal(file, name, deps);
-	if (!locked)
+	if (locked)
 		KLD_UNLOCK();
 	return (sym);
 }

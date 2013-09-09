@@ -53,12 +53,14 @@ int	rm_wowned(struct rmlock *rm);
 void	rm_sysinit(void *arg);
 void	rm_sysinit_flags(void *arg);
 
+#if LOCK_DEBUG > 0
 void	_rm_wlock_debug(struct rmlock *rm, const char *file, int line);
 void	_rm_wunlock_debug(struct rmlock *rm, const char *file, int line);
 int	_rm_rlock_debug(struct rmlock *rm, struct rm_priotracker *tracker,
 	    int trylock, const char *file, int line);
 void	_rm_runlock_debug(struct rmlock *rm,  struct rm_priotracker *tracker,
 	    const char *file, int line);
+#endif /* LOCK_DEBUG */
 
 void	_rm_wlock(struct rmlock *rm);
 void	_rm_wunlock(struct rmlock *rm);

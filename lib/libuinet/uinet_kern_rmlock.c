@@ -67,8 +67,11 @@ rm_init(struct rmlock *rm, const char *name)
 void
 rm_init_flags(struct rmlock *rm, const char *name, int opts)
 {
+	int rmopts = 0;
 
-	rw_init_flags((struct rwlock *)rm, name, opts);
+	if (opts & RM_RECURSE) rmopts |= RW_RECURSE;
+
+	rw_init_flags((struct rwlock *)rm, name, rmopts);
 }
 
 void
