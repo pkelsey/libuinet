@@ -652,11 +652,8 @@ if_netmap_receive(void *arg)
 					     rxr->slot[cur].len, 0, sc->ifp, NULL);
 
 				if (NULL == m) {
-					/* XXX drop packet now or spin the
-					 * receive loop in the hopes of
-					 * accomodating it before the rxring
-					 * fills and drops happen anyway? */
-					break;  /* for now, spin the loop */
+					/* XXX dropped. should count this */
+					printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>NO MBUFS (1)\n");
 				}
 
 				/* Recover this buffer at the far end of the
@@ -672,27 +669,32 @@ if_netmap_receive(void *arg)
 				m = m_gethdr(M_DONTWAIT, MT_DATA);
 				if (NULL == m) {
 					if_netmap_bufinfo_unalloc(&sc->rx_bufinfo);
-					/* XXX drop packet now or spin the
-					 * receive loop in the hopes of
-					 * accomodating it before the rxring
-					 * fills and drops happen anyway? */
-					break; /* for now, spin the loop */
+					printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>NO MBUFS (2)\n");
+					/* XXX dropped. should count this */
+
+					rxr->slot[sc->hw_rx_rsvd_begin].buf_idx = rxr->slot[cur].buf_idx;
+					rxr->slot[sc->hw_rx_rsvd_begin].flags |= NS_BUF_CHANGED;
+					sc->hw_rx_rsvd_begin = NETMAP_RING_NEXT(rxr, sc->hw_rx_rsvd_begin);
+				} else {
+
+					bi->nm_index = rxr->slot[cur].buf_idx;
+					
+					m->m_pkthdr.len = m->m_len = rxr->slot[cur].len;
+					m->m_pkthdr.rcvif = sc->ifp;
+					m->m_ext.ref_cnt = &bi->refcnt;
+					m_extadd(m, NETMAP_BUF(rxr, rxr->slot[cur].buf_idx),
+						 rxr->nr_buf_size, if_netmap_free, sc, bi, 0, EXT_EXTREF);
+
+					new_reserved++;
 				}
 
-				bi->nm_index = rxr->slot[cur].buf_idx;
-
-				m->m_pkthdr.len = m->m_len = rxr->slot[cur].len;
-				m->m_pkthdr.rcvif = sc->ifp;
-				m->m_ext.ref_cnt = &bi->refcnt;
-				m_extadd(m, NETMAP_BUF(rxr, rxr->slot[cur].buf_idx),
-					 rxr->nr_buf_size, if_netmap_free, sc, bi, 0, EXT_EXTREF);
-
-				new_reserved++;
 			}
 
 			cur = NETMAP_RING_NEXT(rxr, cur);
 
-			sc->ifp->if_input(sc->ifp, m);
+			if (m) {
+				sc->ifp->if_input(sc->ifp, m);
+			}
 		}
 
 		if (n > rxr->avail) {
