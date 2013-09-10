@@ -27,6 +27,8 @@
 #include <unistd.h>
 #undef pause
 
+#include <time.h>
+
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/systm.h>
@@ -41,6 +43,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sockio.h>
+#include <sys/sysctl.h>
 #include <sys/uio.h>
 
 #include <net/if.h>
@@ -57,7 +60,16 @@ extern in_addr_t inet_addr(const char *cp);
 #define MAX_VLANS_PER_TAG 4094
 
 
-typedef enum { CS_INIT, CS_RETRY,CS_CONNECTING, CS_CONNECTED, CS_DISCONNECTING, CS_DONE } conn_state_t;
+typedef enum {
+	CS_INIT,
+	CS_RETRY,
+	CS_CONNECTING,
+	CS_CONNECTED,
+	CS_SEND,
+	CS_WAIT_REPLY,
+	CS_DISCONNECTING,
+	CS_DONE
+} conn_state_t;
 
 struct server_context;
 
@@ -71,11 +83,17 @@ struct server_conn {
 	struct sockaddr_in remote_sin;
 };
 
+enum whichq { Q_NONE, Q_CONN, Q_SEND };
 
 struct client_conn {
-	TAILQ_ENTRY(client_conn) client_queue;
+	TAILQ_ENTRY(client_conn) connsend_queue;
+	TAILQ_ENTRY(client_conn) active_queue;
+	enum whichq qid;
+	unsigned long long sends;
+	unsigned long long recvs;
 	struct client_context *client;
 	struct socket *so;
+	int active;
 	conn_state_t conn_state;
 	conn_state_t last_conn_state;
 	unsigned int fib;
@@ -89,14 +107,19 @@ struct client_conn {
 	uint16_t foreign_port;
 	struct sockaddr_in local_sin;
 	struct sockaddr_in remote_sin;
+	unsigned int rcv_len;
+	char connstr[80];
 };
 
 
 TAILQ_HEAD(client_conn_listhead, client_conn);
 
 struct client_context {
-	struct client_conn_listhead queue;
-	struct mtx lock;
+	struct client_conn_listhead connect_queue;
+	struct client_conn_listhead send_queue;
+	struct client_conn_listhead active_queue;
+	struct mtx active_queue_lock;
+	unsigned int outstanding;
 	int notify;
 	int interleave;
 	uint8_t wirebuf[1024];
@@ -181,6 +204,21 @@ struct test_config tests[] = {
 
 	TEST_ACTIVE("one, tags", 1, "10.20.0.1", 1234, "10.0.0.1", 2222, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 42, 1, 3) ,
 
+	TEST_PASSIVE_N("1M, vlan heavy", 1, "10.0.0.1", 1, 2222, 1, 22, 1000000, 2, NULL), 
+	TEST_ACTIVE_N("1M, vlan heavy", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1, 2222, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 1000000, 2), 
+
+	TEST_PASSIVE_N("1M, dst ip heavy", 1, "10.0.0.1", 1000000, 2222, 1, 0, 1, 0, NULL),
+	TEST_ACTIVE_N("1M, dst ip heavy", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1000000, 2222, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0), 
+	TEST_PASSIVE_N("1M, dst port heavy", 1, "10.0.0.1", 16, 1, 62500, 0, 1, 0, NULL),
+	TEST_ACTIVE_N("1M, dst port heavy", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 16, 1, 62500, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
+
+	TEST_PASSIVE_N("1M, src ip heavy", 1, "10.0.0.1", 1, 2222, 1, 0, 1, 0, NULL),
+	TEST_ACTIVE_N("1M, src ip heavy", 1, "10.20.0.1", 1000000, 1234, 1, "10.0.0.1", 1, 2222, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
+	TEST_PASSIVE_N("1M, src port heavy", 1, "10.0.0.1", 1, 2222, 1, 0, 1, 0, NULL),
+	TEST_ACTIVE_N("1M, src port heavy", 1, "10.20.0.1", 16, 1, 62500, "10.0.0.1", 1, 2222, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
+
+	TEST_PASSIVE_N("1M, balanced", 1, "10.0.0.1", 10, 2222, 10, 1, 100, 1, NULL), 
+	TEST_ACTIVE_N("1M, balanced", 1, "10.20.0.1", 10, 1234, 10, "10.0.0.1", 10, 2222, 10, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 1, 100, 1), 
 
 	TEST_PASSIVE("any port, filtered", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 0, 1, 0, "uinet_test"), 
 	TEST_PASSIVE("any ip, any port, filtered", 1, "0.0.0.0", IN_PROMISC_PORT_ANY, 0, 1, 0, "uinet_test"), 
@@ -211,7 +249,6 @@ loopback_thread(void *arg)
 	struct iovec iov;
 	struct uio uio;
 	int error;
-	int rcv_flags = 0;
 	ssize_t len;
 	char buf1[32], buf2[32];
 
@@ -239,7 +276,7 @@ loopback_thread(void *arg)
 		uio.uio_segflg = UIO_SYSSPACE;
 		uio.uio_rw = UIO_READ;
 		uio.uio_td = curthread;
-		error = soreceive(so, NULL, &uio, NULL, NULL, &rcv_flags);
+		error = soreceive(so, NULL, &uio, NULL, NULL, NULL);
 		if ((0 != error) && (EAGAIN != error)) {
 			if (ECONNRESET != error) {
 				printf("loopback_thread: soreceive failed %d\n", error);
@@ -250,6 +287,8 @@ loopback_thread(void *arg)
 			if (len) {
 				iov.iov_base = server->copybuf;
 				iov.iov_len = sizeof(server->copybuf);
+				uio.uio_iov = &iov;
+				uio.uio_iovcnt = 1;
 				uio.uio_offset = 0;
 				uio.uio_resid = len;
 				uio.uio_rw = UIO_WRITE;
@@ -411,198 +450,310 @@ out:
 }
 
 
+static int
+client_issue(struct client_context *client, struct client_conn *cc)
+{
+	int error = 0;
+	int len;
+	struct iovec iov;
+	struct uio uio;
+
+
+	switch (cc->conn_state) {
+	case CS_INIT:
+	case CS_RETRY:
+		if (cc->so) {
+			if (client->notify) printf("%s CLOSING -> RETRYING\n", cc->connstr);
+			SOCKBUF_LOCK(&cc->so->so_rcv);
+			soupcall_clear(cc->so, SO_RCV);
+			SOCKBUF_UNLOCK(&cc->so->so_rcv);
+			soclose(cc->so);
+		}
+		
+
+		if (client->notify) printf("%s CONNECTING\n", cc->connstr);
+
+		TAILQ_REMOVE(&client->connect_queue, cc, connsend_queue);
+		cc->qid = Q_NONE;
+
+		cc->so = create_test_socket(TEST_TYPE_ACTIVE, cc->fib,
+					    cc->local_mac, cc->foreign_mac,
+					    cc->vlan_stack, cc->vlan_stack_depth,
+					    NULL, cc);
+		if (NULL == cc->so) {
+			printf("socket create failed\n");
+			error = EINVAL;
+		} else {
+			if ((error = dobind(cc->so, cc->local_addr, cc->local_port))) {
+				printf("dobind failed\n");
+			} else {
+				if ((error = doconnect(cc->so, cc->foreign_addr, cc->foreign_port))) {
+					printf("doconnect failed\n");
+				}
+			}
+		}
+
+		if (!error) {
+			client->connecting++;
+			cc->conn_state = CS_CONNECTING;
+		} else {
+			cc->conn_state = CS_RETRY;
+			TAILQ_INSERT_TAIL(&client->connect_queue, cc, connsend_queue);
+			cc->qid = Q_CONN;
+		}
+		break;
+
+	case CS_SEND:
+		TAILQ_REMOVE(&client->send_queue, cc, connsend_queue);
+		cc->qid = Q_NONE;
+
+		cc->sends++;
+
+		len = snprintf(client->wirebuf, sizeof(client->wirebuf), "%s %llu", cc->connstr, cc->sends);
+		cc->rcv_len = len >= sizeof(client->wirebuf) - 1 ? sizeof(client->wirebuf) : len + 1;
+
+		if (client->notify > 1) printf("%s sending %u bytes\n", cc->connstr, cc->rcv_len);
+		
+
+		iov.iov_base = client->wirebuf;
+		iov.iov_len = cc->rcv_len;
+		uio.uio_iov = &iov;
+		uio.uio_iovcnt = 1;
+		uio.uio_offset = 0;
+		uio.uio_resid = iov.iov_len;
+		uio.uio_segflg = UIO_SYSSPACE;
+		uio.uio_rw = UIO_WRITE;
+		uio.uio_td = curthread;
+		if ((error = sosend(cc->so, NULL, &uio, NULL, NULL, 0, curthread))) {
+			printf("verify_thread: sosend failed %d\n", error);
+		}
+
+		if (!error) {
+			cc->conn_state = CS_WAIT_REPLY;
+		} else {
+			cc->conn_state = CS_RETRY;
+			TAILQ_INSERT_TAIL(&client->connect_queue, cc, connsend_queue);
+			cc->qid = Q_CONN;
+		}
+
+		break;
+	default:
+		break;
+	}
+
+	return error;
+}
+
+
+
+static int
+handle_disconnect(struct client_context *client, struct client_conn *cc, unsigned int state_mask)
+{
+
+	if ((cc->so->so_state & SS_ISDISCONNECTED) & state_mask) {
+		if (client->notify) printf("%s DISCONNECTED\n", cc->connstr);
+		cc->conn_state = CS_RETRY;
+		client->connected--;
+		
+		switch (cc->qid) {
+		case Q_CONN:
+			TAILQ_REMOVE(&client->connect_queue, cc, connsend_queue);
+			break;
+		case Q_SEND:
+			TAILQ_REMOVE(&client->send_queue, cc, connsend_queue);
+			break;
+		default:
+			client->outstanding--;
+			break;
+		}
+		TAILQ_INSERT_TAIL(&client->connect_queue, cc, connsend_queue);
+		cc->qid = Q_CONN;
+	} else if ((cc->so->so_state & SS_ISDISCONNECTING) & state_mask) {
+		if (client->notify) printf("%s DISCONNECTING\n", cc->connstr);
+		cc->conn_state = CS_DISCONNECTING;
+	} else {
+		return (0);
+	}
+
+	return (1);
+}
+
+
+
 static void
 verify_thread(void *arg)
 {
 	struct client_context *client = (struct client_context *)arg;
-	struct client_conn *cc;
+	struct client_conn *cc, *cctmp;
+	struct socket *so;
 	struct iovec iov;
 	struct uio uio;
 	int error;
-	int rcv_flags = 0;
-	ssize_t len;
-	unsigned int pass, fail;
-	char connstr[80];
-	char buf1[32], buf2[32];
-	uint64_t cycle_number = 0;
-	int connection_cycle;
-	int data_cycle;
-	int size, remaining;
-	int i;
+	unsigned int pass = 0, fail = 0;
+	unsigned int max_outstanding = 1024;
+	unsigned int max_connects_per_period = 1500;
+	struct timespec connect_rate_limit_period = { 0, 100 * 1000 * 1000 };
+	unsigned int connects_in_last_period;
+	unsigned int sends_in_last_period;
+	unsigned int last_connected;
+	struct timespec this_time, elapsed_time;
+	struct timespec last_print_time;
+	struct timespec last_conn_rate_limit_time;
+
+	client->outstanding = 0;
+	connects_in_last_period = 0;
+	sends_in_last_period = 0;
+	last_connected = 0;
+
+	clock_gettime(CLOCK_REALTIME, &this_time);
+	last_conn_rate_limit_time = last_print_time = this_time;
 
 	while(1) {
-		printf("verify cycle %llu started\n", (unsigned long long)cycle_number);
+		clock_gettime(CLOCK_REALTIME, &this_time);
 
-		cc = TAILQ_FIRST(&client->queue);
-		
-		pass = 0;
-		fail = 0;
+		elapsed_time = this_time;
+		timespecsub(&elapsed_time, &last_print_time);
+		if (elapsed_time.tv_sec >= 5) {
+			printf("outstanding=%u connecting=%u connected=%u pass=%u fail=%u connects/sec=%u sends/sec=%u\n",
+			       client->outstanding, client->connecting, client->connected, pass, fail,
+			       client->connected > last_connected ? (client->connected - last_connected) / (unsigned int)elapsed_time.tv_sec : 0,
+			       sends_in_last_period / (unsigned int)elapsed_time.tv_sec);
 
-		if (NULL == cc) {
-			printf("No connections defined.\n");
-			break;
+			last_connected = client->connected;
+			sends_in_last_period = 0;
+			last_print_time = this_time;
 		}
+
+		elapsed_time = this_time;
+		timespecsub(&elapsed_time, &last_conn_rate_limit_time);
+		if (timespeccmp(&elapsed_time, &connect_rate_limit_period, >)) {
+			connects_in_last_period = 0;
+			last_conn_rate_limit_time = this_time;
+		}		
+
+		TAILQ_FOREACH_SAFE(cc, &client->connect_queue, connsend_queue, cctmp) {
+			if ((client->outstanding == max_outstanding) ||
+			    (connects_in_last_period >= max_connects_per_period))
+				break;
+			
+			if (0 == client_issue(client, cc)) {
+				client->outstanding++;
+				connects_in_last_period++;
+			}
+		}	
 		
-		connection_cycle =
-		    client->interleave ||
-		    (cycle_number <= 1) ||
-		    (!client->interleave && !(cycle_number & 0x1));
-
-		data_cycle =
-		    client->interleave ||
-		    (!client->interleave && (cycle_number > 1) && (cycle_number & 0x1));
-
-		TAILQ_FOREACH(cc, &client->queue, client_queue) {
-			struct in_addr laddr, faddr;
-
-			remaining = sizeof(connstr);
-
-			laddr.s_addr = cc->local_addr;
-			faddr.s_addr = cc->foreign_addr;
-			size = snprintf(connstr, sizeof(connstr), "%s:%u -> %s:%u vlans=[ ", 
-					inet_ntoa_r(laddr, buf1), cc->local_port,
-					inet_ntoa_r(faddr, buf2), cc->foreign_port);
-
-			for (i = 0; i < cc->vlan_stack_depth; i++) {
-				remaining = size > remaining ? 0 : remaining - size;
-				if (remaining) {
-					size = snprintf(&connstr[sizeof(connstr) - remaining], remaining, "%u ", cc->vlan_stack[i]);  
-				}
+		TAILQ_FOREACH_SAFE(cc, &client->send_queue, connsend_queue, cctmp) {
+			if (client->outstanding == max_outstanding)
+				break;
+			
+			if (0 == client_issue(client, cc)) {
+				client->outstanding++;
+				sends_in_last_period++;
 			}
-			remaining = size > remaining ? 0 : remaining - size;
-			if (remaining) {
-				snprintf(&connstr[sizeof(connstr) - remaining], remaining, "]");	
+		}	
+		
+		mtx_lock(&client->active_queue_lock);
+		while (NULL == TAILQ_FIRST(&client->active_queue))
+			mtx_sleep(&client->active_queue, &client->active_queue_lock, 0, "wcaqlk", 0);
+		mtx_unlock(&client->active_queue_lock);
+	
+
+		while (1) {
+			mtx_lock(&client->active_queue_lock);
+			cc = TAILQ_FIRST(&client->active_queue);
+			if (cc) {
+				TAILQ_REMOVE(&client->active_queue, cc, active_queue);
+				cc->active = 0;
+			}
+			mtx_unlock(&client->active_queue_lock);
+
+			if (NULL == cc) {
+				break;
 			}
 
-			if (client->notify) {
-				printf("verifying %s\n", connstr);
-			}
+			so = cc->so;
 
-			mtx_lock(&client->lock);
 			switch (cc->conn_state) {
-			case CS_INIT:
-			case CS_RETRY:
-				if (connection_cycle) {
-					if (CS_INIT == cc->conn_state) {
-						client->connecting++;
-					}
+			case CS_CONNECTING:
+				client->connecting--;
+				if (0 == handle_disconnect(client, cc,
+							   SS_ISDISCONNECTING | SS_ISDISCONNECTED)) {
 
-					cc->last_conn_state = cc->conn_state;
-					cc->conn_state = CS_CONNECTING;
-					mtx_unlock(&client->lock);
-				
-					if (cc->so) {
-						SOCKBUF_LOCK(&cc->so->so_rcv);
-						soupcall_set(cc->so, SO_RCV, NULL, NULL);
-						SOCKBUF_UNLOCK(&cc->so->so_rcv);
-						soclose(cc->so);
-					}
+					if (client->notify) printf("%s CONNECTED\n", cc->connstr);
+					cc->conn_state = CS_SEND;
+					client->connected++;
+					client->outstanding--;
+					
+					TAILQ_INSERT_TAIL(&client->send_queue, cc, connsend_queue);
+					cc->qid = Q_SEND;
+				}
+				break;
+			case CS_SEND:
+				handle_disconnect(client, cc,
+						  SS_ISDISCONNECTING | SS_ISDISCONNECTED);
+				break;
+			case CS_WAIT_REPLY:
+				if (0 == handle_disconnect(client, cc,
+							   SS_ISDISCONNECTING | SS_ISDISCONNECTED)) {
+					int ready;
 
-					error = 0;
-					cc->so = create_test_socket(TEST_TYPE_ACTIVE, cc->fib,
-								    cc->local_mac, cc->foreign_mac,
-								    cc->vlan_stack, cc->vlan_stack_depth,
-								    NULL, cc);
-					if (NULL == cc->so) {
-						printf("socket create failed\n");
-						error = EINVAL;
-					} else {
-						if ((error = dobind(cc->so, cc->local_addr, cc->local_port))) {
-							printf("dobind failed\n");
+					SOCKBUF_LOCK(&so->so_rcv);
+					ready = (so->so_rcv.sb_cc >= cc->rcv_len);
+					SOCKBUF_UNLOCK(&so->so_rcv);
+					
+					if (ready) {
+						cc->recvs++;
+
+						iov.iov_base = client->wirebuf;
+						iov.iov_len = cc->rcv_len;
+						uio.uio_iov = &iov;
+						uio.uio_iovcnt = 1;
+						uio.uio_offset = 0;
+						uio.uio_resid = iov.iov_len;
+						uio.uio_segflg = UIO_SYSSPACE;
+						uio.uio_rw = UIO_READ;
+						uio.uio_td = curthread;
+						error = soreceive(so, NULL, &uio, NULL, NULL, NULL);
+						if (0 != error) {
+							printf("verify_thread: soreceive failed %d\n", error);
+							cc->conn_state = CS_RETRY;
 						} else {
-							if ((error = doconnect(cc->so, cc->foreign_addr, cc->foreign_port))) {
-								printf("doconnect failed\n");
+							if (0 != strncmp(cc->connstr, client->wirebuf, strlen(cc->connstr))) {
+								printf("verification failed\n");
+								cc->conn_state = CS_RETRY;
+								fail++;
+							} else {
+								cc->conn_state = CS_SEND;
+								pass++;
 							}
 						}
-					}
 
-					if (error) {
-						mtx_lock(&client->lock);
-						client->connecting--;
-						client->retrying++;
-						client->retries++;
+						client->outstanding--;
 
-						cc->last_conn_state = cc->conn_state;
-						cc->conn_state = CS_RETRY;
-						mtx_unlock(&client->lock);
-					}
-				} else {
-					mtx_unlock(&client->lock);
-				}
-				break;
-			case CS_CONNECTING:
-				mtx_unlock(&client->lock);
-				break;
-			case CS_CONNECTED:
-				if (data_cycle) {
-					mtx_unlock(&client->lock);
-
-					snprintf(client->wirebuf, sizeof(client->wirebuf), "%s", connstr);
-					len = strlcpy(client->verifybuf, client->wirebuf, sizeof(client->verifybuf)) + 1;
-			
-					iov.iov_base = client->wirebuf;
-					iov.iov_len = len;
-					uio.uio_iov = &iov;
-					uio.uio_iovcnt = 1;
-					uio.uio_offset = 0;
-					uio.uio_resid = iov.iov_len;
-					uio.uio_segflg = UIO_SYSSPACE;
-					uio.uio_rw = UIO_WRITE;
-					uio.uio_td = curthread;
-					error = sosend(cc->so, NULL, &uio, NULL, NULL, 0, curthread);
-					if (0 != error) {
-						printf("verify_thread: sosend failed %d\n", error);
-					}
-
-					memset(client->wirebuf, 0, len);
-
-					iov.iov_base = client->wirebuf;
-					iov.iov_len = len;
-					uio.uio_iov = &iov;
-					uio.uio_iovcnt = 1;
-					uio.uio_offset = 0;
-					uio.uio_resid = iov.iov_len;
-					uio.uio_segflg = UIO_SYSSPACE;
-					uio.uio_rw = UIO_READ;
-					uio.uio_td = curthread;
-					error = soreceive(cc->so, NULL, &uio, NULL, NULL, &rcv_flags);
-					if (0 != error) {
-						printf("loopback_thread: soreceive failed %d\n", error);
-					} else {
-						if (0 != strcmp(client->verifybuf, client->wirebuf)) {
-							printf("verification failed\n");
-							fail++;
+						if (CS_SEND == cc->conn_state) {
+							TAILQ_INSERT_TAIL(&client->send_queue, cc, connsend_queue);
+							cc->qid = Q_SEND;
 						} else {
-							pass++;
+							TAILQ_INSERT_TAIL(&client->connect_queue, cc, connsend_queue);
+							cc->qid = Q_CONN;
 						}
+					} else {
+						if (client->notify) printf("NOT READY\n");
 					}
-				} else {
-					mtx_unlock(&client->lock);
 				}
 				break;
 			case CS_DISCONNECTING:
+				handle_disconnect(client, cc, SS_ISDISCONNECTED);
 				break;
-			case CS_DONE:
+			default:
+				printf("connection active in unexpected state %u\n", cc->conn_state);
 				break;
+				
 			}
-
 		}
-
-		if (connection_cycle) {
-			printf("connected=%u connecting=%u disconnecting=%u retrying=%u connects=%u disconnects=%u retries=%u\n",
-			       client->connected, client->connecting, client->disconnecting, client->retrying, client->connects,
-			       client->disconnects, client->retries);
-		}
-
-		if (data_cycle) {
-			printf("pass=%u fail=%u\n", pass, fail); 
-		}
-
-		cycle_number++;
-		pause("vrfy", 2*hz);
 	}
 
-	mtx_destroy(&client->lock);
+	mtx_destroy(&client->active_queue_lock);
 	free(client, M_DEVBUF);
 }
 
@@ -612,99 +763,14 @@ client_upcall(struct socket *so, void *arg, int waitflag)
 {
 	struct client_conn *cc = arg;
 	struct client_context *client = cc->client;
-	struct sockaddr_in *sin;
-	int error;
-	int notify = 0;
 
-	mtx_lock(&client->lock);
-	
-	switch (cc->conn_state) {
-	case CS_INIT:
-	case CS_RETRY:
-		break;
-	case CS_CONNECTING:
-		client->connected++;  /* needs to be out here to count
-				       * properly in the
-				       * transition-to-disconnect(ing)
-				       * cases
-				       */
-		if (so->so_state & SS_ISCONNECTED) {
-			client->connects++;
-			if (CS_INIT == cc->last_conn_state) {
-				client->connecting--;
-			} else {
-				client->retrying--;
-			}
-
-			if (0 == (client->connected % 1000))
-				notify = 1;
-
-			cc->last_conn_state = cc->conn_state;
-			cc->conn_state = CS_CONNECTED;
-
-			sin = NULL;
-			error = (*so->so_proto->pr_usrreqs->pru_peeraddr)(so, (struct sockaddr **)&sin);
-			if (error) {
-				printf("Error getting peer address %d\n", error);
-			}
-	
-			if (sin) {
-				memcpy(&cc->remote_sin, sin, sizeof(struct sockaddr_in));
-				free(sin, M_SONAME);
-			}
-
-			sin = NULL;
-			error = (*so->so_proto->pr_usrreqs->pru_sockaddr)(so, (struct sockaddr **)&sin);
-			if (error) {
-				printf("Error getting local address %d\n", error);
-			}
-	
-			if (sin) {
-				memcpy(&cc->local_sin, sin, sizeof(struct sockaddr_in));
-				free(sin, M_SONAME);
-			}
-			break;
-		} 
-		/* fallthrough */
-	case CS_CONNECTED:
-		if (so->so_state & SS_ISDISCONNECTED) {
-			client->connected--;
-			client->retrying++;
-			client->disconnects++;
-			client->retries++;
-
-			cc->last_conn_state = cc->conn_state;
-			cc->conn_state = CS_RETRY;
-		} else if (so->so_state & SS_ISDISCONNECTING) {
-			client->disconnecting++;
-
-			cc->last_conn_state = cc->conn_state;
-			cc->conn_state = CS_DISCONNECTING;
-		} 
-		break;
-	case CS_DISCONNECTING:
-		if (so->so_state & SS_ISDISCONNECTED) {
-			client->connected--;
-			client->disconnecting--;
-			client->retrying++;
-			client->retries++;
-			client->disconnects++;
-
-
-
-			cc->last_conn_state = cc->conn_state;
-			cc->conn_state = CS_RETRY;
-		}
-		break;
-	case CS_DONE:
-		break;
+	mtx_lock(&client->active_queue_lock);
+	if (!cc->active) {
+		cc->active = 1;
+		TAILQ_INSERT_TAIL(&client->active_queue, cc, active_queue);
+		wakeup_one(&client->active_queue);
 	}
-
-	mtx_unlock(&client->lock);
-
-	if (notify)
-		printf("connected=%u connecting=%u disconnecting=%u retrying=%u connects=%u disconnects=%u retries=%u\n",
-		       client->connected, client->connecting, client->disconnecting, client->retrying, client->connects, client->disconnects, client->retries);
+	mtx_unlock(&client->active_queue_lock);
 
 	return (SU_OK);
 }
@@ -1077,9 +1143,13 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 	if ((error = setopt_int(so, IPPROTO_IP, IP_BINDANY, 1, "IP_BINDANY")))
 		goto err;
 
+	if ((error = setopt_int(so, IPPROTO_TCP, TCP_NODELAY, 1, "TCP_NODELAY")))
+		goto err;
+
 	memset(&l2i, 0, sizeof(l2i));
 		
 	if (TEST_TYPE_ACTIVE == test_type) {
+
 		if ((error = mac_aton(foreign_mac, l2i.inl2i_foreign_addr)))
 			goto err;
 		
@@ -1113,6 +1183,8 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 	}
 
 	ts->inl2t_cnt = vlan_stack_depth;
+
+	/* XXX assuming 802.1ad/802.1q */
 	for (i = 0; i < vlan_stack_depth; i++) {
 		uint32_t ethertype;
 
@@ -1122,7 +1194,7 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 
 		ts->inl2t_tags[i] = htonl((ethertype << 16) | vlan_stack[i]);
 	}
-	ts->inl2t_mask = htonl(0x00000fff);  /* XXX assuming 802.1Q */
+	ts->inl2t_mask = htonl(0x00000fff); 
 
 	if ((error = so_setsockopt(so, SOL_SOCKET, SO_L2INFO, &l2i, sizeof(l2i)))) {
 		printf("Promisc socket SO_L2INFO set failed (%d)\n", error);
@@ -1159,8 +1231,8 @@ run_test(struct test_config *test, int verbose)
 	unsigned int foreign_addr_num, foreign_port_num;
 	in_addr_t foreign_addr;
 	in_port_t foreign_port;
-	struct client_context *client;
-	struct server_context *server;
+	struct client_context *client = NULL;
+	struct server_context *server = NULL;
 
 
 	print_test_config(test);
@@ -1169,8 +1241,10 @@ run_test(struct test_config *test, int verbose)
 
 	if (TEST_TYPE_ACTIVE == test->type) {
 		client = malloc(sizeof(struct client_context), M_DEVBUF, M_WAITOK | M_ZERO);
-		TAILQ_INIT(&client->queue);
-		mtx_init(&client->lock, "clnqlk", NULL, MTX_DEF);
+		TAILQ_INIT(&client->connect_queue);
+		TAILQ_INIT(&client->send_queue);
+		TAILQ_INIT(&client->active_queue);
+		mtx_init(&client->active_queue_lock, "clnqlk", NULL, MTX_DEF);
 		client->notify = verbose;
 		client->interleave = 0;
 	} else {
@@ -1227,6 +1301,9 @@ run_test(struct test_config *test, int verbose)
 						foreign_port = test->foreign_port_start;
 						for (foreign_port_num = 0; foreign_port_num < num_foreign_ports; foreign_port_num++) {
 							struct client_conn *cc;
+							struct in_addr laddr, faddr;
+							char buf1[16], buf2[16];
+							int size, remaining, i;
 
 							cc = malloc(sizeof(struct client_conn), M_DEVBUF, M_WAITOK | M_ZERO);
 							if (NULL == cc) {
@@ -1248,9 +1325,31 @@ run_test(struct test_config *test, int verbose)
 							}
 							cc->vlan_stack_depth = test->vlan_stack_depth;
 
+
+							remaining = sizeof(cc->connstr);
+							
+							laddr.s_addr = cc->local_addr;
+							faddr.s_addr = cc->foreign_addr;
+							size = snprintf(cc->connstr, remaining, "%s:%u -> %s:%u vlans=[ ", 
+									inet_ntoa_r(laddr, buf1), cc->local_port,
+									inet_ntoa_r(faddr, buf2), cc->foreign_port);
+							
+							for (i = 0; i < cc->vlan_stack_depth; i++) {
+								remaining = size > remaining ? 0 : remaining - size;
+								if (remaining) {
+									size = snprintf(&cc->connstr[sizeof(cc->connstr) - remaining],
+											remaining, "%u ", cc->vlan_stack[i]);  
+								}
+							}
+							remaining = size > remaining ? 0 : remaining - size;
+							if (remaining) {
+								snprintf(&cc->connstr[sizeof(cc->connstr) - remaining], remaining, "]");	
+							}
+
 							socket_count++;
 
-							TAILQ_INSERT_TAIL(&cc->client->queue, cc, client_queue);
+							cc->qid = Q_CONN;
+							TAILQ_INSERT_TAIL(&cc->client->connect_queue, cc, connsend_queue);
 
 							foreign_port++;
 						}
@@ -1292,7 +1391,7 @@ run_test(struct test_config *test, int verbose)
 	if (TEST_TYPE_ACTIVE == test->type) {
 		if (kthread_add(verify_thread, client, NULL, NULL, 0, 128*1024/PAGE_SIZE, "verify_cln")) {
 			printf("Failed to create client thread\n");
-			mtx_destroy(&client->lock);
+			mtx_destroy(&client->active_queue_lock);
 			free(client, M_DEVBUF);
 			goto out;
 		}
@@ -1346,6 +1445,7 @@ usage(const char *progname)
 }
 
 
+extern int min_to_ticks;
 
 int main(int argc, char **argv)
 {
@@ -1452,15 +1552,42 @@ int main(int argc, char **argv)
 	unsigned int current = 0;
 	unsigned int last_read = 0;
 	unsigned int min, avg, max;
+	struct timespec last_time, this_time, elapsed;
+
+	clock_gettime(CLOCK_REALTIME, &last_time);
 	while (1) {
 		pause("slp", hz);
 
 		current++;
-		if (current - last_read > 10) {
+		if (current - last_read >= 10) {
+			clock_gettime(CLOCK_REALTIME, &this_time);
+			elapsed = this_time;
+			timespecsub(&elapsed, &last_time);
+			last_time = this_time;
+
 			last_read = current;
 			tcp_tcbinfo_hashstats(&min, &avg, &max);
 			printf("TCP tcbinfo hashstats: min=%u avg=%u max=%u\n",
 			       min, avg, max);
+			
+			int values[4];
+			ssize_t len = sizeof(values[0]);
+			kernel_sysctlbyname(curthread, "debug.to_avg_depth", &values[0], &len, NULL, 0, NULL, 0);
+			kernel_sysctlbyname(curthread, "debug.to_avg_gcalls", &values[1], &len, NULL, 0, NULL, 0);
+			kernel_sysctlbyname(curthread, "debug.to_avg_lockcalls", &values[2], &len, NULL, 0, NULL, 0);
+			kernel_sysctlbyname(curthread, "debug.to_avg_mpcalls", &values[3], &len, NULL, 0, NULL, 0);
+			printf("to_avg_depth=%d.%03d ", values[0] / 1000, values[0] % 1000);
+			printf("to_avg_gcalls=%d.%03d ", values[1] / 1000, values[1] % 1000);
+			printf("to_avg_lockcalls=%d.%03d ", values[2] / 1000, values[2] % 1000);
+			printf("to_avg_mpcalls=%d.%03d\n", values[3] / 1000, values[3] % 1000);
+			
+			printf("ticks=%u\n", ticks);
+			
+			uint64_t est_hz;
+			
+			est_hz = (10 * 1000000000ULL * (uint64_t)hz) / ((uint64_t)elapsed.tv_sec * 1000000000 + elapsed.tv_nsec);
+
+			printf("est. hz = %u, min_to_ticks=%d\n", (unsigned int)est_hz, min_to_ticks);
 		}
 	}
 
