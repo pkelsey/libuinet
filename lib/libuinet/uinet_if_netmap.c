@@ -757,7 +757,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 
 	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
 
-	if (kthread_add(if_netmap_send, sc, NULL, &sc->tx_thread, 0, 0, "nm_tx")) {
+	if (kthread_add(if_netmap_send, sc, NULL, &sc->tx_thread, 0, 0, "nm_tx: %s", ifp->if_xname)) {
 		printf("Could not start transmit thread for %s\n", sc->cfg->spec);
 		ether_ifdetach(ifp);
 		if_free(ifp);
@@ -765,7 +765,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	}
 
 
-	if (kthread_add(if_netmap_receive, sc, NULL, &sc->rx_thread, 0, 0, "nm_rx")) {
+	if (kthread_add(if_netmap_receive, sc, NULL, &sc->rx_thread, 0, 0, "nm_rx: %s", ifp->if_xname)) {
 		printf("Could not start receive thread for %s\n", sc->cfg->spec);
 		ether_ifdetach(ifp);
 		if_free(ifp);
