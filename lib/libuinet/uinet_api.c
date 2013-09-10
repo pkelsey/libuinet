@@ -67,6 +67,7 @@ uinet_interface_up(const char *canonical_name, unsigned int qno)
 	}
 
 	ifr.ifr_flags |= IFF_UP;
+	ifr.ifr_flagshigh |= (IFF_PPROMISC | IFF_PROMISCINET) >> 16;
 	error = ifioctl(cfg_so, SIOCSIFFLAGS, (caddr_t)&ifr, td);
 	if (0 != error) {
 		printf("SSIOCSIFFLAGS failed %d\n", error);

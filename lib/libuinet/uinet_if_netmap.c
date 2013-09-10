@@ -739,7 +739,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 
 	snprintf(basename, IF_NAMESIZE, "%s%u:", sc->cfg->basename, sc->cfg->unit);
 	if_initname(ifp, basename, sc->cfg->queue);
-	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST | IFF_PPROMISC | IFF_PROMISCINET;
+	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = if_netmap_ioctl;
 	ifp->if_start = if_netmap_start;
 
