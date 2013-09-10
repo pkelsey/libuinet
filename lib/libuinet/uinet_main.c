@@ -115,6 +115,7 @@ struct client_conn {
 TAILQ_HEAD(client_conn_listhead, client_conn);
 
 struct client_context {
+	unsigned int id;
 	struct client_conn_listhead connect_queue;
 	struct client_conn_listhead send_queue;
 	struct client_conn_listhead active_queue;
@@ -137,6 +138,7 @@ struct client_context {
 TAILQ_HEAD(server_conn_listhead, server_conn);
 
 struct server_context {
+	unsigned int id;
 	struct server_conn_listhead queue;
 	struct mtx lock;
 	int notify;
@@ -149,6 +151,7 @@ struct server_context {
 struct test_config {
 	unsigned int num;
 	char *name;
+	char *ifname;
 	unsigned int type;
 	unsigned int fib;
 	char *local_ip_start;
@@ -165,23 +168,8 @@ struct test_config {
         unsigned int num_vlans;
 	int vlan_stack_depth;
 	char * syn_filter_name;
+	unsigned int notify;
 };
-
-
-#define TEST_PASSIVE(name, fib, ip, port, vlanstart, nvlans, vlanstackdepth, synfilter)	\
-	TEST_PASSIVE_N(name, fib, ip, 1, port, 1, vlanstart, nvlans, vlanstackdepth, synfilter)
-
-#define TEST_PASSIVE_N(name, fib, ip, nips, port, nports, vlanstart, nvlans, vlanstackdepth, synfilter) \
-	{ 0, (name), TEST_TYPE_PASSIVE, (fib), (ip), (nips), (port), (nports), 0, 0, 0, 0, NULL, NULL, (vlanstart), (nvlans), (vlanstackdepth), (synfilter) }
-
-#define TEST_ACTIVE(name, fib, localip, localport, foreignip, foreignport, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth) \
-	TEST_ACTIVE_N(name, fib, localip, 1, localport, 1, foreignip, 1, foreignport, 1, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth)
-
-#define TEST_ACTIVE_N(name, fib, localip, nlocalips, localport, nlocalports, foreignip, nforeignips, foreignport, nforeignports, localmac, foreignmac, vlanstart, nvlans, vlanstackdepth) \
-	{ 0, (name), TEST_TYPE_ACTIVE, (fib), (localip), (nlocalips), (localport), (nlocalports), (foreignip), (nforeignips), (foreignport), (nforeignports),(localmac), (foreignmac), (vlanstart), (nvlans), (vlanstackdepth) }
-
-#define VLANS(...) { __VA_ARGS__ }
-
 
 static int dobind(struct socket *so, in_addr_t addr, in_port_t port);
 static int doconnect(struct socket *so, in_addr_t addr, in_port_t port);
@@ -191,53 +179,6 @@ static struct socket * create_test_socket(unsigned int test_type, unsigned int f
 					  const char *syn_filter_name, void *upcall_arg);
 
 
-struct test_config tests[] = {
-
-	TEST_PASSIVE("sp. ip, sp. port, sp. tags, filt.", 1, "10.0.0.1",                2222, 42, 1,  3, "uinet_test"), 
-	TEST_PASSIVE("any ip, sp. port, sp. tags, filt.", 1,  "0.0.0.0",                2222, 42, 1,  1, "uinet_test"), 
-	TEST_PASSIVE("sp. ip, any port, sp. tags, filt.", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 42, 1,  1, "uinet_test"), 
-	TEST_PASSIVE("any ip, any port, sp. tags, filt.", 1,  "0.0.0.0", IN_PROMISC_PORT_ANY, 42, 1,  1, "uinet_test"), 
-	TEST_PASSIVE("sp. ip, sp. port, any tags, filt.", 1, "10.0.0.1",                2222,  0, 1, -1, "uinet_test"), 
-	TEST_PASSIVE("any ip, sp. port, any tags, filt.", 1,  "0.0.0.0",                2222,  0, 1, -1, "uinet_test"), 
-	TEST_PASSIVE("sp. ip, any port, any tags, filt.", 1, "10.0.0.1", IN_PROMISC_PORT_ANY,  0, 1, -1, "uinet_test"), 
-	TEST_PASSIVE("any ip, any port, any tags, filt.", 1,  "0.0.0.0", IN_PROMISC_PORT_ANY,  0, 1, -1, "uinet_test"), 
-
-	TEST_ACTIVE("one, tags", 1, "10.20.0.1", 1234, "10.0.0.1", 2222, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 42, 1, 3) ,
-
-	TEST_PASSIVE_N("1M, vlan heavy", 1, "10.0.0.1", 1, 2222, 1, 22, 1000000, 2, NULL), 
-	TEST_ACTIVE_N("1M, vlan heavy", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1, 2222, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 1000000, 2), 
-
-	TEST_PASSIVE_N("1M, dst ip heavy", 1, "10.0.0.1", 1000000, 2222, 1, 0, 1, 0, NULL),
-	TEST_ACTIVE_N("1M, dst ip heavy", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1000000, 2222, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0), 
-	TEST_PASSIVE_N("1M, dst port heavy", 1, "10.0.0.1", 16, 1, 62500, 0, 1, 0, NULL),
-	TEST_ACTIVE_N("1M, dst port heavy", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 16, 1, 62500, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
-
-	TEST_PASSIVE_N("1M, src ip heavy", 1, "10.0.0.1", 1, 2222, 1, 0, 1, 0, NULL),
-	TEST_ACTIVE_N("1M, src ip heavy", 1, "10.20.0.1", 1000000, 1234, 1, "10.0.0.1", 1, 2222, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
-	TEST_PASSIVE_N("1M, src port heavy", 1, "10.0.0.1", 1, 2222, 1, 0, 1, 0, NULL),
-	TEST_ACTIVE_N("1M, src port heavy", 1, "10.20.0.1", 16, 1, 62500, "10.0.0.1", 1, 2222, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
-
-	TEST_PASSIVE_N("1M, balanced", 1, "10.0.0.1", 10, 2222, 10, 1, 100, 1, NULL), 
-	TEST_ACTIVE_N("1M, balanced", 1, "10.20.0.1", 10, 1234, 10, "10.0.0.1", 10, 2222, 10, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 1, 100, 1), 
-
-	TEST_PASSIVE("any port, filtered", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 0, 1, 0, "uinet_test"), 
-	TEST_PASSIVE("any ip, any port, filtered", 1, "0.0.0.0", IN_PROMISC_PORT_ANY, 0, 1, 0, "uinet_test"), 
-	TEST_PASSIVE("any port", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 0, 1, 0, NULL), 
-	TEST_PASSIVE("any port, many vlans", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 22, 1000000, 2, NULL), 
-	TEST_PASSIVE("any port, many vlans", 1, "10.0.0.1", IN_PROMISC_PORT_ANY, 22, 2, 2, NULL), 
-	TEST_PASSIVE_N("many any port", 1, "10.0.0.1", 20000, IN_PROMISC_PORT_ANY, 1, 0, 1, 0, NULL), 
-	TEST_PASSIVE_N("many any port, many vlans", 1, "10.0.0.1", 100, IN_PROMISC_PORT_ANY, 1, 22, 100, 1, NULL), 
-	TEST_PASSIVE_N("many specific port", 1, "10.0.0.1", 66, 1, 1000, 0, 1, 0, NULL), 
-
-	TEST_ACTIVE("one", 1, "10.20.0.1", 1234, "10.0.0.1", 2222, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0) ,
-	TEST_ACTIVE_N("one local, many foreign", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1000, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
-	TEST_ACTIVE_N("one local, many foreign", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 20000, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0),
-	TEST_ACTIVE_N("one local, many foreign, many vlans", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 100, 1, 100, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 100, 1),
-	TEST_ACTIVE_N("one local, one foreign, many vlans", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1, 1, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 1000000, 2),
-	TEST_ACTIVE_N("one local, one foreign, many vlans", 1, "10.20.0.1", 1, 1234, 1, "10.0.0.1", 1, 1, 1, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 22, 2, 2),
-
-	TEST_ACTIVE_N("many local, many foreign", 1, "10.20.0.1", 2, 1234, 1, "10.0.0.1", 1, 1, 40000, "00:0c:29:15:11:e2", "00:0c:29:d2:ba:ec", 0, 1, 0) 
-};
 
 
 static void
@@ -614,8 +555,8 @@ verify_thread(void *arg)
 		elapsed_time = this_time;
 		timespecsub(&elapsed_time, &last_print_time);
 		if (elapsed_time.tv_sec >= 5) {
-			printf("outstanding=%u connecting=%u connected=%u pass=%u fail=%u connects/sec=%u sends/sec=%u\n",
-			       client->outstanding, client->connecting, client->connected, pass, fail,
+			printf("id %3u: outstanding=%u connecting=%u connected=%u pass=%u fail=%u connects/sec=%u sends/sec=%u\n",
+			       client->id, client->outstanding, client->connecting, client->connected, pass, fail,
 			       client->connected > last_connected ? (client->connected - last_connected) / (unsigned int)elapsed_time.tv_sec : 0,
 			       sends_in_last_period / (unsigned int)elapsed_time.tv_sec);
 
@@ -1106,6 +1047,11 @@ print_test_config(struct test_config *test)
 			printf(" %u", vlan_tag_stack[tagnum]);
 		}
 		printf(" ]\n");
+
+		printf("%-36s                                          local_mac=%s\n",
+		       "", test->local_mac);
+		printf("%-36s                                        foreign_mac=%s\n",
+		       "", test->foreign_mac);
 	}
 
 }
@@ -1210,6 +1156,30 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 }
 
 
+static unsigned int
+min_tag_stack_depth(unsigned int first_vlan, unsigned int num_vlans)
+{
+	unsigned int depth = 0;
+	unsigned int remaining_vlans = num_vlans;
+	unsigned int residual;
+
+	num_vlans += first_vlan - 1;
+	do {
+		residual = remaining_vlans % MAX_VLANS_PER_TAG;
+		remaining_vlans /= MAX_VLANS_PER_TAG;
+
+		depth++;
+	} while (remaining_vlans > 1);
+
+	if (remaining_vlans && residual) {
+		depth++;
+	}
+
+	return (depth);
+}
+
+
+
 static int
 run_test(struct test_config *test, int verbose)
 {
@@ -1245,13 +1215,15 @@ run_test(struct test_config *test, int verbose)
 		TAILQ_INIT(&client->send_queue);
 		TAILQ_INIT(&client->active_queue);
 		mtx_init(&client->active_queue_lock, "clnqlk", NULL, MTX_DEF);
-		client->notify = verbose;
+		client->id = test->num;
+		client->notify = test->notify;
 		client->interleave = 0;
 	} else {
 		server = malloc(sizeof(struct server_context), M_DEVBUF, M_WAITOK | M_ZERO);
 		TAILQ_INIT(&server->queue);
 		mtx_init(&server->lock, "svrqlk", NULL, MTX_DEF);
-		server->notify = verbose;
+		server->id = test->num;
+		server->notify = test->notify;
 
 		if (kthread_add(loopback_thread, server, NULL, NULL, 0, 128*1024/PAGE_SIZE, "loopback_svr")) {
 			mtx_destroy(&server->lock);
@@ -1269,6 +1241,7 @@ run_test(struct test_config *test, int verbose)
 		for (i = 0; i < test->vlan_stack_depth; i++) {
 			max_vlans *= MAX_VLANS_PER_TAG;
 		}
+		max_vlans -= test->vlan_start - 1;
 	}
 
 	if (num_vlans > max_vlans) {
@@ -1330,7 +1303,8 @@ run_test(struct test_config *test, int verbose)
 							
 							laddr.s_addr = cc->local_addr;
 							faddr.s_addr = cc->foreign_addr;
-							size = snprintf(cc->connstr, remaining, "%s:%u -> %s:%u vlans=[ ", 
+							size = snprintf(cc->connstr, remaining, "%u: %s:%u -> %s:%u vlans=[ ", 
+									cc->fib,
 									inet_ntoa_r(laddr, buf1), cc->local_port,
 									inet_ntoa_r(faddr, buf2), cc->foreign_port);
 							
@@ -1407,87 +1381,262 @@ out:
 
 
 static void
-assign_test_numbers(void)
-{
-	unsigned int num_tests, test_num;
-
-	num_tests = sizeof(tests)/sizeof(tests[0]);
-	for (test_num = 0; test_num < num_tests; test_num++) {
-		tests[test_num].num = test_num;
-	}
-}
-
-
-static void
-list_tests(void)
-{
-	unsigned int num_tests, test_num;
-
-	num_tests = sizeof(tests)/sizeof(tests[0]);
-	for (test_num = 0; test_num < num_tests; test_num++) {
-		print_test_config(&tests[test_num]);
-	}
-}
-
-
-static void
 usage(const char *progname)
 {
 
 	printf("Usage: %s [options]\n", progname);
-	printf("    -h         show usage\n");
-	printf("    -i ifname  specify network interface\n");
-	printf("    -l         list all canned tests\n");
-	printf("    -Q depth   override tag stack depth\n");
-	printf("    -t num     run given test number\n");
-	printf("    -V num     override number of vlans\n");
-	printf("    -v         be verbose\n");
+	printf("    -a ipaddr            set local start IP address\n");
+	printf("    -A ipaddr            set foreign start IP address\n");
+	printf("    -b num               set number of local IP addresses\n");
+	printf("    -B num               set number of foreign IP addresses\n");
+	printf("    -f                   set fib\n");
+	printf("    -h                   show usage\n");
+	printf("    -i ifname            specify network interface\n");
+	printf("    -l                   list test defaults\n");
+	printf("    -m macaddr           set local MAC address\n");
+	printf("    -M macaddr           set foreign MAC address\n");
+	printf("    -n                   do not run tests\n");
+	printf("    -N name              set test name\n");
+	printf("    -p port              set local port start\n");
+	printf("    -P port              set foreign port start\n");
+	printf("    -q num               set number of local ports\n");
+	printf("    -Q num               set number of foreign ports\n");
+	printf("    -t active|passive	 set test type\n");
+	printf("    -T depth             set tag stack depth\n");
+	printf("    -v                   be verbose\n");
+	printf("    -V num               set number of vlans\n");
+
 }
 
 
 extern int min_to_ticks;
 
+
+#if 0
+#endif
+
 int main(int argc, char **argv)
 {
-	char *ifname = NULL;
 	struct thread *td;
 	char ch;
 	char *progname = argv[0];
-	int num_tests;
-	int test_num = -1;
-	int vlan_stack_depth = -1;
-	int num_vlans = -1;
+	int val;
+	int norun = 0;
 	int verbose = 0;
+	int ifname_specified = 0;
+	unsigned int i;
+	struct test_config default_active_test = {
+		.num = 0,
+		.name = "default active test",
+		.ifname = "bogus0",
+		.type = TEST_TYPE_ACTIVE,
+		.fib = 1,
+		.local_ip_start = "10.20.0.1",
+		.num_local_ips = 1,
+		.local_port_start = 1,
+		.num_local_ports = 1,
+		.foreign_ip_start = "10.0.0.1",
+		.num_foreign_ips = 1,
+		.foreign_port_start = 1,
+		.num_foreign_ports = 1,
+		.local_mac = "02:00:00:00:00:00",
+		.foreign_mac = "02:00:00:00:00:01",
+		.vlan_start = 1,
+		.num_vlans = 1,
+		.vlan_stack_depth = 0,
+		.syn_filter_name = NULL,
+		.notify = 0
+	}; 
+
+	struct test_config default_passive_test = {
+		.num = 1,
+		.name = "default passive test",
+		.ifname = "bogus0",
+		.type = TEST_TYPE_PASSIVE,
+		.fib = 1,
+		.local_ip_start = "10.0.0.1",
+		.num_local_ips = 1,
+		.local_port_start = 1,
+		.num_local_ports = 1,
+		.foreign_ip_start = NULL,
+		.num_foreign_ips = 0,
+		.foreign_port_start = 0,
+		.num_foreign_ports = 0,
+		.local_mac = "02:00:00:00:00:01",
+		.foreign_mac = "02:00:00:00:00:00",
+		.vlan_start = 1,
+		.num_vlans = 1,
+		.vlan_stack_depth = -1,
+		.syn_filter_name = NULL,
+		.notify = 0
+	}; 
+	
+#define MAX_TESTS 32
+	struct test_config tests[MAX_TESTS];
 	struct test_config *test;
+	unsigned int num_tests = 0;
 
+	while ((ch = getopt(argc, argv, "a:A:b:B:f:hi:lm:M:nN:p:P:q:Q:t:T:V:v")) != -1) {
+		if (0 == num_tests) {
+			switch (ch) {
+			case 'h':
+			case 'l':
+			case 'n':
+			case 't':
+			case 'v':
+				/* these are all options that can appear before the first test spec */
+				break;
+			default:
+				printf("Test type must be specified before option \"%c\"\n", ch);
+				return (1);
+			}
+		}
 
-	assign_test_numbers();
-
-	while ((ch = getopt(argc, argv, "hi:lQ:t:V:v")) != -1) {
 		switch (ch) {
+		case 'a':
+			test->local_ip_start = optarg;
+			break;
+		case 'A':
+			if (TEST_TYPE_PASSIVE == test->type) {
+				printf("PASSIVE tests do not use foreign IP addresses\n");
+				return (1);
+			}
+
+			test->foreign_ip_start = optarg;
+			break;
+		case 'b':
+			val = strtol(optarg, NULL, 10);
+			if (val < 1) {
+				printf("Number ip addresses must be > 0\n");
+				return (1);
+			}
+			test->num_local_ips = val;
+			break;
+		case 'B':
+			if (TEST_TYPE_PASSIVE == test->type) {
+				printf("PASSIVE tests do not use foreign IP addresses\n");
+				return (1);
+			}
+
+			val = strtol(optarg, NULL, 10);
+			if (val < 1) {
+				printf("Number ip addresses must be > 0\n");
+				return (1);
+			}
+			test->num_foreign_ips = val;
+			break;
+		case 'f':
+			test->fib = strtol(optarg, NULL, 10);
+			break;
 		case 'h':
 			usage(progname);
 			return (0);
 		case 'i':
-			ifname = optarg;
+			test->ifname = optarg;
+			ifname_specified = 1;
 			break;
 		case 'l':
-			list_tests();
+			print_test_config(&default_active_test);
+			print_test_config(&default_passive_test);
 			return (0);
+		case 'm':
+			test->local_mac = optarg;
+			break;
+		case 'M':
+			test->foreign_mac = optarg;
+			break;
+		case 'n':
+			norun = 1;
+			break;
+		case 'N':
+			test->name = optarg;
+			break;
+		case 'p':
+			val = strtol(optarg, NULL, 10);
+			if ((val < 1) || (val > 65535)) {
+				printf("Port number is outside of [1, 65535]\n");
+				return (1);
+			}
+			test->local_port_start = val;
+			break;
+		case 'P':
+			if (TEST_TYPE_PASSIVE == test->type) {
+				printf("PASSIVE tests do not use foreign ports\n");
+				return (1);
+			}
+
+			val = strtol(optarg, NULL, 10);
+			if ((val < 1) || (val > 65535)) {
+				printf("Port number is outside of [1, 65535]\n");
+				return (1);
+			}
+			test->foreign_port_start = val;
+			break;
+		case 'q':
+			val = strtol(optarg, NULL, 10);
+			if (val < 1) {
+				printf("Number of ports must be > 0\n");
+				return (1);
+			}
+			test->num_local_ports = val;
+			break;
 		case 'Q':
-			vlan_stack_depth = strtol(optarg, NULL, 10);
+			if (TEST_TYPE_PASSIVE == test->type) {
+				printf("PASSIVE tests do not use foreign ports\n");
+				return (1);
+			}
+
+			val = strtol(optarg, NULL, 10);
+			if (val < 1) {
+				printf("Number of ports must be > 0\n");
+				return (1);
+			}
+			test->num_foreign_ports = val;
 			break;
 		case 't':
-			test_num = strtol(optarg, NULL, 10);
+			if ((num_tests > 0) & !ifname_specified) {
+				printf("Interface name must be specified for each test\n");
+				return (1);
+			}
+
+			test = &tests[num_tests];
+			num_tests++;
+
+			if (0 == strcmp(optarg, "active")) {
+				*test = default_active_test;
+			} else if (0 == strcmp(optarg, "passive")) {
+				*test = default_passive_test;
+			} else {
+				printf("Invalid test type \"%s\"\n", optarg);
+				return (1);
+			}
+
+			test->num = num_tests - 1;
+			test->fib = num_tests;
+			test->notify = verbose;
+			ifname_specified = 0;
 			break;
-		case 'V':
-			num_vlans = strtol(optarg, NULL, 10);
+		case 'T':
+			test->vlan_stack_depth = strtol(optarg, NULL, 10);
 			break;
 		case 'v':
-			verbose++;
+			if (0 == num_tests) {
+				verbose++;
+			} else {
+				test->notify++;
+			}
 			break;
-		case '?':
+		case 'V':
+			val = strtol(optarg, NULL, 10);
+			if (val < 1) {
+				printf("Number of VLANs must be >= 1\n");
+				return (1);
+			}
+			test->num_vlans = val;
+			break;
 		default:
+			printf("Unknown option \"%c\"\n", ch);
+		case '?':
 			usage(progname);
 			return (1);
 		}
@@ -1495,25 +1644,41 @@ int main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
-
-	if (NULL == ifname) {
-		printf("Specify a network interface\n");
+	
+	if (0 == num_tests) {
+		printf("No tests specified\n");
 		return (1);
 	}
 
-	num_tests = sizeof(tests)/sizeof(tests[0]);
-
-	if (test_num >= num_tests) {
-		printf("Invalid test number\n");
+	if (0 == ifname_specified) {
+		printf("Interface name must be specified for each test\n");
 		return (1);
 	}
 
-	if (test_num < 0) {
-		printf("Specify a test number\n");
-		return (1);
+	for (i = 0; i < num_tests; i++) {
+		int required_stack_depth;
+		
+		test = &tests[i];
+
+		required_stack_depth = min_tag_stack_depth(test->vlan_start, test->num_vlans);
+
+		if ((test->num_vlans > 1) && (test->vlan_stack_depth < required_stack_depth)) {
+			test->vlan_stack_depth = required_stack_depth;
+		}
+
+		print_test_config(test);
 	}
 
-	uinet_config_if(ifname, 0, 1);
+	if (norun) {
+		return (0);
+	}
+
+	for (i = 0; i < num_tests; i++) {
+		test = &tests[i];
+
+		uinet_config_if(test->ifname, 0, test->fib);
+	}
+
 
 	/*
 	 * Take care not to do to anything that requires any of the
@@ -1529,25 +1694,21 @@ int main(int argc, char **argv)
 
 	td = curthread;
 
-	if (uinet_interface_up(ifname, 0)) {
-		printf("Failed to bring up interface %s\n", ifname);
-		return (1);
+	for (i = 0; i < num_tests; i++) {
+		test = &tests[i];
+		if (uinet_interface_up(test->ifname, 0)) {
+			printf("Failed to bring up interface %s\n", test->ifname);
+			return (1);
+		}
 	}
 
-	test = &tests[test_num];
-
-	if (vlan_stack_depth >= 0) {
-		test->vlan_stack_depth = vlan_stack_depth;
-	}
-	
-	if (num_vlans > 0) {
-		test->num_vlans = num_vlans;
+	for (i = 0; i < num_tests; i++) {
+		if (0 != run_test(&tests[i], verbose)) {
+			printf("Test %u failed to run\n", i);
+			return (1);
+		}
 	}
 
-	if (0 != run_test(test, verbose)) {
-		printf("Test %u failed.\n", test_num);
-		return (1);
-	}
 
 	unsigned int current = 0;
 	unsigned int last_read = 0;
