@@ -28,6 +28,8 @@
  *
  */
 
+#include "opt_param.h"
+
 #include <sys/cdefs.h>
 #include <sys/param.h>
 #include <sys/pcpu.h>
@@ -76,6 +78,15 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters)
 	snprintf(tmpbuf, sizeof(tmpbuf), "%u", nmbclusters);
 	setenv("kern.ipc.nmbclusters", tmpbuf);
 
+	/* The env var kern.ncallout will get read in proc0_init(), but
+	 * that's after we init the callwheel below.  So we set it here for
+	 * consistency, but the operative setting is the direct assignment
+	 * below.
+	 */
+        ncallout = HZ * 3600;
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", ncallout);
+	setenv("kern.ncallout", tmpbuf);
+
 	/* Assuming maxsockets will be set to nmbclusters, the following
 	 * sets the TCP tcbhash size so that perfectly uniform hashing would
 	 * result in a maximum bucket depth of about 16.
@@ -91,7 +102,6 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters)
 	mp_ncpus = ncpus;
 
         /* vm_init bits */
-        ncallout = 64;
 	
         pcpup = malloc(sizeof(struct pcpu), M_DEVBUF, M_ZERO);
         pcpu_init(pcpup, 0, sizeof(struct pcpu));

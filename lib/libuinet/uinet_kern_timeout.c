@@ -62,6 +62,9 @@ __FBSDID("$FreeBSD$");
 
 #include <pthread.h>
 
+
+int min_to_ticks = 1000000;
+
 static void timer_intr(void *arg);
 
 static int avg_depth;
@@ -155,7 +158,7 @@ kern_timeout_callwheel_alloc(caddr_t v)
 	     callwheelsize <<= 1, ++callwheelbits)
 		;
 	callwheelmask = callwheelsize - 1;
-
+	printf("callwheelsize=%d\n", callwheelsize);
 	cc->cc_callout = (struct callout *)v;
 	v = (caddr_t)(cc->cc_callout + ncallout);
 	cc->cc_callwheel = (struct callout_tailq *)v;
@@ -631,6 +634,8 @@ retry:
 	if (to_ticks <= 0)
 		to_ticks = 1;
 
+	if ((to_ticks > 1) && (to_ticks < min_to_ticks)) min_to_ticks = to_ticks;
+
 	c->c_arg = arg;
 	c->c_flags |= (CALLOUT_ACTIVE | CALLOUT_PENDING);
 	c->c_func = ftn;
@@ -785,10 +790,47 @@ _callout_init_lock(c, lock, flags)
 }
 
 
+extern int     sched_get_priority_max(int);
+extern int     sched_get_priority_min(int);
+
+
 static void
 timer_intr(void *arg)
 {
 	struct timespec rq, rm;
+
+	pthread_t t;
+	int policy;
+	struct sched_param sparam;
+
+	/* XXX arbitrary prioritization: If able to schedule as a real-time
+	 * thread, set to ~80% max real-time priority, otherwise set to max
+	 * time-sharing priority.
+	 */
+
+	t = pthread_self();
+
+	policy = SCHED_RR;
+	sparam.sched_priority =
+	    sched_get_priority_min(policy) +
+	    ((sched_get_priority_max(policy) - sched_get_priority_min(policy)) * 8) / 10;
+
+	if (0 != pthread_setschedparam(t, policy, &sparam)) {
+		policy = SCHED_FIFO;
+		sparam.sched_priority =
+		    sched_get_priority_min(policy) +
+		    ((sched_get_priority_max(policy) - sched_get_priority_min(policy)) * 8) / 10;
+
+		if (0 != pthread_setschedparam(t, policy, &sparam)) {
+			printf("Warning: Timer interrupt thread will not run at real-time priority.\n");
+
+			policy = SCHED_OTHER;
+			sparam.sched_priority = sched_get_priority_max(policy);
+			if (0 != pthread_setschedparam(t, policy, &sparam)) {
+				printf("Warning: Timer interrupt thread priority could not be adjusted.\n");
+			}
+		}
+	}
 
 	rq.tv_sec = 0;
 	rq.tv_nsec = 1000000000UL / hz;
