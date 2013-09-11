@@ -63,6 +63,8 @@ __FBSDID("$FreeBSD$");
 #include <pthread.h>
 
 
+extern int errno;
+
 int min_to_ticks = 1000000;
 
 static void timer_intr(void *arg);
@@ -797,8 +799,12 @@ extern int     sched_get_priority_min(int);
 static void
 timer_intr(void *arg)
 {
-	struct timespec rq, rm;
-
+	struct timespec base_tick_period, tick_period;
+	struct timespec start, target_period, delta;
+	long nsec;
+	int hardclocks;
+	const int calibration_period = 5;
+	int i;
 	pthread_t t;
 	int policy;
 	struct sched_param sparam;
@@ -832,11 +838,99 @@ timer_intr(void *arg)
 		}
 	}
 
-	rq.tv_sec = 0;
-	rq.tv_nsec = 1000000000UL / hz;
+	nsec = 1000000000UL / hz;
+	
+	delta.tv_sec = 0;
+	delta.tv_nsec = 0;
 
+	base_tick_period.tv_sec = 0;
+	base_tick_period.tv_nsec = nsec;
+
+	for (i = 0; i < calibration_period; i++) {
+		timespecadd(&target_period, &base_tick_period);
+	}
+
+	hardclocks = 0;
+	tick_period = base_tick_period;
+
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	while (1) {
-		nanosleep(&rq, &rm);
+		struct timespec rq, rm;
+
+		rq = tick_period;
+		while ((-1 == nanosleep(&rq, &rm)) && (EINTR == errno)) {
+			rq = rm;
+		}
+
 		uinet_hardclock();
+
+		hardclocks++;
+		if (hardclocks == calibration_period) {
+			struct timespec now, elapsed, correction;
+
+			hardclocks = 0;
+
+			clock_gettime(CLOCK_MONOTONIC, &now);
+
+			elapsed = now;
+			timespecsub(&elapsed, &start);
+			start = now;
+
+			/* 
+			 * This will accumulate the residuals over a series
+			 * of too-long periods.
+			 */
+			timespecadd(&elapsed, &delta);
+
+			if (timespeccmp(&elapsed, &target_period, >=)) {
+				/* 
+				 * Period was too long.  Revise sleep time
+				 * downward and issue any missed ticks.
+				 */
+
+				delta = elapsed;
+				timespecsub(&delta, &target_period);
+				
+				correction = delta;
+				correction.tv_nsec /= calibration_period * 2;
+
+				if (timespeccmp(&tick_period, &correction, >=)) {
+						timespecsub(&tick_period, &correction);
+				}
+
+				while (timespeccmp(&delta, &base_tick_period, >=)) {
+					timespecsub(&delta, &base_tick_period);
+					uinet_hardclock();
+				}
+			} else {
+				/*
+				 * Period was too short.  Revise sleep time
+				 * upward and sleep now for the remainder of
+				 * the period.
+				 */
+
+				delta = target_period;
+				timespecsub(&delta, &elapsed);
+
+				/*
+				 * Don't include this catch-up sleep in the
+				 * measurement of the next period.
+				 */
+				timespecadd(&start, &delta);
+
+				correction = delta;
+				correction.tv_nsec /= calibration_period * 2;
+				timespecadd(&tick_period, &correction);
+
+				rq = delta;
+				while ((-1 == nanosleep(&rq, &rm)) && (EINTR == errno)) {
+					rq = rm;
+				}
+
+				delta.tv_sec = 0;
+				delta.tv_nsec = 0;
+			}
+
+		}
 	}
 }

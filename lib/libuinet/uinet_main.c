@@ -1714,14 +1714,18 @@ int main(int argc, char **argv)
 	unsigned int last_read = 0;
 	unsigned int min, avg, max;
 	struct timespec last_time, this_time, elapsed;
+	unsigned int ticks_before, total_ticks;
 
-	clock_gettime(CLOCK_REALTIME, &last_time);
+	total_ticks = 0;
+	clock_gettime(CLOCK_MONOTONIC, &last_time);
 	while (1) {
+		ticks_before = (unsigned int)ticks;
 		pause("slp", hz);
+		total_ticks += (unsigned int)ticks - ticks_before; 
 
 		current++;
-		if (current - last_read >= 10) {
-			clock_gettime(CLOCK_REALTIME, &this_time);
+		if (current - last_read == 10) {
+			clock_gettime(CLOCK_MONOTONIC, &this_time);
 			elapsed = this_time;
 			timespecsub(&elapsed, &last_time);
 			last_time = this_time;
@@ -1746,9 +1750,11 @@ int main(int argc, char **argv)
 			
 			uint64_t est_hz;
 			
-			est_hz = (10 * 1000000000ULL * (uint64_t)hz) / ((uint64_t)elapsed.tv_sec * 1000000000 + elapsed.tv_nsec);
+			est_hz = (100 * 1000000000ULL * (uint64_t)total_ticks) / ((uint64_t)elapsed.tv_sec * 1000000000 + elapsed.tv_nsec);
+			total_ticks = 0;
 
-			printf("est. hz = %u, min_to_ticks=%d\n", (unsigned int)est_hz, min_to_ticks);
+			printf("est. hz = %u.%02u, min_to_ticks=%d\n", (unsigned int)est_hz/100, (unsigned int)est_hz%100, min_to_ticks);
+			clock_gettime(CLOCK_MONOTONIC, &last_time);
 		}
 	}
 
