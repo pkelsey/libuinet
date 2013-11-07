@@ -846,6 +846,8 @@ timer_intr(void *arg)
 	base_tick_period.tv_sec = 0;
 	base_tick_period.tv_nsec = nsec;
 
+	target_period.tv_sec = 0;
+	target_period.tv_nsec = 0;
 	for (i = 0; i < calibration_period; i++) {
 		timespecadd(&target_period, &base_tick_period);
 	}

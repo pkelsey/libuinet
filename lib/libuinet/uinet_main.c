@@ -1411,9 +1411,16 @@ usage(const char *progname)
 
 extern int min_to_ticks;
 
+extern void exit(int status);
 
-#if 0
-#endif
+static void
+quit_clean(int arg)
+{
+	printf("Exiting\n");
+	exit(0);
+}
+
+
 
 int main(int argc, char **argv)
 {
@@ -1473,8 +1480,10 @@ int main(int argc, char **argv)
 	
 #define MAX_TESTS 32
 	struct test_config tests[MAX_TESTS];
-	struct test_config *test;
+	struct test_config *test = NULL;
 	unsigned int num_tests = 0;
+
+	signal(SIGINT, quit_clean);
 
 	while ((ch = getopt(argc, argv, "a:A:b:B:f:hi:lm:M:nN:p:P:q:Q:t:T:V:v")) != -1) {
 		if (0 == num_tests) {

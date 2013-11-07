@@ -55,6 +55,11 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+
+#if defined(UINET_PROFILE)
+static struct itimerval prof_itimer;
+#endif /* UINET_PROFILE */
+
 __thread struct thread *pcurthread;
 
 struct pthread_start_args 
@@ -77,6 +82,10 @@ static void *
 pthread_start_routine(void *arg)
 {
 	struct pthread_start_args *psa = arg;
+
+#if defined(UINET_PROFILE)
+	setitimer(ITIMER_PROF, &prof_itimer, NULL);
+#endif /* UINET_PROFILE */
 
 	pcurthread = psa->psa_td;
 	pcurthread->td_proc = &proc0;
@@ -218,3 +227,13 @@ uinet_init_thread0(void)
 	pcurthread = &thread0;
 	pcurthread->td_proc = &proc0;
 }
+
+
+#if defined(UINET_PROFILE)
+void gprof_init(void) __attribute__((constructor)); 
+
+void gprof_init(void) {
+	printf("getting prof timer\n");
+	getitimer(ITIMER_PROF, &prof_itimer);
+}
+#endif /* UINET_PROFILE */
