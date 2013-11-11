@@ -32,7 +32,7 @@ typedef enum {
 	UINET_BLACKHOLE_TCP_NONE,	/* disable TCP blackholing (default) */
 	UINET_BLACKHOLE_TCP_SYN_ONLY,	/* only blackhole unwanted SYNs */
 	UINET_BLACKHOLE_TCP_ALL,	/* blackhole all unwanted TCP segments */
-	UINET_BLACKHOLE_UDP_NONE,	/* diable UDP blackholing (default) */
+	UINET_BLACKHOLE_UDP_NONE,	/* disable UDP blackholing (default) */
 	UINET_BLACKHOLE_UDP_ALL,	/* blackhole all unwanted UDP datagrams */
 } uinet_blackhole_t;
 

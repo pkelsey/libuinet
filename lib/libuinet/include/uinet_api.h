@@ -28,9 +28,40 @@
 #define	_UINET_API_H_
 
 
-int uinet_init(unsigned int ncpus, unsigned int nmbclusters);
+#include "uinet_api_types.h"
+#include "uinet_config.h"
 
-int uinet_interface_up(const char *canonical_name, unsigned int qno);
-
+void  uinet_finalize_thread(void);
+uinet_in_addr_t uinet_inet_addr(const char *cp);
+char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
+int   uinet_init(unsigned int ncpus, unsigned int nmbclusters);
+int   uinet_initialize_thread(void);
+int   uinet_interface_up(const char *canonical_name, unsigned int qno);
+int   uinet_mac_aton(const char *macstr, uint8_t *macout);
+int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
+int   uinet_setl2info(struct uinet_socket *so, const uint8_t *local_mac, const uint8_t *foreign_mac, const uint32_t *tag_stack, const uint32_t mask, int stack_depth);
+struct uinet_socket *uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam);
+int   uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam);
+void  uinet_soclose(struct uinet_socket *so);
+int   uinet_soconnect(struct uinet_socket *so, struct uinet_sockaddr *nam);
+int   uinet_socreate(int dom, struct uinet_socket **aso, int type, int proto);
+int   uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int *optlen);
+short uinet_sogetstate(struct uinet_socket *so);
+int   uinet_solisten(struct uinet_socket *so, int backlog);
+int   uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uinet_uio *uio, int *flagsp);
+void  uinet_sosetnonblocking(struct uinet_socket *so, unsigned int nonblocking);
+int   uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int optlen);
+int   uinet_sosend(struct uinet_socket *so, struct uinet_sockaddr *addr, struct uinet_uio *uio, int flags);
+int   uinet_soshutdown(struct uinet_socket *so, int how);
+int   uinet_sogetpeeraddr(struct uinet_socket *so, struct uinet_sockaddr **sa);
+int   uinet_sogetsockaddr(struct uinet_socket *so, struct uinet_sockaddr **sa);
+void  uinet_free_sockaddr(struct uinet_sockaddr *sa);
+void  uinet_soupcall_set(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
+void  uinet_soupcall_clear(struct uinet_socket *so, int which);
+void  uinet_synfilter_get_conninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
+void  uinet_synfilter_get_l2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
+int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);
+void *uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie);
+void  uinet_synfilter_deferral_deliver(struct uinet_socket *so, void *deferral, int decision);
 
 #endif /* _UINET_API_H_ */

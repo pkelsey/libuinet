@@ -2,17 +2,17 @@
 # Derived from FreeBSD auto-generated kernel Makefile and
 # machine-specific Makefile templates
 #
-DEBUG=-g
+DEBUG=-g -O0
 
-S=$(TOP_DIR)/network/uinet/sys
+S=$(TOPDIR)/network/uinet/sys
 MACHINE_INCLUDES_ROOT=machine_includes
 MACHINE_INCLUDES_DIR=${MACHINE_INCLUDES_ROOT}/${MACHINE_CPUARCH}/machine
 X86_INCLUDES=0
 
-include ${TOP_DIR}/network/uinet/mk/kern.pre.mk
+include ${TOPDIR}/network/uinet/mk/kern.pre.mk
 
 KERNPREINCLUDES:= ${INCLUDES}
-INCLUDES= -I${TOP_DIR}/network/uinet/lib/libuinet/include ${KERNPREINCLUDES}
+INCLUDES= -I${TOPDIR}/network/uinet/lib/libuinet/include ${KERNPREINCLUDES}
 
 
 INCLUDES+= -I./machine_includes
@@ -282,6 +282,22 @@ PROGRAM=uinet_test
 LDADD+= -lpthread
 
 
+#
+# The library is built by first incrementally linking all the object
+# to resolve internal references.  Then, all symbols are made local.
+# Then, only the symbols that are part of the UINET API are made
+# externally available.
+#
+libuinet.a: machine_includes ${MHEADERS} ${MSRCS} ${OBJS}
+	${LD} -r -o $*.ro ${OBJS}
+	nm $*.ro  | grep -v ' U ' | cut -d ' ' -f 3 > $*_localize_list.tmp
+	objcopy --localize-symbols=$*_localize_list.tmp $*.ro 
+	rm $*_localize_list.tmp
+	objcopy --globalize-symbols=uinet_api.symlist $*.ro 
+	rm -f $@
+	ar -cqs $@ $*.ro
+	rm -f $*.ro
+
 ${PROGRAM}: machine_includes ${MHEADERS} ${MSRCS} ${OBJS}
 	${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
 
@@ -324,5 +340,5 @@ vnode_if_typedef.h:
 	${AWK} -f $S/tools/vnode_if.awk $S/kern/vnode_if.src -q
 
 
-include ${TOP_DIR}/network/uinet/mk/kern.mk
+include ${TOPDIR}/network/uinet/mk/kern.mk
 

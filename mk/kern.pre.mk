@@ -2,7 +2,7 @@
 # Derived from FreeBSD src/sys/conf/kern.pre.mk
 #
 
-include ${TOP_DIR}/network/uinet/mk/compiler.mk
+include ${TOPDIR}/network/uinet/mk/compiler.mk
 
 MACHINE_CPUARCH:= $(shell uname -m)
 
