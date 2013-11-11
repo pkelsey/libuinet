@@ -130,7 +130,7 @@ struct syn_filter {
 	 */
 #define SYNF_ACCEPT	0	/* Process SYN normally */
 #define SYNF_REJECT	1	/* Discard SYN */
-#define SYNF_DEFER	2	/* Descision will be returned later via setsockopt() */
+#define SYNF_DEFER	2	/* Decision will be returned later via setsockopt() */
 	int	(*synf_callback)(struct inpcb *inp, void *inst_arg,
 				 struct syn_filter_cbarg *arg);
 
@@ -145,9 +145,10 @@ struct syn_filter {
 
 	/*
 	 * SYN filter instance destructor.  Runs with INP_WLOCK(inp) held.
+	 * arg is the value returned by the instance constructor.
 	 */
 	void	(*synf_destroy)
-		(struct inpcb *inp);
+		(struct inpcb *inp, void *arg);
 };
 
 struct in_l2info *in_promisc_l2info_alloc(int flags);

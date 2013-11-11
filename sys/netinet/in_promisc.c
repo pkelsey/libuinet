@@ -387,12 +387,12 @@ syn_filter_run_destructor(struct inpcb *inp)
 			 */
 			SYN_FILTER_LOCK();
 			if (sfi->params.synf_destroy)
-				sfi->params.synf_destroy(inp);
+				sfi->params.synf_destroy(inp, sfinst->instance_arg);
 			syn_filter_detach_locked(sfi);
 			SYN_FILTER_UNLOCK();
 		} else {
 			if (sfi->params.synf_destroy)
-				sfi->params.synf_destroy(inp);	
+				sfi->params.synf_destroy(inp, sfinst->instance_arg);	
 			syn_filter_detach(sfi);
 		}
 
