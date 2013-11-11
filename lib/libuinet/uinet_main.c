@@ -836,6 +836,7 @@ DECLARE_MODULE(synf_uinet_test, synf_uinet_test_mod, SI_SUB_DRIVERS, SI_ORDER_MI
 static int
 mac_aton(const char *macstr, uint8_t *macout)
 {
+
 	unsigned int i;
 	const char *p;
 	char *endp;
@@ -1083,7 +1084,7 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 	if ((error = setopt_int(so, SOL_SOCKET, SO_SETFIB, fib, "SO_SETFIB")))
 		goto err;
 
-	if ((error = setopt_int(so, SOL_SOCKET, SO_REUSEPORT, fib, "SO_REUSEPORT")))
+	if ((error = setopt_int(so, SOL_SOCKET, SO_REUSEPORT, 1, "SO_REUSEPORT")))
 		goto err;
 	
 	if ((error = setopt_int(so, IPPROTO_IP, IP_BINDANY, 1, "IP_BINDANY")))
@@ -1245,7 +1246,7 @@ run_test(struct test_config *test, int verbose)
 	}
 
 	if (num_vlans > max_vlans) {
-		printf("Limiting number of VLANs to unqiue tag stack limit of %llu\n", (unsigned long long)max_vlans);
+		printf("Limiting number of VLANs to unique tag stack limit of %llu\n", (unsigned long long)max_vlans);
 		num_vlans = max_vlans;
 	}
 
@@ -1424,10 +1425,10 @@ quit_clean(int arg)
 
 int main(int argc, char **argv)
 {
-	struct thread *td;
 	char ch;
 	char *progname = argv[0];
 	int val;
+	int minval;
 	int norun = 0;
 	int verbose = 0;
 	int ifname_specified = 0;
@@ -1561,9 +1562,11 @@ int main(int argc, char **argv)
 			test->name = optarg;
 			break;
 		case 'p':
+			minval = (TEST_TYPE_PASSIVE == test->type) ? 0 : 1; 
+
 			val = strtol(optarg, NULL, 10);
-			if ((val < 1) || (val > 65535)) {
-				printf("Port number is outside of [1, 65535]\n");
+			if ((val < minval) || (val > 65535)) {
+				printf("Port number is outside of [%d, 65535]\n", minval);
 				return (1);
 			}
 			test->local_port_start = val;
@@ -1700,8 +1703,6 @@ int main(int argc, char **argv)
 	printf("maxfiles=%d\n", maxfiles);
 	printf("maxsockets=%d\n", maxsockets);
 	printf("nmbclusters=%d\n", nmbclusters);
-
-	td = curthread;
 
 	for (i = 0; i < num_tests; i++) {
 		test = &tests[i];
