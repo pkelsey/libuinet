@@ -45,6 +45,7 @@ int   uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam);
 void  uinet_soclose(struct uinet_socket *so);
 int   uinet_soconnect(struct uinet_socket *so, struct uinet_sockaddr *nam);
 int   uinet_socreate(int dom, struct uinet_socket **aso, int type, int proto);
+void  uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc);
 int   uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int *optlen);
 short uinet_sogetstate(struct uinet_socket *so);
 int   uinet_solisten(struct uinet_socket *so, int backlog);

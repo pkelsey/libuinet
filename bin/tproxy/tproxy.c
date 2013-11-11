@@ -70,6 +70,11 @@ struct connection_context {
 	struct event rcv_ready;
 	struct event snd_ready;
 	struct event connected;
+#define CONN_BUFFER_SIZE 1024
+	unsigned int occupied;
+	unsigned int input_index;
+	unsigned int output_index;
+	uint8_t buffer[CONN_BUFFER_SIZE];
 };
 
 
@@ -85,6 +90,7 @@ struct splice_context {
 
 
 struct splice_table {
+	pthread_mutex_t lock;
 	TAILQ_HEAD(splice_table_bucket, splice_context) *buckets;
 	uint32_t mask;
 };
@@ -164,6 +170,9 @@ conn_init(struct connection_context *conn, struct uinet_socket *so, struct splic
 	event_init(&conn->rcv_ready, conn, EVENT_RCV_READY);
 	event_init(&conn->snd_ready, conn, EVENT_SND_READY);
 	event_init(&conn->connected, conn, EVENT_CONNECTED);
+	conn->occupied = 0;
+	conn->input_index = 0;
+	conn->output_index = 0;
 }
 
 
@@ -212,6 +221,8 @@ splice_table_init(struct splice_table *t, unsigned int nbuckets)
 	unsigned int max_buckets = ((unsigned int)-1 >> 1) + 1;
 	unsigned int i;
 
+	pthread_mutex_init(&t->lock, NULL);
+
 	if (nbuckets > max_buckets)
 		nbuckets = max_buckets;
 
@@ -251,11 +262,15 @@ splice_table_insert(struct splice_table *t, struct splice_context *splice)
 	struct uinet_sockaddr_in *client_sin = (struct uinet_sockaddr_in *)splice->client_addr;
 	struct uinet_sockaddr_in *server_sin = (struct uinet_sockaddr_in *)splice->server_addr;
 
+	pthread_mutex_lock(&t->lock);
+
 	bucket = &t->buckets[splice_table_hash(t,
 					       server_sin->sin_addr.s_addr, server_sin->sin_port,
 					       client_sin->sin_addr.s_addr, client_sin->sin_port)];
 	
 	TAILQ_INSERT_HEAD(bucket, splice, splice_table);
+
+	pthread_mutex_unlock(&t->lock);
 }
 
 
@@ -266,11 +281,15 @@ splice_table_remove(struct splice_table *t, struct splice_context *splice)
 	struct uinet_sockaddr_in *client_sin = (struct uinet_sockaddr_in *)splice->client_addr;
 	struct uinet_sockaddr_in *server_sin = (struct uinet_sockaddr_in *)splice->server_addr;
 	
+	pthread_mutex_lock(&t->lock);
+
 	bucket = &t->buckets[splice_table_hash(t,
 					       server_sin->sin_addr.s_addr, server_sin->sin_port,
 					       client_sin->sin_addr.s_addr, client_sin->sin_port)];
 	
 	TAILQ_REMOVE(bucket, splice, splice_table);
+
+	pthread_mutex_unlock(&t->lock);
 }
 
 
@@ -280,6 +299,7 @@ splice_table_lookup(struct splice_table *t, struct uinet_in_conninfo *inc)
 	struct splice_table_bucket *bucket;
 	struct splice_context *splice;
 
+	pthread_mutex_lock(&t->lock);
 	bucket = &t->buckets[splice_table_hash(t,
 					       inc->inc_ie.ie_laddr.s_addr, inc->inc_ie.ie_lport,
 					       inc->inc_ie.ie_faddr.s_addr, inc->inc_ie.ie_fport)];
@@ -297,10 +317,12 @@ splice_table_lookup(struct splice_table *t, struct uinet_in_conninfo *inc)
 		    (client_sin->sin_port == inc->inc_ie.ie_fport) &&
 		    (server_sin->sin_addr.s_addr == inc->inc_ie.ie_laddr.s_addr) &&
 		    (server_sin->sin_port == inc->inc_ie.ie_lport)) {
+			pthread_mutex_unlock(&t->lock);
 			return (splice);
 		}
 	}
 
+	pthread_mutex_unlock(&t->lock);
 	return (NULL);
 }
 
@@ -334,18 +356,49 @@ proxy_conn_rcv(struct uinet_socket *so, void *arg, int waitflag)
 
 
 static int
-conn_complete(struct uinet_socket *so, void *arg, int waitflag)
+outbound_conn_complete(struct uinet_socket *so, void *arg, int waitflag)
 {
 	struct connection_context *conn = (struct connection_context *)arg;
 
 	if (conn->splice->proxy->verbose > 1)
-		printf("conn_complete\n");
+		printf("outbound_conn_complete\n");
 
 	event_send(conn->eq, &conn->connected);
 
 	uinet_soupcall_set(so, UINET_SO_RCV, proxy_conn_rcv, conn);
 
 	proxy_conn_rcv(so, conn, waitflag);
+
+	return (UINET_SU_OK);
+}
+
+
+static int
+inbound_conn_complete(struct uinet_socket *so, void *arg, int waitflag)
+{
+	struct proxy_context *proxy = (struct proxy_context *)arg;
+	struct uinet_in_conninfo inc;
+	struct connection_context *conn;
+	struct splice_context *splice;
+
+	if (proxy->verbose > 1)
+		printf("inbound_conn_complete\n");
+
+	uinet_sogetconninfo(so, &inc);
+
+	splice = splice_table_lookup(&proxy->splicetab, &inc);
+	if (NULL != splice) {
+		conn = &splice->client;
+		conn_init(conn, so, splice);
+
+		event_send(conn->eq, &conn->connected);
+
+		uinet_soupcall_set(so, UINET_SO_RCV, proxy_conn_rcv, conn);
+
+		proxy_conn_rcv(so, conn, waitflag);
+	} else {
+		printf("Failed to find splice for inbound connection\n");
+	}
 
 	return (UINET_SU_OK);
 }
@@ -379,7 +432,7 @@ listener_upcall(struct uinet_socket *head, void *arg, int waitflag)
 	splice->proxy = proxy;
 	conn_init(&splice->client, so, splice);
 
-	uinet_soupcall_set(so, UINET_SO_RCV, conn_complete, &splice->client);
+	uinet_soupcall_set(so, UINET_SO_RCV, inbound_conn_complete, proxy);
 
 out:
 	if (sa)
@@ -410,6 +463,73 @@ dobind(struct uinet_socket *so, uinet_in_addr_t addr, uinet_in_port_t port)
 }
 
 
+static void
+on_receive_ready(struct connection_context *rx, struct connection_context *tx)
+{
+	struct uinet_iovec iov[2];
+	struct uinet_uio uio;
+	unsigned int space = CONN_BUFFER_SIZE - rx->occupied;
+	unsigned int bytes_to_end_of_buffer;
+	unsigned int bytes_read;
+	unsigned int bytes_written;
+	int error;
+
+	if (space > 0) {
+		bytes_to_end_of_buffer = CONN_BUFFER_SIZE - rx->input_index;
+
+		uio.uio_iov = iov;
+		iov[0].iov_base = &rx->buffer[rx->input_index];
+		iov[0].iov_len = (space > bytes_to_end_of_buffer) ? bytes_to_end_of_buffer : space;
+		if (space > bytes_to_end_of_buffer) {
+			iov[1].iov_base = rx->buffer;
+			iov[1].iov_len = space - bytes_to_end_of_buffer;
+			uio.uio_iovcnt = 2;
+		} else {
+			uio.uio_iovcnt = 1;
+		}
+		uio.uio_offset = 0;
+		uio.uio_resid = space;
+	
+		error = uinet_soreceive(rx->so, NULL, &uio, NULL);
+		bytes_read = space - uio.uio_resid;
+
+		printf("read %u bytes from %p\n", bytes_read, rx);
+		
+		rx->occupied += bytes_read;
+		rx->input_index += bytes_read;
+		if (rx->input_index >= CONN_BUFFER_SIZE)
+			rx->input_index -= CONN_BUFFER_SIZE;
+	}
+
+
+	if (rx->occupied) {
+		bytes_to_end_of_buffer = CONN_BUFFER_SIZE - rx->output_index;
+
+		uio.uio_iov = iov;
+		iov[0].iov_base = &rx->buffer[rx->output_index];
+		iov[0].iov_len = (rx->occupied > bytes_to_end_of_buffer) ? bytes_to_end_of_buffer : rx->occupied;
+		if (rx->occupied > bytes_to_end_of_buffer) {
+			iov[1].iov_base = rx->buffer;
+			iov[1].iov_len = rx->occupied - bytes_to_end_of_buffer;
+			uio.uio_iovcnt = 2;
+		} else {
+			uio.uio_iovcnt = 1;
+		}
+		uio.uio_offset = 0;
+		uio.uio_resid = rx->occupied;
+		error = uinet_sosend(tx->so, NULL, &uio, 0);
+		bytes_written = rx->occupied - uio.uio_resid;
+
+		printf("wrote %u bytes to %p\n", bytes_written, tx);
+
+		rx->occupied -= bytes_written;
+		rx->output_index += bytes_written;
+		if (rx->output_index >= CONN_BUFFER_SIZE)
+			rx->output_index -= CONN_BUFFER_SIZE;
+	}
+}
+
+
 static void *
 proxy_event_loop(void *arg)
 {
@@ -424,6 +544,8 @@ proxy_event_loop(void *arg)
 	struct uinet_sockaddr_in *local_sin;
 	struct uinet_sockaddr_in *foreign_sin;
 	int error;
+
+	uinet_initialize_thread();
 
 	if (proxy->verbose)
 		printf("Event loop started\n");
@@ -477,6 +599,8 @@ proxy_event_loop(void *arg)
 						       uinet_inet_ntoa(client_sin->sin_addr, buf2, sizeof(buf2)),
 						       ntohs(client_sin->sin_port));
 					}
+				} else {
+					on_receive_ready(client, server);
 				}
 				break;
 
@@ -533,6 +657,8 @@ proxy_event_loop(void *arg)
 					uinet_soupcall_clear(so, UINET_SO_RCV);					
 
 					splice_table_remove(&proxy->splicetab, splice);
+				} else {
+					on_receive_ready(server, client);
 				}
 				break;
 
@@ -582,6 +708,8 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 			goto err;
 		}
 
+		uinet_sosetnonblocking(so, 1);
+
 		optlen = sizeof(optval);
 		optval = 1;
 		if ((error = uinet_sosetsockopt(so, UINET_IPPROTO_TCP, UINET_TCP_NODELAY, &optval, optlen))) {
@@ -626,7 +754,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 
 		splice_table_insert(&proxy->splicetab, splice);
 
-		uinet_soupcall_set(so, UINET_SO_RCV, conn_complete, &splice->server);
+		uinet_soupcall_set(so, UINET_SO_RCV, outbound_conn_complete, &splice->server);
 
 		if (proxy->verbose) {
 			char buf1[32], buf2[32];

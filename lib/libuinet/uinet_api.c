@@ -296,6 +296,15 @@ uinet_socreate(int dom, struct uinet_socket **aso, int type, int proto)
 }
 
 
+void
+uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc)
+{
+	struct socket *so_internal = (struct socket *)so;
+
+	memcpy(inc, &sotoinpcb(so_internal)->inp_inc, sizeof(struct uinet_in_conninfo));
+}
+
+
 int
 uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval,
 		   unsigned int *optlen)
@@ -329,14 +338,17 @@ uinet_solisten(struct uinet_socket *so, int backlog)
 int
 uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uinet_uio *uio, int *flagsp)
 {
-	struct iovec iov;
+	struct iovec iov[uio->uio_iovcnt];
 	struct uio uio_internal;
+	int i;
 	int result;
 
-	iov.iov_base = uio->uio_base;
-	iov.iov_len = uio->uio_len;
-	uio_internal.uio_iov = &iov;
-	uio_internal.uio_iovcnt = 1;
+	for (i = 0; i < uio->uio_iovcnt; i++) {
+		iov[i].iov_base = uio->uio_iov[i].iov_base;
+		iov[i].iov_len = uio->uio_iov[i].iov_len;
+	}
+	uio_internal.uio_iov = iov;
+	uio_internal.uio_iovcnt = uio->uio_iovcnt;
 	uio_internal.uio_offset = uio->uio_offset;
 	uio_internal.uio_resid = uio->uio_resid;
 	uio_internal.uio_segflg = UIO_SYSSPACE;
@@ -376,14 +388,17 @@ uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval
 int
 uinet_sosend(struct uinet_socket *so, struct uinet_sockaddr *addr, struct uinet_uio *uio, int flags)
 {
-	struct iovec iov;
+	struct iovec iov[uio->uio_iovcnt];
 	struct uio uio_internal;
+	int i;
 	int result;
 
-	iov.iov_base = uio->uio_base;
-	iov.iov_len = uio->uio_len;
-	uio_internal.uio_iov = &iov;
-	uio_internal.uio_iovcnt = 1;
+	for (i = 0; i < uio->uio_iovcnt; i++) {
+		iov[i].iov_base = uio->uio_iov[i].iov_base;
+		iov[i].iov_len = uio->uio_iov[i].iov_len;
+	}
+	uio_internal.uio_iov = iov;
+	uio_internal.uio_iovcnt = uio->uio_iovcnt;
 	uio_internal.uio_offset = uio->uio_offset;
 	uio_internal.uio_resid = uio->uio_resid;
 	uio_internal.uio_segflg = UIO_SYSSPACE;
