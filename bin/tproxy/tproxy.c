@@ -275,21 +275,28 @@ splice_table_remove(struct splice_table *t, struct splice_context *splice)
 
 
 static struct splice_context *
-splice_table_lookup(struct splice_table *t, uinet_in_addr_t laddr, uinet_in_port_t lport, uinet_in_addr_t faddr, uinet_in_port_t fport)
+splice_table_lookup(struct splice_table *t, struct uinet_in_conninfo *inc)
 {
 	struct splice_table_bucket *bucket;
 	struct splice_context *splice;
 
-	bucket = &t->buckets[splice_table_hash(t, laddr, lport, faddr, fport)];
+	bucket = &t->buckets[splice_table_hash(t,
+					       inc->inc_ie.ie_laddr.s_addr, inc->inc_ie.ie_lport,
+					       inc->inc_ie.ie_faddr.s_addr, inc->inc_ie.ie_fport)];
+					       
 	
 	TAILQ_FOREACH(splice, bucket, splice_table) {
 		struct uinet_sockaddr_in *client_sin = (struct uinet_sockaddr_in *)splice->client_addr;
 		struct uinet_sockaddr_in *server_sin = (struct uinet_sockaddr_in *)splice->server_addr;
 
-		if ((client_sin->sin_addr.s_addr == faddr) &&
-		    (client_sin->sin_port == fport) &&
-		    (server_sin->sin_addr.s_addr == laddr) &&
-		    (server_sin->sin_port == lport)) {
+		/*
+		 * The connection info in inc is from the incoming SYN from
+		 * the client, so the client's address is in the foreign part.
+		 */
+		if ((client_sin->sin_addr.s_addr == inc->inc_ie.ie_faddr.s_addr) &&
+		    (client_sin->sin_port == inc->inc_ie.ie_fport) &&
+		    (server_sin->sin_addr.s_addr == inc->inc_ie.ie_laddr.s_addr) &&
+		    (server_sin->sin_port == inc->inc_ie.ie_lport)) {
 			return (splice);
 		}
 	}
@@ -327,12 +334,12 @@ proxy_conn_rcv(struct uinet_socket *so, void *arg, int waitflag)
 
 
 static int
-conn_established(struct uinet_socket *so, void *arg, int waitflag)
+conn_complete(struct uinet_socket *so, void *arg, int waitflag)
 {
 	struct connection_context *conn = (struct connection_context *)arg;
 
 	if (conn->splice->proxy->verbose > 1)
-		printf("conn_established\n");
+		printf("conn_complete\n");
 
 	event_send(conn->eq, &conn->connected);
 
@@ -372,92 +379,13 @@ listener_upcall(struct uinet_socket *head, void *arg, int waitflag)
 	splice->proxy = proxy;
 	conn_init(&splice->client, so, splice);
 
-	uinet_soupcall_set(so, UINET_SO_RCV, conn_established, &splice->client);
+	uinet_soupcall_set(so, UINET_SO_RCV, conn_complete, &splice->client);
 
 out:
 	if (sa)
 		uinet_free_sockaddr(sa);
 
 	return (UINET_SU_OK);
-}
-
-
-static struct uinet_socket *
-create_socket(unsigned int listen, unsigned int fib,
-	      const char *local_mac, const char *foreign_mac,
-	      const uint32_t *vlan_stack, int vlan_stack_depth,
-	      uinet_api_synfilter_callback_t synfilter_cb, void *synfilter_cb_arg,
-	      int (*upcall)(struct uinet_socket *, void *, int), void *upcall_arg)
-{
-	int error;
-	struct uinet_socket *so;
-#define MAX_TAGS 16
-	uint32_t tags[16];
-	int i;
-	unsigned int optval, optlen;
-	uint8_t foreign_mac_bytes[6];
-	uint8_t local_mac_bytes[6];
-
-	error = uinet_socreate(UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
-	if (0 != error) {
-		printf("Socket creation failed (%d)\n", error);
-		return (NULL);
-	}
-	
-	if ((error = uinet_make_socket_promiscuous(so, fib))) {
-		printf("Failed to make socket promiscuous (%d)\n", error);
-		goto err;
-	}
-
-	optlen = sizeof(optval);
-	optval = 1;
-	if ((error = uinet_sosetsockopt(so, UINET_IPPROTO_TCP, UINET_TCP_NODELAY, &optval, optlen)))
-		goto err;
-
-	if ((error = uinet_mac_aton(foreign_mac, foreign_mac_bytes)))
-		goto err;
-	
-	if ((error = uinet_mac_aton(local_mac, local_mac_bytes)))
-		goto err;
-
-	if (listen) {
-		if (synfilter_cb) {
-			if ((error = uinet_synfilter_install(so, synfilter_cb, synfilter_cb_arg))) {
-				printf("Socket SYN filter install failed (%d)\n", error);
-				goto err;
-			}
-		}
-		
-		uinet_sosetnonblocking(so, 1);
-	}		
-
-	uinet_soupcall_set(so, UINET_SO_RCV, upcall, upcall_arg);
-	
-	if (vlan_stack_depth > MAX_TAGS) {
-		vlan_stack_depth = MAX_TAGS;
-	}
-
-	/* XXX assuming 802.1ad/802.1q */
-	for (i = 0; i < vlan_stack_depth; i++) {
-		uint32_t ethertype;
-		
-		/* this is standards compliant to two levels, questionable beyond that */
-		if ((vlan_stack_depth - 1) == i) ethertype = 0x8100;
-		else ethertype = 0x88a8;
-		
-		tags[i] = htonl((ethertype << 16) | vlan_stack[i]);
-	}
-
-	if ((error = uinet_setl2info(so, local_mac_bytes, foreign_mac_bytes, tags, htonl(0x00000fff), vlan_stack_depth))) {
-		printf("Socket SO_L2INFO set failed (%d)\n", error);
-		goto err;
-	}
-
-	return (so);
-
- err:
-	uinet_soclose(so);
-	return (NULL);
 }
 
 
@@ -641,9 +569,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 
 	uinet_synfilter_get_conninfo(cookie, &inc);
 
-	if (NULL == splice_table_lookup(&proxy->splicetab,
-					inc.inc_ie.ie_laddr.s_addr, inc.inc_ie.ie_lport,
-					inc.inc_ie.ie_faddr.s_addr, inc.inc_ie.ie_fport)) {
+	if (NULL == splice_table_lookup(&proxy->splicetab, &inc)) {
 
 		error = uinet_socreate(UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
 		if (0 != error) {
@@ -700,7 +626,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 
 		splice_table_insert(&proxy->splicetab, splice);
 
-		uinet_soupcall_set(so, UINET_SO_RCV, conn_established, &splice->server);
+		uinet_soupcall_set(so, UINET_SO_RCV, conn_complete, &splice->server);
 
 		if (proxy->verbose) {
 			char buf1[32], buf2[32];
@@ -735,26 +661,49 @@ static struct proxy_context *
 create_proxy(unsigned int client_fib, unsigned int server_fib,
 	     uinet_in_addr_t listen_addr, uinet_in_port_t listen_port, int verbose)
 {
-	struct proxy_context *proxy;
+	struct proxy_context *proxy = NULL;
 	struct uinet_socket *listener = NULL;
+	int optlen, optval;
 	int error;
+
+	error = uinet_socreate(UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
+	if (0 != error) {
+		printf("Listen socket creation failed (%d)\n", error);
+		goto fail;
+	}
+	
+	if ((error = uinet_make_socket_promiscuous(listener, client_fib))) {
+		printf("Failed to make listen socket promiscuous (%d)\n", error);
+		goto fail;
+	}
+
+	uinet_sosetnonblocking(listener, 1);
+
+	optlen = sizeof(optval);
+	optval = 1;
+	if ((error = uinet_sosetsockopt(listener, UINET_IPPROTO_TCP, UINET_TCP_NODELAY, &optval, optlen)))
+		goto fail;
 
 	proxy = proxy_alloc(10000);
 	if (NULL == proxy)
 		goto fail;
 
-	listener = create_socket(1, client_fib,
-				 NULL, NULL,
-				 NULL, -1,
-				 proxy_syn_filter, proxy,
-				 listener_upcall, proxy);
-	if (NULL == listener)
+	if ((error = uinet_synfilter_install(listener, proxy_syn_filter, proxy))) {
+		printf("Listen socket SYN filter install failed (%d)\n", error);
 		goto fail;
+	}
+	
+	uinet_soupcall_set(listener, UINET_SO_RCV, listener_upcall, proxy);
+	
+	if ((error = uinet_setl2info(listener, NULL, NULL, NULL, 0, -1))) {
+		printf("Listen socket L2 info set failed (%d)\n", error);
+		goto fail;
+	}
 
 	proxy->listener = listener;
 	proxy->verbose = verbose;
-	proxy->client_fib =  client_fib;
-	proxy->server_fib =  server_fib;
+	proxy->client_fib = client_fib;
+	proxy->server_fib = server_fib;
 
 	pthread_create(&proxy->thread, NULL, proxy_event_loop, proxy);
 
