@@ -41,6 +41,7 @@
 #include <sys/uio.h>
 
 #define _KERNEL
+#include <sys/errno.h>
 #include <sys/proc.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
@@ -74,8 +75,8 @@ int
 _pthread_create(pthread_t *thread, const pthread_attr_t *attr,
 	       void *(*start_routine)(void *), void *arg);
 
-void
-uinet_init_thread0(void);
+void uinet_init_thread0(void);
+struct thread *uinet_thread_alloc(struct proc *p);
 
 
 static void *
@@ -102,6 +103,47 @@ pthread_start_routine(void *arg)
 	return (NULL);
 }
 
+
+struct thread *
+uinet_thread_alloc(struct proc *p)
+{
+	struct thread *td = NULL;
+	struct mtx *lock = NULL;
+	pthread_cond_t *cond = NULL;
+
+	if (NULL == p) {
+		p = &proc0;
+	}
+
+	td = malloc(sizeof(struct thread));
+	if (NULL == td)
+		goto error;
+
+	lock = malloc(sizeof(struct mtx));
+	if (NULL == lock)
+		goto error;
+
+	cond = malloc(sizeof(pthread_cond_t));
+	if (NULL == cond)
+		goto error;
+
+	pthread_cond_init(cond, NULL);
+	mtx_init(lock, "thread_lock", NULL, MTX_DEF);
+	td->td_lock = lock;
+	td->td_sleepqueue = (void *)cond;
+	td->td_ucred = crhold(p->p_ucred);
+
+	return (td);
+
+error:
+	if (td) free(td);
+	if (lock) free(lock);
+	if (cond) free(cond);
+
+	return (NULL);
+}
+
+
 /*
  * N.B. The flags are ignored.  Namely RFSTOPPED is not honored and threads
  * are started right away.
@@ -116,28 +158,17 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	pthread_attr_t attr;
 	struct pthread_start_args *psa;
 	struct thread *td;
-	struct mtx *lock;
-	pthread_cond_t *cond;
 	char name[32];
 	va_list ap;
 
-	if (NULL == p) {
-		p = &proc0;
-	}
+	td = uinet_thread_alloc(p);
+	if (NULL == td)
+		return (ENOMEM);
 
-	td = malloc(sizeof(struct thread));
 	if (tdp)
 		*tdp = td;
 
 	psa = malloc(sizeof(struct pthread_start_args));
-	lock = malloc(sizeof(struct mtx));
-	cond = malloc(sizeof(pthread_cond_t));
-	pthread_cond_init(cond, NULL);
-	mtx_init(lock, "thread_lock", NULL, MTX_DEF);
-	td->td_lock = lock;
-	td->td_sleepqueue = (void *)cond;
-	td->td_ucred = crhold(p->p_ucred);
-
 	psa->psa_start_routine = start_routine;
 	psa->psa_arg = arg;
 	psa->psa_td = td;
@@ -182,21 +213,17 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	struct thread *td;
 	pthread_attr_t attr;
 	struct pthread_start_args *psa;
-	struct mtx *lock;
-	pthread_cond_t *cond; 
 	char name[32];
 	va_list ap;
 
-	*tdp = td = malloc(sizeof(struct thread));
-	psa = malloc(sizeof(struct pthread_start_args));
-	lock = malloc(sizeof(struct mtx));
-	cond = malloc(sizeof(pthread_cond_t));
-	pthread_cond_init(cond, NULL);
-	mtx_init(lock, "thread_lock", NULL, MTX_DEF);
-	td->td_lock = lock;
-	td->td_sleepqueue = (void *)cond;
-	td->td_ucred = crhold(proc0.p_ucred);
+	td = uinet_thread_alloc(*p);
+	if (NULL == td)
+		return (ENOMEM);
 
+	if (tdp)
+		*tdp = td;
+
+	psa = malloc(sizeof(struct pthread_start_args));
 	psa->psa_start_routine = start_routine;
 	psa->psa_arg = arg;
 	psa->psa_td = td;
@@ -226,6 +253,7 @@ uinet_init_thread0(void)
 {
 	pcurthread = &thread0;
 	pcurthread->td_proc = &proc0;
+	pcurthread->td_wchan = pthread_self();
 }
 
 
