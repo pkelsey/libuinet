@@ -31,6 +31,10 @@
 #include "uinet_api_types.h"
 #include "uinet_config.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void  uinet_finalize_thread(void);
 uinet_in_addr_t uinet_inet_addr(const char *cp);
 char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
@@ -67,5 +71,9 @@ void  uinet_synfilter_get_l2info(uinet_api_synfilter_cookie_t cookie, struct uin
 int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);
 void *uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie);
 void  uinet_synfilter_deferral_deliver(struct uinet_socket *so, void *deferral, int decision);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _UINET_API_H_ */

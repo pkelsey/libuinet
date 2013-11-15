@@ -26,7 +26,7 @@
 
 #include "uinet_api_errno.h"
 
-#include_next <errno.h>
+#include <errno.h>
 
 
 int
@@ -70,8 +70,10 @@ uinet_errno_to_os(int uinet_errno)
 	case UINET_EPIPE:		os_errno = EPIPE; break;
 	case UINET_EDOM:		os_errno = EDOM; break;
 	case UINET_ERANGE:		os_errno = ERANGE; break;
-	case UINET_EAGAIN:		os_errno = EAGAIN; break;
+
+/*	case UINET_EAGAIN:  same as EWOULDBLOCK */
 	case UINET_EWOULDBLOCK:		os_errno = EWOULDBLOCK; break;
+
 	case UINET_EINPROGRESS:		os_errno = EINPROGRESS; break;
 	case UINET_EALREADY:		os_errno = EALREADY; break;
 	case UINET_ENOTSOCK:		os_errno = ENOTSOCK; break;
@@ -81,8 +83,10 @@ uinet_errno_to_os(int uinet_errno)
 	case UINET_ENOPROTOOPT:		os_errno = ENOPROTOOPT; break;
 	case UINET_EPROTONOSUPPORT:	os_errno = EPROTONOSUPPORT; break;
 	case UINET_ESOCKTNOSUPPORT:	os_errno = ESOCKTNOSUPPORT; break;
-	case UINET_EOPNOTSUPP:		os_errno = EOPNOTSUPP; break;
+
+/*	case UINET_EOPNOTSUPP: same as ENOTSUP */
 	case UINET_ENOTSUP:		os_errno = ENOTSUP; break;
+
 	case UINET_EPFNOSUPPORT:	os_errno = EPFNOSUPPORT; break;
 	case UINET_EAFNOSUPPORT:	os_errno = EAFNOSUPPORT; break;
 	case UINET_EADDRINUSE:		os_errno = EADDRINUSE; break;
@@ -132,7 +136,6 @@ uinet_errno_to_os(int uinet_errno)
 	case UINET_EPROTO:		os_errno = EPROTO; break;
 	case UINET_ENOTCAPABLE:		os_errno = ENOTCAPABLE; break;
 	case UINET_ECAPMODE:		os_errno = ECAPMODE; break;
-	case UINET_ELAST:		os_errno = ELAST; break;
 	default:			os_errno = uinet_errno; break;
 	}
 

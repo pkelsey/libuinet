@@ -147,6 +147,14 @@
 
 #define	UINET_ELAST		94		/* Must be equal largest errno */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 int uinet_errno_to_os(int uinet_errno);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _UINET_API_ERRNO_H_ */

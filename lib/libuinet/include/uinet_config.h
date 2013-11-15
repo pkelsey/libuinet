@@ -27,6 +27,9 @@
 #ifndef	_UINET_CONFIG_H_
 #define	_UINET_CONFIG_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 typedef enum {
 	UINET_BLACKHOLE_TCP_NONE,	/* disable TCP blackholing (default) */
@@ -67,5 +70,9 @@ int uinet_config_if(const char *ifname, int cpu, unsigned int cdom);
  *  Configure UDP and TCP blackholing.
  */
 int uinet_config_blackhole(uinet_blackhole_t action);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _UINET_CONFIG_H_ */

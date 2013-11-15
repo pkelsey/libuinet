@@ -87,6 +87,7 @@ VPATH+= $S/libkern
 
 UINET_SRCS+=			\
 	uinet_api.c		\
+	uinet_api_errno.c	\
 	uinet_arc4random.c	\
 	uinet_clock.c		\
 	uinet_config.c		\
