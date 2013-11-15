@@ -416,8 +416,8 @@ listener_upcall(struct uinet_socket *head, void *arg, int waitflag)
 	if (proxy->verbose > 1)
 		printf("listener_upcall\n");
 
-	so = uinet_soaccept(head, &sa);
-	if (NULL == so)
+	error = uinet_soaccept(head, &sa, &so);
+	if (error != 0)
 		goto out;
 
 	if (proxy->verbose)
@@ -876,7 +876,7 @@ usage(const char *progname)
 
 int main (int argc, char **argv)
 {
-	char ch;
+	int ch;
 	char *progname = argv[0];
 #define MIN_IFS 2
 #define MAX_IFS 2

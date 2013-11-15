@@ -1425,7 +1425,7 @@ quit_clean(int arg)
 
 int main(int argc, char **argv)
 {
-	char ch;
+	int ch;
 	char *progname = argv[0];
 	int val;
 	int minval;
