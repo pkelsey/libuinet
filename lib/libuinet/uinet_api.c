@@ -46,8 +46,21 @@
 
 #include "uinet_api.h"
 
+#include "opt_inet6.h"
+
 
 extern struct thread *uinet_thread_alloc(struct proc *p);
+
+
+int
+uinet_inet6_enabled(void)
+{
+#ifdef INET6
+	return (1);
+#else
+	return (0);
+#endif
+}
 
 
 int
@@ -220,22 +233,54 @@ uinet_setl2info(struct uinet_socket *so, const uint8_t *local_mac, const uint8_t
 }
 
 
-struct uinet_socket *
-uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam)
+/*
+ * This is really a version of kern_accept() without the file descriptor
+ * bits.  As long as SS_NBIO is set on the listen socket, it does just what
+ * you want to do in an upcall on that socket, so it's a better piece of
+ * functionality to expose than just wrapping a bare soaccept().  If a blocking
+ * syscall/poll style API comes later, this routine will serve that need as
+ * well.
+ */
+int
+uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struct uinet_socket **aso)
 {
-	struct socket *listener_internal = (struct socket *)listener;
+	struct socket *head = (struct socket *)listener;
 	struct socket *so;
+	struct sockaddr *sa = NULL;
 	int error;
 
-	*nam = NULL;
+	if (nam)
+		*nam = NULL;
+
+	*aso = NULL;
 
 	ACCEPT_LOCK();
-	if (TAILQ_EMPTY(&listener_internal->so_comp)) {
+	if ((head->so_state & SS_NBIO) && TAILQ_EMPTY(&head->so_comp)) {
 		ACCEPT_UNLOCK();
-		return (NULL);
+		error = EWOULDBLOCK;
+		goto noconnection;
 	}
 
-	so = TAILQ_FIRST(&listener_internal->so_comp);
+	while (TAILQ_EMPTY(&head->so_comp) && head->so_error == 0) {
+		if (head->so_rcv.sb_state & SBS_CANTRCVMORE) {
+			head->so_error = ECONNABORTED;
+			break;
+		}
+		error = msleep(&head->so_timeo, &accept_mtx, PSOCK | PCATCH,
+		    "accept", 0);
+		if (error) {
+			ACCEPT_UNLOCK();
+			goto noconnection;
+		}
+	}
+	if (head->so_error) {
+		error = head->so_error;
+		head->so_error = 0;
+		ACCEPT_UNLOCK();
+		goto noconnection;
+	}
+
+	so = TAILQ_FIRST(&head->so_comp);
 	KASSERT(!(so->so_qstate & SQ_INCOMP), ("uinet_soaccept: so_qstate SQ_INCOMP"));
 	KASSERT(so->so_qstate & SQ_COMP, ("uinet_soaccept: so_qstate not SQ_COMP"));
 
@@ -247,22 +292,33 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam)
 	SOCK_LOCK(so);			/* soref() and so_state update */
 	soref(so);			/* socket came from sonewconn() with an so_count of 0 */
 
-	TAILQ_REMOVE(&listener_internal->so_comp, so, so_list);
-	listener_internal->so_qlen--;
-	so->so_state |= (listener_internal->so_state & SS_NBIO);
+	TAILQ_REMOVE(&head->so_comp, so, so_list);
+	head->so_qlen--;
+	so->so_state |= (head->so_state & SS_NBIO);
 	so->so_qstate &= ~SQ_COMP;
 	so->so_head = NULL;
 
 	SOCK_UNLOCK(so);
 	ACCEPT_UNLOCK();
 
-	error = soaccept(so, (struct sockaddr **)nam);
+	error = soaccept(so, &sa);
 	if (error) {
 		soclose(so);
-		return (NULL);
+		return (error);
 	}
 
-	return ((struct uinet_socket *)so);
+	if (nam) {
+		*nam = (struct uinet_sockaddr *)sa;
+		sa = NULL;
+	}
+
+	*aso = (struct uinet_socket *)so;
+
+noconnection:
+	if (sa)
+		free(sa, M_SONAME);
+
+	return (error);
 }
 
 
@@ -273,10 +329,10 @@ uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam)
 }
 
 
-void
+int
 uinet_soclose(struct uinet_socket *so)
 {
-	soclose((struct socket *)so);
+	return soclose((struct socket *)so);
 }
 
 
@@ -444,6 +500,48 @@ void
 uinet_free_sockaddr(struct uinet_sockaddr *sa)
 {
 	free(sa, M_SONAME);
+}
+
+
+void
+uinet_soupcall_lock(struct uinet_socket *so, int which)
+{
+	struct socket *so_internal = (struct socket *)so;
+	struct sockbuf *sb;
+
+	switch(which) {
+	case UINET_SO_RCV:
+		sb = &so_internal->so_rcv;
+		break;
+	case UINET_SO_SND:
+		sb = &so_internal->so_snd;
+		break;
+	default:
+		return;
+	}
+	
+	SOCKBUF_LOCK(sb);
+}
+
+
+void
+uinet_soupcall_unlock(struct uinet_socket *so, int which)
+{
+	struct socket *so_internal = (struct socket *)so;
+	struct sockbuf *sb;
+
+	switch(which) {
+	case UINET_SO_RCV:
+		sb = &so_internal->so_rcv;
+		break;
+	case UINET_SO_SND:
+		sb = &so_internal->so_snd;
+		break;
+	default:
+		return;
+	}
+	
+	SOCKBUF_UNLOCK(sb);
 }
 
 

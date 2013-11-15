@@ -4,6 +4,7 @@ uinet_finalize_thread
 uinet_free_sockaddr
 uinet_inet_addr
 uinet_inet_ntoa
+uinet_inet6_enabled
 uinet_init
 uinet_initialize_thread
 uinet_interface_up
@@ -26,8 +27,10 @@ uinet_sosend
 uinet_soshutdown
 uinet_sogetpeeraddr
 uinet_sogetsockaddr
-uinet_soupcall_set
+uinet_soupcall_lock
 uinet_soupcall_clear
+uinet_soupcall_set
+uinet_soupcall_unlock
 uinet_synfilter_deferral_alloc
 uinet_synfilter_deferral_deliver
 uinet_synfilter_get_conninfo
