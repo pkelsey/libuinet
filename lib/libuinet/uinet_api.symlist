@@ -1,5 +1,6 @@
 uinet_config_if
 uinet_config_blackhole
+uinet_errno_to_os
 uinet_finalize_thread
 uinet_free_sockaddr
 uinet_inet_addr
