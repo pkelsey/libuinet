@@ -336,10 +336,53 @@ uinet_soclose(struct uinet_socket *so)
 }
 
 
+/*
+ * This is really a version of kern_connect() without the file descriptor
+ * bits.  As long as SS_NBIO is set on the socket, it does not block.  If a
+ * blocking syscall/poll style API comes later, this routine will serve that
+ * need as well.
+ */
 int
-uinet_soconnect(struct uinet_socket *so, struct uinet_sockaddr *nam)
+uinet_soconnect(struct uinet_socket *uso, struct uinet_sockaddr *nam)
 {
-	return soconnect((struct socket *)so, (struct sockaddr *)nam, curthread);
+	struct socket *so = (struct socket *)uso;
+	int error;
+	int interrupted = 0;
+
+	if (so->so_state & SS_ISCONNECTING) {
+		error = EALREADY;
+		goto done1;
+	}
+
+	error = soconnect(so, (struct sockaddr *)nam, curthread);
+	if (error)
+		goto bad;
+	if ((so->so_state & SS_NBIO) && (so->so_state & SS_ISCONNECTING)) {
+		error = EINPROGRESS;
+		goto done1;
+	}
+	SOCK_LOCK(so);
+	while ((so->so_state & SS_ISCONNECTING) && so->so_error == 0) {
+		error = msleep(&so->so_timeo, SOCK_MTX(so), PSOCK | PCATCH,
+		    "connec", 0);
+		if (error) {
+			if (error == EINTR || error == ERESTART)
+				interrupted = 1;
+			break;
+		}
+	}
+	if (error == 0) {
+		error = so->so_error;
+		so->so_error = 0;
+	}
+	SOCK_UNLOCK(so);
+bad:
+	if (!interrupted)
+		so->so_state &= ~SS_ISCONNECTING;
+	if (error == ERESTART)
+		error = EINTR;
+done1:
+	return (error);
 }
 
 
@@ -362,6 +405,15 @@ uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc)
 
 
 int
+uinet_sogeterror(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+
+	return (so_internal->so_error);
+}
+
+
+int
 uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval,
 		   unsigned int *optlen)
 {
@@ -375,7 +427,7 @@ uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval
 }
 
 
-short
+int
 uinet_sogetstate(struct uinet_socket *so)
 {
 	struct socket *so_internal = (struct socket *)so;

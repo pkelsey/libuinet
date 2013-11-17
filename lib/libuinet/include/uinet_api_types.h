@@ -121,8 +121,12 @@ struct uinet_uio {
 };
 
 
-#define	UINET_SS_ISCONNECTED	0x0002	/* socket connected to a peer */
-#define	UINET_SS_ISDISCONNECTED	0x2000	/* socket disconnected from peer */
+#define	UINET_SS_ISCONNECTED		0x0002	/* socket connected to a peer */
+#define	UINET_SS_ISCONNECTING		0x0004	/* in process of connecting to peer */
+#define	UINET_SS_ISDISCONNECTING	0x0008	/* in process of disconnecting */
+#define	UINET_SS_NBIO			0x0100	/* non-blocking ops */
+#define	UINET_SS_ISCONFIRMING		0x0400	/* deciding to accept connection req */
+#define	UINET_SS_ISDISCONNECTED		0x2000	/* socket disconnected from peer */
 
 
 /* 'which' values for socket upcalls. */
