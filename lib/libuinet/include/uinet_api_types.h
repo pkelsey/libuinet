@@ -31,8 +31,6 @@
 
 struct uinet_socket;
 
-struct uinet_sockaddr;
-
 typedef void * uinet_api_synfilter_cookie_t;
 
 typedef int (*uinet_api_synfilter_callback_t)(struct uinet_socket *, void *, uinet_api_synfilter_cookie_t);
@@ -43,6 +41,12 @@ struct uinet_api_synfilter_ctx {
 };
 
 typedef uint8_t uinet_sa_family_t;
+
+struct uinet_sockaddr {
+	unsigned char		sa_len;		/* total length */
+	uinet_sa_family_t	sa_family;	/* address family */
+	char			sa_data[14];	/* actually longer; address value */
+};
 
 typedef	uint16_t uinet_in_port_t;
 
@@ -187,6 +191,11 @@ struct uinet_uio {
 
 #define	UINET_PF_INET		UINET_AF_INET
 #define	UINET_PF_INET6		UINET_AF_INET6
+
+
+#define	UINET_SHUT_RD		0		/* shut down the reading side */
+#define	UINET_SHUT_WR		1		/* shut down the writing side */
+#define	UINET_SHUT_RDWR		2		/* shut down both sides */
 
 
 #define	UINET_IPPROTO_IP	0	/* dummy for IP */
