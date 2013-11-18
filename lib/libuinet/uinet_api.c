@@ -256,6 +256,10 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 
 	ACCEPT_LOCK();
 	if ((head->so_state & SS_NBIO) && TAILQ_EMPTY(&head->so_comp)) {
+		if (head->so_upcallprep.soup_accept != NULL) {
+			head->so_upcallprep.soup_accept(so,
+							head->so_upcallprep.soup_accept_arg);
+		}
 		ACCEPT_UNLOCK();
 		error = EWOULDBLOCK;
 		goto noconnection;

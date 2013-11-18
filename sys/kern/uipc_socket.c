@@ -1567,6 +1567,11 @@ restart:
 		}
 		if ((so->so_state & SS_NBIO) ||
 		    (flags & (MSG_DONTWAIT|MSG_NBIO))) {
+			if (so->so_upcallprep.soup_receive != NULL) {
+				so->so_upcallprep.soup_receive(so,
+					so->so_upcallprep.soup_receive_arg,
+					uio->uio_resid);
+			}
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			error = EWOULDBLOCK;
 			goto release;
@@ -1910,6 +1915,15 @@ dontblock:
 				so->so_rcv.sb_lastrecord = NULL;
 			} else if (nextrecord->m_nextpkt == NULL)
 				so->so_rcv.sb_lastrecord = nextrecord;
+
+			if (uio->uio_resid > 0 && orig_resid != uio->uio_resid
+			    && !sosendallatonce(so) && nextrecord == NULL) {
+				if (so->so_upcallprep.soup_receive != NULL) {
+					so->so_upcallprep.soup_receive(so,
+					       so->so_upcallprep.soup_receive_arg,
+					       uio->uio_resid);
+				}
+			}
 		}
 		SBLASTRECORDCHK(&so->so_rcv);
 		SBLASTMBUFCHK(&so->so_rcv);

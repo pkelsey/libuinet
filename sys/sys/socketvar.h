@@ -128,6 +128,13 @@ struct socket {
 	int so_fibnum;		/* routing domain for this socket */
 	uint32_t so_user_cookie;
 
+	struct so_upcallprep {
+		void (*soup_accept)(struct socket *so, void *arg);
+		void *soup_accept_arg;
+		void (*soup_receive)(struct socket *so, void *arg, int64_t);
+		void *soup_receive_arg;
+	} so_upcallprep;		/* (a) initialized once immediately after socket creation */ 
+
 	struct in_l2info *so_l2info;	/* (b) PROMISCUOUS_INET L2 info */
 };
 
