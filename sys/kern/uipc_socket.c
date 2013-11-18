@@ -1269,6 +1269,11 @@ restart:
 		if (space < resid + clen &&
 		    (atomic || space < so->so_snd.sb_lowat || space < clen)) {
 			if ((so->so_state & SS_NBIO) || (flags & MSG_NBIO)) {
+				if (so->so_upcallprep.soup_send) {
+					so->so_upcallprep.soup_send(so,
+						so->so_upcallprep.soup_send_arg,
+						resid);
+				}
 				SOCKBUF_UNLOCK(&so->so_snd);
 				error = EWOULDBLOCK;
 				goto release;

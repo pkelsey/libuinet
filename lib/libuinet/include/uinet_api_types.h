@@ -112,6 +112,8 @@ struct uinet_in_conninfo {
 };
 
 
+#define UINET_IOV_MAX	1024
+
 struct uinet_iovec {
 	void	*iov_base;	/* Base address. */
 	uint64_t iov_len;	/* Length. */

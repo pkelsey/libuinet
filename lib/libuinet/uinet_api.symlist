@@ -25,6 +25,7 @@ uinet_solisten
 uinet_soreceive
 uinet_sosetnonblocking
 uinet_sosetsockopt
+uinet_sosetupcallprep
 uinet_sosend
 uinet_soshutdown
 uinet_sogetpeeraddr

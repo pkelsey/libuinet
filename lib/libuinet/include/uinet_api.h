@@ -58,6 +58,10 @@ int   uinet_solisten(struct uinet_socket *so, int backlog);
 int   uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uinet_uio *uio, int *flagsp);
 void  uinet_sosetnonblocking(struct uinet_socket *so, unsigned int nonblocking);
 int   uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int optlen);
+void  uinet_sosetupcallprep(struct uinet_socket *so,
+			    void (*soup_accept)(struct uinet_socket *, void *), void *soup_accept_arg,
+			    void (*soup_receive)(struct uinet_socket *, void *, int64_t), void *soup_receive_arg,
+			    void (*soup_send)(struct uinet_socket *, void *, int64_t), void *soup_send_arg);
 int   uinet_sosend(struct uinet_socket *so, struct uinet_sockaddr *addr, struct uinet_uio *uio, int flags);
 int   uinet_soshutdown(struct uinet_socket *so, int how);
 int   uinet_sogetpeeraddr(struct uinet_socket *so, struct uinet_sockaddr **sa);

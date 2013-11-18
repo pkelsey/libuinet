@@ -133,6 +133,8 @@ struct socket {
 		void *soup_accept_arg;
 		void (*soup_receive)(struct socket *so, void *arg, int64_t);
 		void *soup_receive_arg;
+		void (*soup_send)(struct socket *so, void *arg, int64_t);
+		void *soup_send_arg;
 	} so_upcallprep;		/* (a) initialized once immediately after socket creation */ 
 
 	struct in_l2info *so_l2info;	/* (b) PROMISCUOUS_INET L2 info */
