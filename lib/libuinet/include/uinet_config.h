@@ -40,12 +40,20 @@ typedef enum {
 } uinet_blackhole_t;
 
 
+typedef enum {
+	UINET_IFTYPE_LOOPBACK,
+	UINET_IFTYPE_NETMAP
+} uinet_iftype_t;
+
 /*
  *  Add an interface to the config.  If called twice for the same interface,
  *  the second config replaces the first.
  *
  *  ifname	is of the form <base><unit>:<queue>, e.g. em0:1.
  *  		<base><unit> is a synonym for <base><unit>:0.
+ *
+ *  type	is the type of interface to create.  This determines the
+ *		interface driver that will claim this config entry.
  *
  *  cpu		is the cpu number on which to perform stack processing on
  *		packets received on ifname.  -1 means leave it up to the
@@ -63,7 +71,7 @@ typedef enum {
  *
  *  EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
  */
-int uinet_config_if(const char *ifname, int cpu, unsigned int cdom);
+int uinet_config_if(const char *ifname, uinet_iftype_t type, int cpu, unsigned int cdom);
 
 
 /*

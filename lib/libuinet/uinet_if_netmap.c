@@ -862,13 +862,15 @@ if_netmap_modevent(module_t mod, int type, void *data)
 	switch (type) {
 	case MOD_LOAD:
 		while (NULL != (cfg = uinet_config_if_next(cfg))) {
-			if_netmap_attach(cfg);
+			if (UINET_IFTYPE_NETMAP == cfg->type)
+				if_netmap_attach(cfg);
 		}
 		break;
 
 	case MOD_UNLOAD:
 		while (NULL != (cfg = uinet_config_if_next(cfg))) {
-			if_netmap_detach(cfg);
+			if (UINET_IFTYPE_NETMAP == cfg->type)
+				if_netmap_detach(cfg);
 		}
 		break;
 

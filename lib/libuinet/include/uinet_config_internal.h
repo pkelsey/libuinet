@@ -33,9 +33,11 @@
 
 #include <net/if.h>
 
+#include <uinet_config.h>
 
 struct uinet_config_if {
 	TAILQ_ENTRY(uinet_config_if) link;
+	uinet_iftype_t type;
 	char spec[IF_NAMESIZE];
 	char name[IF_NAMESIZE];
 	char basename[IF_NAMESIZE];

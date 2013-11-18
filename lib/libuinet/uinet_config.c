@@ -38,7 +38,7 @@
 static TAILQ_HEAD(config_head, uinet_config_if) if_conf = TAILQ_HEAD_INITIALIZER(if_conf);
 
 
-int uinet_config_if(const char *ifname, int cpu, unsigned int cdom)
+int uinet_config_if(const char *ifname, uinet_iftype_t type, int cpu, unsigned int cdom)
 {
 	const char *colon, *p, *p_orig;
 	unsigned int queue;
@@ -113,6 +113,8 @@ int uinet_config_if(const char *ifname, int cpu, unsigned int cdom)
 	if (NULL == cfg) {
 		return (ENOMEM);
 	}
+
+	cfg->type = type;
 
 	/* copies guaranteed not to overflow the destinations due to above
 	 * checks against IF_NAMESIZE.

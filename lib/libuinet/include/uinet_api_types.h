@@ -195,6 +195,9 @@ struct uinet_uio {
 #define	UINET_PF_INET6		UINET_AF_INET6
 
 
+#define	UINET_MSG_DONTWAIT	0x80		/* this message should be nonblocking */
+#define	UINET_MSG_NBIO		0x4000		/* FIONBIO mode, used by fifofs */
+
 #define	UINET_SHUT_RD		0		/* shut down the reading side */
 #define	UINET_SHUT_WR		1		/* shut down the writing side */
 #define	UINET_SHUT_RDWR		2		/* shut down both sides */

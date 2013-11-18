@@ -8,6 +8,8 @@ uinet_inet_ntoa
 uinet_inet6_enabled
 uinet_init
 uinet_initialize_thread
+uinet_interface_add_alias
+uinet_interface_create
 uinet_interface_up
 uinet_mac_aton
 uinet_make_socket_promiscuous

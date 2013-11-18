@@ -938,9 +938,6 @@ int main (int argc, char **argv)
 
 	uinet_init(1, 128*1024);
 
-	uinet_config_blackhole(UINET_BLACKHOLE_TCP_ALL);
-	uinet_config_blackhole(UINET_BLACKHOLE_UDP_ALL);
-
 	for (i = 0; i < num_ifs; i++) {
 		uinet_interface_up(ifnames[i], 0);
 	}

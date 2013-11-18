@@ -28,9 +28,12 @@
  *
  */
 
+
 #include <sys/param.h>
+#include <sys/kernel.h>
 #include <sys/pcpu.h>
 #include <sys/smp.h>
+#include <sys/systm.h>
 
 
 /* This is used in modules that need to work in both SMP and UP. */
@@ -42,3 +45,18 @@ int mp_maxcpus = MAXCPU;
 
 volatile int smp_started;
 u_int mp_maxid;
+
+
+static void
+mp_start(void *dummy)
+{
+	int i;
+	
+	for (i = 0; i < mp_ncpus; i++) {
+		CPU_SET(i, &all_cpus);
+	}
+
+	printf("UINET multiprocessor subsystem configured with %d CPUs\n", mp_ncpus);
+}
+SYSINIT(cpu_mp, SI_SUB_CPU, SI_ORDER_THIRD, mp_start, NULL);
+

@@ -27,21 +27,24 @@
 #ifndef	_UINET_API_H_
 #define	_UINET_API_H_
 
-#include "uinet_api_errno.h"
-#include "uinet_api_types.h"
-#include "uinet_config.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#include "uinet_api_errno.h"
+#include "uinet_api_types.h"
+#include "uinet_config.h"
 
 void  uinet_finalize_thread(void);
 uinet_in_addr_t uinet_inet_addr(const char *cp);
 char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
 int   uinet_inet6_enabled(void);
-int   uinet_init(unsigned int ncpus, unsigned int nmbclusters);
+int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback);
 int   uinet_initialize_thread(void);
-int   uinet_interface_up(const char *canonical_name, unsigned int qno);
+int   uinet_interface_add_alias(const char *canonical_name, int qno,
+				const char *addr, const char *braddr, const char *mask);
+int   uinet_interface_create(const char *canonical_name, int qno);
+int   uinet_interface_up(const char *canonical_name, int qno, unsigned int promisc);
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
 int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
 int   uinet_setl2info(struct uinet_socket *so, const uint8_t *local_mac, const uint8_t *foreign_mac, const uint32_t *tag_stack, const uint32_t mask, int stack_depth);

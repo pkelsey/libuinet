@@ -65,7 +65,7 @@ pthread_mutex_t init_lock;
 pthread_cond_t init_cond;
 
 int
-uinet_init(unsigned int ncpus, unsigned int nmbclusters)
+uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 {
 	struct thread *td;
 	char tmpbuf[32];
@@ -73,7 +73,15 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters)
 	int num_hash_buckets;
 	caddr_t v;
 
-	printf("uinet starting: cpus=%u nmbclusters=%u\n", ncpus, nmbclusters);
+	if (ncpus > MAXCPU) {
+		printf("Limiting number of CPUs to %u\n", MAXCPU);
+		ncpus = MAXCPU;
+	} else if (0 == ncpus) {
+		printf("Setting number of CPUs to 1\n");
+		ncpus = 1;
+	}
+
+	printf("uinet starting: cpus=%u, nmbclusters=%u\n", ncpus, nmbclusters);
 
 	snprintf(tmpbuf, sizeof(tmpbuf), "%u", nmbclusters);
 	setenv("kern.ipc.nmbclusters", tmpbuf);
@@ -100,6 +108,7 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters)
 	boot_pages = 16;  /* number of pages made available for uma to bootstrap itself */
 
 	mp_ncpus = ncpus;
+	mp_maxid = mp_ncpus - 1;
 
         /* vm_init bits */
 	
@@ -143,6 +152,16 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters)
 	 */
 	uinet_config_blackhole(UINET_BLACKHOLE_TCP_ALL);
 	uinet_config_blackhole(UINET_BLACKHOLE_UDP_ALL);
+
+	if (loopback) {
+		int error;
+
+		uinet_interface_up("lo0", -1, 0);
+
+		if (0 != (error = uinet_interface_add_alias("lo0", -1, "127.0.0.1", "0.0.0.0", "255.0.0.0"))) {
+			printf("Loopback alias add failed %d\n", error);
+		}
+	}
 
 	return (0);
 }

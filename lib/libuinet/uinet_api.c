@@ -38,6 +38,7 @@
 
 #include <net/if.h>
 #include <netinet/in.h>
+#include <netinet/in_var.h>
 #include <netinet/in_promisc.h>
 
 #include <arpa/inet.h>
@@ -105,45 +106,140 @@ uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size)
 }
 
 
-int
-uinet_interface_up(const char *canonical_name, unsigned int qno)
+static int
+uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *canonical_name, int qno)
 {
-	struct socket *cfg_so;
 	struct thread *td = curthread;
-	struct ifreq ifr;
 	int error;
-	char ifname[IF_NAMESIZE];
 
-	error = socreate(PF_INET, &cfg_so, SOCK_DGRAM, 0, td->td_ucred, td);
+	error = socreate(PF_INET, so, SOCK_DGRAM, 0, td->td_ucred, td);
 	if (0 != error) {
-		printf("Socket creation failed (%d)\n", error);
-		return (1);
+		printf("ifconfig socket creation failed (%d)\n", error);
+		return (error);
 	}
 
-	snprintf(ifname, sizeof(ifname), "%s:%u", canonical_name, qno);
-	strcpy(ifr.ifr_name, ifname);
+	if (qno >= 0)
+		snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s:%u", canonical_name, qno);
+	else
+		strlcpy(ifr->ifr_name, canonical_name, sizeof(ifr->ifr_name));
 
+	
+	return (0);
+}
+
+
+static int
+uinet_ifconfig_do(struct socket *so, unsigned long what, void *req)
+{
+	int error;
+
+	error = ifioctl(so, what, (caddr_t)req, curthread);
+	if (error != 0)
+		printf("ifioctl 0x%08lx failed %d\n", what, error);
+
+	return (error);
+}
+
+
+static void
+uinet_ifconfig_end(struct socket *so)
+{
+	soclose(so);
+}
+
+
+int
+uinet_interface_add_alias(const char *canonical_name, int qno,
+			  const char *addr, const char *braddr, const char *mask)
+{
+	struct socket *cfg_so;
+	struct in_aliasreq ina;
+	struct sockaddr_in template = {
+		.sin_len = sizeof(struct sockaddr_in),
+		.sin_family = AF_INET
+	};
+	int error;
+
+	/*
+	 * The cast of ina to (struct ifreq *) is safe bcause they both
+	 * begin with the same size name field, and uinet_ifconfig_begin
+	 * only touches the name field.
+	 */
+	error = uinet_ifconfig_begin(&cfg_so, (struct ifreq *)&ina, canonical_name, qno);
+	if (0 != error) {
+		return (error);
+	}
+
+	ina.ifra_addr = template;
+	if (inet_pton(AF_INET, addr, &ina.ifra_addr.sin_addr) <= 0) {
+		error = EAFNOSUPPORT;
+		goto out;
+	}
+
+	ina.ifra_broadaddr = template;
+	if (inet_pton(AF_INET, braddr, &ina.ifra_broadaddr.sin_addr) <= 0) {
+		error = EAFNOSUPPORT;
+		goto out;
+	}
+
+	ina.ifra_mask = template;
+	if (inet_pton(AF_INET, mask, &ina.ifra_mask.sin_addr) <= 0) {
+		error = EAFNOSUPPORT;
+		goto out;
+	}
+
+	error = uinet_ifconfig_do(cfg_so, SIOCAIFADDR, &ina);
+
+out:
+	uinet_ifconfig_end(cfg_so);
+
+	return (error);
+}
+
+
+int
+uinet_interface_create(const char *canonical_name, int qno)
+{
+	struct socket *cfg_so;
+	struct ifreq ifr;
+	int error;
+
+	error = uinet_ifconfig_begin(&cfg_so, &ifr, canonical_name, qno);
+	if (0 != error)
+		return (error);
+
+	error = uinet_ifconfig_do(cfg_so, SIOCIFCREATE, &ifr);
+
+	uinet_ifconfig_end(cfg_so);
+
+	return (error);
+}
+
+
+int
+uinet_interface_up(const char *canonical_name, int qno, unsigned int promisc)
+{
+	struct socket *cfg_so;
+	struct ifreq ifr;
+	int error;
+
+	error = uinet_ifconfig_begin(&cfg_so, &ifr, canonical_name, qno);
+	if (0 != error)
+		return (error);
 	
 	/* set interface to UP */
 
-	error = ifioctl(cfg_so, SIOCGIFFLAGS, (caddr_t)&ifr, td);
-	if (0 != error) {
-		printf("SSIOCGIFFLAGS failed %d\n", error);
-		return (1);
+	error = uinet_ifconfig_do(cfg_so, SIOCGIFFLAGS, &ifr);
+	if (0 == error) {
+		ifr.ifr_flags |= IFF_UP;
+		if (promisc)
+			ifr.ifr_flagshigh |= (IFF_PPROMISC | IFF_PROMISCINET) >> 16;
+		error = uinet_ifconfig_do(cfg_so, SIOCSIFFLAGS, &ifr);
 	}
 
-	ifr.ifr_flags |= IFF_UP;
-	ifr.ifr_flagshigh |= (IFF_PPROMISC | IFF_PROMISCINET) >> 16;
-	error = ifioctl(cfg_so, SIOCSIFFLAGS, (caddr_t)&ifr, td);
-	if (0 != error) {
-		printf("SSIOCSIFFLAGS failed %d\n", error);
-		return (1);
-	}
+	uinet_ifconfig_end(cfg_so);
 
-	soclose(cfg_so);
-
-	return (0);
-	
+	return (error);
 }
 
 
@@ -534,7 +630,7 @@ uinet_sosend(struct uinet_socket *so, struct uinet_sockaddr *addr, struct uinet_
 	uio_internal.uio_segflg = UIO_SYSSPACE;
 	uio_internal.uio_rw = UIO_WRITE;
 	uio_internal.uio_td = curthread;
-	
+
 	result = sosend((struct socket *)so, (struct sockaddr *)addr, &uio_internal, NULL, NULL, flags, curthread);
 
 	uio->uio_resid = uio_internal.uio_resid;
