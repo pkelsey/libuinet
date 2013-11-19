@@ -131,7 +131,7 @@ struct socket {
 	struct so_upcallprep {
 		void (*soup_accept)(struct socket *so, void *arg);
 		void *soup_accept_arg;
-		void (*soup_receive)(struct socket *so, void *arg, int64_t);
+		void (*soup_receive)(struct socket *so, void *arg, int64_t, int64_t);
 		void *soup_receive_arg;
 		void (*soup_send)(struct socket *so, void *arg, int64_t);
 		void *soup_send_arg;

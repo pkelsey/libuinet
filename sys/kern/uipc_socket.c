@@ -1575,7 +1575,7 @@ restart:
 			if (so->so_upcallprep.soup_receive != NULL) {
 				so->so_upcallprep.soup_receive(so,
 					so->so_upcallprep.soup_receive_arg,
-					uio->uio_resid);
+					orig_resid - uio->uio_resid, uio->uio_resid);
 			}
 			SOCKBUF_UNLOCK(&so->so_rcv);
 			error = EWOULDBLOCK;
@@ -1926,7 +1926,7 @@ dontblock:
 				if (so->so_upcallprep.soup_receive != NULL) {
 					so->so_upcallprep.soup_receive(so,
 					       so->so_upcallprep.soup_receive_arg,
-					       uio->uio_resid);
+					       orig_resid - uio->uio_resid, uio->uio_resid);
 				}
 			}
 		}

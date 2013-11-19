@@ -596,14 +596,14 @@ uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval
 void
 uinet_sosetupcallprep(struct uinet_socket *so,
 		      void (*soup_accept)(struct uinet_socket *, void *), void *soup_accept_arg,
-		      void (*soup_receive)(struct uinet_socket *, void *, int64_t), void *soup_receive_arg,
+		      void (*soup_receive)(struct uinet_socket *, void *, int64_t, int64_t), void *soup_receive_arg,
 		      void (*soup_send)(struct uinet_socket *, void *, int64_t), void *soup_send_arg)
 {
 	struct socket *so_internal = (struct socket *)so;
 
 	so_internal->so_upcallprep.soup_accept = (void (*)(struct socket *, void *))soup_accept;
 	so_internal->so_upcallprep.soup_accept_arg = soup_accept_arg;
-	so_internal->so_upcallprep.soup_receive = (void (*)(struct socket *, void *, int64_t))soup_receive;
+	so_internal->so_upcallprep.soup_receive = (void (*)(struct socket *, void *, int64_t, int64_t))soup_receive;
 	so_internal->so_upcallprep.soup_receive_arg = soup_receive_arg;
 	so_internal->so_upcallprep.soup_send = (void (*)(struct socket *, void *, int64_t))soup_send;
 	so_internal->so_upcallprep.soup_send_arg = soup_send_arg;
