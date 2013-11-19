@@ -55,13 +55,13 @@ typedef enum {
  *  type	is the type of interface to create.  This determines the
  *		interface driver that will claim this config entry.
  *
- *  cpu		is the cpu number on which to perform stack processing on
- *		packets received on ifname.  -1 means leave it up to the
- *		scheduler.
- *
  *  cdom	is the connection domain for ifname.  When looking up an
  *		inbound connection on ifname, only control blocks in the
  *		same connection domain will be searched.
+ *
+ *  cpu		is the cpu number on which to perform stack processing on
+ *		packets received on ifname.  -1 means leave it up to the
+ *		scheduler.
  *
  *  returns:
  *
@@ -71,7 +71,7 @@ typedef enum {
  *
  *  EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
  */
-int uinet_config_if(const char *ifname, uinet_iftype_t type, int cpu, unsigned int cdom);
+int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, int cpu);
 
 
 /*

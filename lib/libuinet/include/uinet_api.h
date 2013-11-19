@@ -47,7 +47,7 @@ int   uinet_interface_create(const char *canonical_name, int qno);
 int   uinet_interface_up(const char *canonical_name, int qno, unsigned int promisc);
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
 int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
-int   uinet_setl2info(struct uinet_socket *so, const uint8_t *local_mac, const uint8_t *foreign_mac, const uint32_t *tag_stack, const uint32_t mask, int stack_depth);
+int   uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
 int   uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struct uinet_socket **aso);
 int   uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam);
 int   uinet_soclose(struct uinet_socket *so);
@@ -74,11 +74,11 @@ void  uinet_soupcall_lock(struct uinet_socket *so, int which);
 void  uinet_soupcall_clear(struct uinet_socket *so, int which);
 void  uinet_soupcall_set(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_unlock(struct uinet_socket *so, int which);
-void  uinet_synfilter_get_conninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
-void  uinet_synfilter_get_l2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
+void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
+void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
 int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);
-void *uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie);
-void  uinet_synfilter_deferral_deliver(struct uinet_socket *so, void *deferral, int decision);
+uinet_synf_deferral_t uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie);
+int   uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_deferral_t deferral, int decision);
 
 #ifdef __cplusplus
 }

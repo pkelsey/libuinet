@@ -188,9 +188,11 @@ struct uinet_uio {
 
 #define	UINET_SOL_SOCKET	0xffff	/* options for socket level */
 
+#define	UINET_AF_UNSPEC		0		/* unspecified */
 #define	UINET_AF_INET		2		/* internetwork: UDP, TCP, etc. */
 #define	UINET_AF_INET6		28		/* IPv6 */
 
+#define	UINET_PF_UNSPEC		UINET_AF_UNSPEC
 #define	UINET_PF_INET		UINET_AF_INET
 #define	UINET_PF_INET6		UINET_AF_INET6
 
@@ -203,7 +205,6 @@ struct uinet_uio {
 #define	UINET_SHUT_RDWR		2		/* shut down both sides */
 
 
-#define	UINET_IPPROTO_IP	0	/* dummy for IP */
 #define	UINET_IPPROTO_ICMP	1	/* control message protocol */
 #define	UINET_IPPROTO_TCP	6	/* tcp */
 #define	UINET_IPPROTO_UDP	17	/* user datagram protocol */
@@ -239,8 +240,8 @@ struct uinet_uio {
 struct uinet_in_l2info {
 	uint8_t inl2i_local_addr[UINET_IN_L2INFO_ADDR_MAX];
 	uint8_t inl2i_foreign_addr[UINET_IN_L2INFO_ADDR_MAX];
-	uint16_t inl2i_cnt;		/* number of tags stored in
-					 * inl2t_tags */
+	int inl2i_cnt;			/* number of tags stored in
+					 * inl2i_tags */
 	uint32_t inl2i_mask;		/* per-element mask, in network byte
 					 * order, to be applied during
 					 * hashing and comparing */
@@ -251,5 +252,7 @@ struct uinet_in_l2info {
 #define UINET_SYNF_ACCEPT	0	/* Process SYN normally */
 #define UINET_SYNF_REJECT	1	/* Discard SYN */
 #define UINET_SYNF_DEFER	2	/* Decision will be returned later via setsockopt() */
+
+typedef void * uinet_synf_deferral_t;
 
 #endif /* _UINET_API_TYPES_H_ */

@@ -302,28 +302,27 @@ out:
 
 
 int
-uinet_setl2info(struct uinet_socket *so, const uint8_t *local_mac, const uint8_t *foreign_mac,
-		const uint32_t *tag_stack, const uint32_t mask, int stack_depth)
+uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i)
 {
 	struct socket *so_internal = (struct socket *)so;
-	struct in_l2info l2i;
-	struct in_l2tagstack *ts = &l2i.inl2i_tagstack;
+	struct in_l2info l2i_internal;
+	struct in_l2tagstack *ts_internal = &l2i_internal.inl2i_tagstack;
 	int error = 0;
 
-	memset(&l2i, 0, sizeof(l2i));
+	memset(&l2i_internal, 0, sizeof(l2i_internal));
 
-	if (local_mac) memcpy(l2i.inl2i_local_addr, local_mac, ETHER_ADDR_LEN);
-	if (foreign_mac) memcpy(l2i.inl2i_foreign_addr, foreign_mac, ETHER_ADDR_LEN);
+	memcpy(l2i_internal.inl2i_local_addr, l2i->inl2i_local_addr, ETHER_ADDR_LEN);
+	memcpy(l2i_internal.inl2i_foreign_addr, l2i->inl2i_foreign_addr, ETHER_ADDR_LEN);
 
-	if (stack_depth < 0) {
-		l2i.inl2i_flags |= INL2I_TAG_ANY;
-	} else if (stack_depth > 0) {
-		ts->inl2t_cnt = stack_depth;
-		ts->inl2t_mask = mask;
-		memcpy(ts->inl2t_tags, tag_stack, sizeof(uint32_t) * stack_depth);
+	if (l2i->inl2i_cnt < 0) {
+		l2i_internal.inl2i_flags |= INL2I_TAG_ANY;
+	} else if (l2i->inl2i_cnt > 0) {
+		ts_internal->inl2t_cnt = l2i->inl2i_cnt;
+		ts_internal->inl2t_mask = l2i->inl2i_mask;
+		memcpy(ts_internal->inl2t_tags, l2i->inl2i_tags, sizeof(uint32_t) * l2i->inl2i_cnt);
 	}
 
-	error = so_setsockopt(so_internal, SOL_SOCKET, SO_L2INFO, &l2i, sizeof(l2i));
+	error = so_setsockopt(so_internal, SOL_SOCKET, SO_L2INFO, &l2i_internal, sizeof(l2i_internal));
 
 	return (error);
 }
@@ -803,12 +802,13 @@ static moduledata_t synf_uinet_api_mod = {
 DECLARE_MODULE(synf_uinet_api, synf_uinet_api_mod, SI_SUB_DRIVERS, SI_ORDER_MIDDLE);
 
 
-void *
+uinet_synf_deferral_t
 uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie)
 {
 	struct syn_filter_cbarg *cbarg = cookie;
 	struct syn_filter_cbarg *result;
 	
+	/* XXX might want to get these from a pool for better speed */
 	result = malloc(sizeof(*result), M_DEVBUF, M_WAITOK);
 	*result = *cbarg;
 
@@ -816,21 +816,24 @@ uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cook
 }
 
 
-void
-uinet_synfilter_deferral_deliver(struct uinet_socket *so, void *deferral, int decision)
+int
+uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_deferral_t deferral, int decision)
 {
 	struct socket *so_internal = (struct socket *)so;
 	struct syn_filter_cbarg *cbarg = deferral;
+	int error;
 
 	cbarg->decision = decision;
-	so_setsockopt(so_internal, IPPROTO_IP, IP_SYNFILTER_RESULT, cbarg, sizeof(*cbarg));
+	error = so_setsockopt(so_internal, IPPROTO_IP, IP_SYNFILTER_RESULT, cbarg, sizeof(*cbarg));
 
 	free(deferral, M_DEVBUF);
+	
+	return (error);
 }
 
 
 void
-uinet_synfilter_get_conninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc)
+uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc)
 {
 	struct syn_filter_cbarg *cbarg = cookie;
 	memcpy(inc, &cbarg->inc, sizeof(struct uinet_in_conninfo));
@@ -838,7 +841,7 @@ uinet_synfilter_get_conninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_i
 
 
 void
-uinet_synfilter_get_l2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i)
+uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i)
 {
 	struct syn_filter_cbarg *cbarg = cookie;
 	

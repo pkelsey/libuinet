@@ -38,6 +38,6 @@ uinet_soupcall_set
 uinet_soupcall_unlock
 uinet_synfilter_deferral_alloc
 uinet_synfilter_deferral_deliver
-uinet_synfilter_get_conninfo
-uinet_synfilter_get_l2info
+uinet_synfilter_getconninfo
+uinet_synfilter_getl2info
 uinet_synfilter_install
