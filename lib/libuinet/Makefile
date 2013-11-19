@@ -2,7 +2,7 @@
 # Derived from FreeBSD auto-generated kernel Makefile and
 # machine-specific Makefile templates
 #
-DEBUG=-g -O0
+DEBUG=-ggdb -O0
 
 S=$(TOPDIR)/network/uinet/sys
 MACHINE_INCLUDES_ROOT=machine_includes
@@ -121,8 +121,6 @@ UINET_SRCS+=			\
 	uinet_kern_synch.c	\
 	uinet_kern_time.c	\
 	uinet_kern_timeout.c	\
-	uinet_main.c		\
-	uinet_main_user.c	\
 	uinet_machdep.c		\
 	uinet_dev_random.c	\
 	uinet_sched.c		\
