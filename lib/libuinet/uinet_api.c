@@ -302,6 +302,36 @@ out:
 
 
 int
+uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i)
+{
+	struct socket *so_internal = (struct socket *)so;
+	struct in_l2info l2i_internal;
+	struct in_l2tagstack *ts_internal = &l2i_internal.inl2i_tagstack;
+	size_t optlen;
+	int error = 0;
+
+	optlen = sizeof(*l2i);
+	error = so_getsockopt(so_internal, SOL_SOCKET, SO_L2INFO, &l2i_internal, &optlen);
+	if (0 == error) {
+		memset(l2i, 0, sizeof(*l2i));
+
+		memcpy(l2i->inl2i_local_addr, l2i_internal.inl2i_local_addr, ETHER_ADDR_LEN);
+		memcpy(l2i->inl2i_foreign_addr, l2i_internal.inl2i_foreign_addr, ETHER_ADDR_LEN);
+
+		if (l2i_internal.inl2i_flags & INL2I_TAG_ANY) {
+			l2i->inl2i_cnt = -1;
+		} else if (ts_internal->inl2t_cnt > 0) {
+			l2i->inl2i_cnt = ts_internal->inl2t_cnt;
+			l2i->inl2i_mask = ts_internal->inl2t_mask;
+			memcpy(l2i->inl2i_tags, ts_internal->inl2t_tags, sizeof(uint32_t) * l2i->inl2i_cnt);
+		}
+	}
+
+	return (error);
+}
+
+
+int
 uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i)
 {
 	struct socket *so_internal = (struct socket *)so;
@@ -498,8 +528,14 @@ void
 uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc)
 {
 	struct socket *so_internal = (struct socket *)so;
+	struct inpcb *inp = sotoinpcb(so_internal);
 
+	/* XXX do we really need the INFO lock here? */
+	INP_INFO_RLOCK(inp->inp_pcbinfo);
+	INP_RLOCK(inp);
 	memcpy(inc, &sotoinpcb(so_internal)->inp_inc, sizeof(struct uinet_in_conninfo));
+	INP_RUNLOCK(inp);
+	INP_INFO_RUNLOCK(inp->inp_pcbinfo);
 }
 
 
@@ -850,7 +886,7 @@ uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l
 	l2i->inl2i_cnt = cbarg->l2i->inl2i_tagstack.inl2t_cnt;
 	l2i->inl2i_mask = cbarg->l2i->inl2i_tagstack.inl2t_mask;
 
-	if (l2i->inl2i_cnt)
+	if (l2i->inl2i_cnt > 0)
 		memcpy(l2i->inl2i_tags, cbarg->l2i->inl2i_tagstack.inl2t_tags, l2i->inl2i_cnt * sizeof(l2i->inl2i_tags[0]));
 }
 
