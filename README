@@ -14,7 +14,7 @@ loopback server on port 2222 on that interface.
 
 
 cd wanproxy/network/uinet/lib/libuinet
-gmake TOP_DIR=../../../..
+gmake TOPDIR=../../../..
 export UINETIF=em1
 ./uinet_test
 
