@@ -41,6 +41,7 @@
 #include <uinet_sys/linker.h>
 
 
+#if 0
 /* Process one elf relocation with addend. */
 static int
 elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
@@ -147,6 +148,14 @@ elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
 			return -1;
 	}
 	return(0);
+}
+#endif
+
+static int
+elf_reloc_internal(linker_file_t lf, Elf_Addr relocbase, const void *data,
+    int type, int local, elf_lookup_fn lookup)
+{
+	panic("ELF relocation not yet supported.");
 }
 
 int
