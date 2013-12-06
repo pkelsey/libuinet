@@ -28,10 +28,10 @@
  *
  */
 
-#include <sys/param.h>
-#include <sys/conf.h>
-#include <sys/mutex.h>
-#include <sys/proc.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/conf.h>
+#include <uinet_sys/mutex.h>
+#include <uinet_sys/proc.h>
 
 #include <stdio.h>
 #include <pthread.h>

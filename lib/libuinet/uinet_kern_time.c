@@ -28,10 +28,10 @@
  *
  */
 
-#include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/proc.h>
-#include <sys/time.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/time.h>
 
 
 static void	timevalfix(struct timeval *);

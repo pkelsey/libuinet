@@ -28,8 +28,8 @@
  *
  */
 
-#include <sys/param.h>
-#include <sys/lock.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/lock.h>
 
 
 /*

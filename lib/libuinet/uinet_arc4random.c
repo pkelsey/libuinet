@@ -24,13 +24,11 @@
  */
 
 
-#include <sys/types.h>
-
 /*
  * Reproduced from sys/libkern.h, which is not included directly in order to
  * avoid massive definition conflict between it and std*.h below.
  */
-void	 arc4rand(void *ptr, u_int len, int reseed);
+void	 arc4rand(void *ptr, unsigned int len, int reseed);
 
 
 #include <stdlib.h>
@@ -40,7 +38,7 @@ void	 arc4rand(void *ptr, u_int len, int reseed);
  * Redirect to the user-space library version.
  */
 void
-arc4rand(void *ptr, u_int len, int reseed)
+arc4rand(void *ptr, unsigned int len, int reseed)
 {
 	if (reseed) {
 		arc4random_stir();

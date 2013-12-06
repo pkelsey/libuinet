@@ -52,7 +52,7 @@ INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. -I$S
 INCLUDES+= -I$S/contrib/altq
 
 CFLAGS=	${COPTFLAGS} ${C_DIALECT} ${DEBUG} ${CWARNFLAGS}
-CFLAGS+= ${INCLUDES} -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
+CFLAGS+= -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
 ifneq (${COMPILER_TYPE},clang)
 CFLAGS+= -fno-common -finline-limit=${INLINE_LIMIT}
 ifneq (${MACHINE_CPUARCH},mips)
@@ -83,10 +83,10 @@ CFLAGS+=	${CONF_CFLAGS}
 # Optional linting. This can be overridden in /etc/make.conf.
 LINTFLAGS=	${LINTOBJKERNFLAGS}
 
-NORMAL_C= ${CC} -c ${CFLAGS} ${WERROR} ${PROF} $<
+NORMAL_C= ${CC} -c ${CFLAGS} ${INCLUDES} ${WERROR} ${PROF} $<
 NORMAL_S= ${CC} -c ${ASM_CFLAGS} ${WERROR} $<
-PROFILE_C= ${CC} -c ${CFLAGS} ${WERROR} $<
-NORMAL_C_NOWERROR= ${CC} -c ${CFLAGS} ${PROF} $<
+PROFILE_C= ${CC} -c ${CFLAGS} ${INCLUDES} ${WERROR} $<
+NORMAL_C_NOWERROR= ${CC} -c ${CFLAGS} ${INCLUDES} ${PROF} $<
 
 NORMAL_M= ${AWK} -f $S/tools/makeobjops.awk $< -c ; \
 	  ${CC} -c ${CFLAGS} ${WERROR} ${PROF} $*.c

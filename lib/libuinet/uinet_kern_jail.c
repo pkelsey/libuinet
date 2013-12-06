@@ -31,12 +31,12 @@
 #include "opt_inet.h"
 #include "opt_inet6.h"
 
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/kernel.h>
-#include <sys/jail.h>
-#include <sys/lock.h>
-#include <sys/sx.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/types.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/jail.h>
+#include <uinet_sys/lock.h>
+#include <uinet_sys/sx.h>
 
 
 /* Dummy that should never be used, provided for linkage to

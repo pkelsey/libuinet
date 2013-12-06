@@ -29,8 +29,8 @@
  */
 
 
-#include <sys/param.h>
-#include <sys/bus.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/bus.h>
 
 
 

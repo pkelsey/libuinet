@@ -30,24 +30,24 @@
  */
 
 #undef _KERNEL
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/kthread.h>
-#include <sys/mman.h>
-#include <sys/refcount.h>
-#include <sys/stat.h>
-#include <sys/time.h>
-#include <sys/stdint.h>
-#include <sys/uio.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/types.h>
+#include <uinet_sys/kthread.h>
+#include <uinet_sys/mman.h>
+#include <uinet_sys/refcount.h>
+#include <uinet_sys/stat.h>
+#include <uinet_sys/time.h>
+#include <uinet_sys/stdint.h>
+#include <uinet_sys/uio.h>
 
 #define _KERNEL
-#include <sys/errno.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/mutex.h>
-#include <sys/sx.h>
-#include <sys/linker.h>
-#include <sys/ucred.h>
+#include <uinet_sys/errno.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/lock.h>
+#include <uinet_sys/mutex.h>
+#include <uinet_sys/sx.h>
+#include <uinet_sys/linker.h>
+#include <uinet_sys/ucred.h>
 #undef _KERNEL
 
 #include <stdlib.h>

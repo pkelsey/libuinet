@@ -36,7 +36,7 @@
  *
  */
 
-#include <sys/types.h>
+#include <uinet_sys/types.h>
 
 /*
  * Reproduced from sys/libsystm.h, which is not included directly in order to

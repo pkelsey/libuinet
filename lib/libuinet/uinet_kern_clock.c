@@ -26,11 +26,11 @@
 #include "opt_device_polling.h"
 #include "opt_watchdog.h"
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/kernel.h>
-#include <sys/limits.h>
-#include <sys/timetc.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/limits.h>
+#include <uinet_sys/timetc.h>
 
 
 
@@ -41,7 +41,7 @@ int	ticks;
  * The real-time timer, interrupting hz times per second.
  */
 void
-uinet_hardclock()
+uinet_hardclock(void)
 {
 
 	atomic_add_int((volatile int *)&ticks, 1);

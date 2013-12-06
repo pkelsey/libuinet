@@ -24,11 +24,11 @@
  */
 
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/cpuset.h>
-#include <sys/proc.h>
-#include <sys/sched.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/cpuset.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/sched.h>
 
 #include <pthread_np.h>
 

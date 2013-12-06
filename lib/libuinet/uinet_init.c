@@ -30,19 +30,19 @@
 
 #include "opt_param.h"
 
-#include <sys/cdefs.h>
-#include <sys/param.h>
-#include <sys/pcpu.h>
-#include <sys/systm.h>
-#include <sys/proc.h>
-#include <sys/smp.h>
-#include <sys/lock.h>
-#include <sys/sx.h>
+#include <uinet_sys/cdefs.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/pcpu.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/smp.h>
+#include <uinet_sys/lock.h>
+#include <uinet_sys/sx.h>
 
-#include <vm/vm.h>
-#include <vm/vm_page.h>
-#include <vm/uma.h>
-#include <vm/uma_int.h>
+#include <uinet_vm/vm.h>
+#include <uinet_vm/vm_page.h>
+#include <uinet_vm/uma.h>
+#include <uinet_vm/uma_int.h>
 #include <pthread.h>
 #include <spawn.h>
 

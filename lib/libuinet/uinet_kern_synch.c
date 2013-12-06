@@ -32,31 +32,31 @@
 #include <errno.h>
 #define _KERNEL
 
-#include <sys/cdefs.h>
+#include <uinet_sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include <sys/param.h>
+#include <uinet_sys/param.h>
 
-#include <sys/systm.h>
-#include <sys/condvar.h>
-#include <sys/kdb.h>
-#include <sys/kernel.h>
-#include <sys/ktr.h>
-#include <sys/lock.h>
-#include <sys/malloc.h>
-#include <sys/mutex.h>
-#include <sys/proc.h>
-#include <sys/resourcevar.h>
-#include <sys/sched.h>
-#include <sys/signalvar.h>
-#include <sys/sleepqueue.h>
-#include <sys/smp.h>
-#include <sys/sx.h>
-#include <sys/sysctl.h>
-#include <sys/vmmeter.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/condvar.h>
+#include <uinet_sys/kdb.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/ktr.h>
+#include <uinet_sys/lock.h>
+#include <uinet_sys/malloc.h>
+#include <uinet_sys/mutex.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/resourcevar.h>
+#include <uinet_sys/sched.h>
+#include <uinet_sys/signalvar.h>
+#include <uinet_sys/sleepqueue.h>
+#include <uinet_sys/smp.h>
+#include <uinet_sys/sx.h>
+#include <uinet_sys/sysctl.h>
+#include <uinet_sys/vmmeter.h>
 #ifdef KTRACE
-#include <sys/uio.h>
-#include <sys/ktrace.h>
+#include <uinet_sys/uio.h>
+#include <uinet_sys/ktrace.h>
 #endif
 
 

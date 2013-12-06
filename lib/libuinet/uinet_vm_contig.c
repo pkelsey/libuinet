@@ -29,19 +29,19 @@
  */
 
 
-#include <sys/cdefs.h>
+#include <uinet_sys/cdefs.h>
 
-#include <sys/param.h>
-#include <sys/types.h>
-#include <sys/kernel.h>
-#include <sys/malloc.h>
-#include <sys/systm.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/types.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/malloc.h>
+#include <uinet_sys/systm.h>
 
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-#include <vm/pmap.h>
-#include <vm/vm_map.h>
-#include <vm/vm_extern.h>
+#include <uinet_vm/vm.h>
+#include <uinet_vm/vm_param.h>
+#include <uinet_vm/pmap.h>
+#include <uinet_vm/vm_map.h>
+#include <uinet_vm/vm_extern.h>
 
 vm_offset_t
 kmem_alloc_contig(vm_map_t map, vm_size_t size, int flags, vm_paddr_t low,

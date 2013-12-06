@@ -35,8 +35,8 @@
  * machdep.c).
  */
 
-#include <sys/param.h>
-#include <sys/pcpu.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/pcpu.h>
 
 
 struct pcpu *pcpup;

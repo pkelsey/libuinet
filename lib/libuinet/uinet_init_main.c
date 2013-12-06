@@ -41,7 +41,7 @@
  *	@(#)init_main.c	8.9 (Berkeley) 1/21/94
  */
 
-#include <sys/cdefs.h>
+#include <uinet_sys/cdefs.h>
 __FBSDID("$FreeBSD: release/9.1.0/sys/kern/init_main.c 237725 2012-06-28 19:34:23Z jhb $");
 
 #include "opt_ddb.h"
@@ -50,52 +50,54 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/init_main.c 237725 2012-06-28 19:34:2
 #include "opt_init_path.h"
 #endif
 
-#include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/exec.h>
-#include <sys/file.h>
-#include <sys/filedesc.h>
-#include <sys/jail.h>
-#include <sys/ktr.h>
-#include <sys/lock.h>
-#include <sys/loginclass.h>
-#include <sys/mount.h>
-#include <sys/mutex.h>
-#include <sys/syscallsubr.h>
-#include <sys/sysctl.h>
-#include <sys/proc.h>
-#include <sys/racct.h>
-#include <sys/resourcevar.h>
-#include <sys/systm.h>
-#include <sys/signalvar.h>
-#include <sys/sysent.h>
-#include <sys/reboot.h>
-#include <sys/sched.h>
-#include <sys/sx.h>
-#include <sys/sysproto.h>
-#include <sys/vmmeter.h>
-#include <sys/unistd.h>
-#include <sys/malloc.h>
-#include <sys/conf.h>
-#include <sys/cpuset.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/exec.h>
+#include <uinet_sys/file.h>
+#include <uinet_sys/filedesc.h>
+#include <uinet_sys/jail.h>
+#include <uinet_sys/ktr.h>
+#include <uinet_sys/lock.h>
+#include <uinet_sys/loginclass.h>
+#include <uinet_sys/mount.h>
+#include <uinet_sys/mutex.h>
+#include <uinet_sys/syscallsubr.h>
+#include <uinet_sys/sysctl.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/racct.h>
+#include <uinet_sys/resourcevar.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/signalvar.h>
+#include <uinet_sys/sysent.h>
+#include <uinet_sys/reboot.h>
+#include <uinet_sys/sched.h>
+#include <uinet_sys/sx.h>
+#include <uinet_sys/sysproto.h>
+#include <uinet_sys/vmmeter.h>
+#include <uinet_sys/unistd.h>
+#include <uinet_sys/malloc.h>
+#include <uinet_sys/conf.h>
+#include <uinet_sys/cpuset.h>
 
-#include <machine/cpu.h>
+#include <uinet_machine/cpu.h>
 
-#include <security/audit/audit.h>
-
-#ifdef MAC
-#include <security/mac/mac_framework.h>
+#ifdef AUDIT
+#include <uinet_security/audit/audit.h>
 #endif
 
-#include <vm/vm.h>
-#include <vm/vm_param.h>
-#include <vm/pmap.h>
-#include <vm/vm_map.h>
-#include <sys/copyright.h>
+#ifdef MAC
+#include <uinet_security/mac/mac_framework.h>
+#endif
+
+#include <uinet_vm/vm.h>
+#include <uinet_vm/vm_param.h>
+#include <uinet_vm/pmap.h>
+#include <uinet_vm/vm_map.h>
+#include <uinet_sys/copyright.h>
 
 #ifdef DDB
-#include <ddb/ddb.h>
-#include <ddb/db_sym.h>
+#include <uinet_ddb/ddb.h>
+#include <uinet_ddb/db_sym.h>
 #endif
 
 void mi_startup(void);				/* Should be elsewhere */

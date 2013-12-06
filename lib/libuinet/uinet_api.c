@@ -25,21 +25,21 @@
 
 
 
-#include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/malloc.h>
-#include <sys/systm.h>
-#include <sys/proc.h>
-#include <sys/protosw.h>
-#include <sys/socket.h>
-#include <sys/socketvar.h>
-#include <sys/sockio.h>
-#include <sys/uio.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/malloc.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/protosw.h>
+#include <uinet_sys/socket.h>
+#include <uinet_sys/socketvar.h>
+#include <uinet_sys/sockio.h>
+#include <uinet_sys/uio.h>
 
-#include <net/if.h>
-#include <netinet/in.h>
-#include <netinet/in_var.h>
-#include <netinet/in_promisc.h>
+#include <uinet_net/if.h>
+#include <uinet_netinet/in.h>
+#include <uinet_netinet/in_var.h>
+#include <uinet_netinet/in_promisc.h>
 
 #include <arpa/inet.h>
 

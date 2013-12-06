@@ -23,12 +23,12 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/proc.h>
-#include <vm/vm.h>
-#include <vm/vm_page.h>
-#include <vm/uma.h>
-#include <vm/uma_int.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/proc.h>
+#include <uinet_vm/vm.h>
+#include <uinet_vm/vm_page.h>
+#include <uinet_vm/uma.h>
+#include <uinet_vm/uma_int.h>
 
 
 #include <pthread.h>

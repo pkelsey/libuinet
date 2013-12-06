@@ -29,13 +29,13 @@
  */
 
 
-#include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/types.h>
-#include <sys/malloc.h>
-#include <sys/refcount.h>
-#include <sys/proc.h>
-#include <sys/ucred.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/types.h>
+#include <uinet_sys/malloc.h>
+#include <uinet_sys/refcount.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/ucred.h>
 
 
 static MALLOC_DEFINE(M_CRED, "cred", "credentials");

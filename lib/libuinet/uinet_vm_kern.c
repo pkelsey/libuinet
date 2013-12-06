@@ -30,10 +30,10 @@
  */
 
 #undef _KERNEL
-#include <sys/param.h>
+#include <uinet_sys/param.h>
 #include <sys/mman.h>
 
-#include <vm/vm.h>
+#include <uinet_vm/vm.h>
 
 
 vm_offset_t kmem_malloc(void * map, int bytes, int wait);

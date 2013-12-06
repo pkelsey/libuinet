@@ -30,9 +30,9 @@
  */
 
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/tty.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/tty.h>
 
 
 dev_t

@@ -23,7 +23,7 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/cdefs.h>
+#include <uinet_sys/cdefs.h>
 
 /*
  * Reproduced from sys/libkern.h, which is not included directly in order to

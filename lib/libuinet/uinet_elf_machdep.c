@@ -36,9 +36,9 @@
  */
 
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/linker.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/linker.h>
 
 
 /* Process one elf relocation with addend. */

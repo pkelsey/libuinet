@@ -28,42 +28,42 @@
  *
  */
 
-#include <sys/cdefs.h>
+#include <uinet_sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
 #include "opt_ddb.h"
 
-#include <sys/param.h>
-#include <sys/bus.h>
-#include <sys/conf.h>
-#include <sys/cpuset.h>
-#include <sys/rtprio.h>
-#include <sys/systm.h>
-#include <sys/interrupt.h>
-#include <sys/kernel.h>
-#include <sys/kthread.h>
-#include <sys/ktr.h>
-#include <sys/limits.h>
-#include <sys/lock.h>
-#include <sys/malloc.h>
-#include <sys/mutex.h>
-#include <sys/priv.h>
-#include <sys/proc.h>
-#include <sys/random.h>
-#include <sys/resourcevar.h>
-#include <sys/sched.h>
-#include <sys/smp.h>
-#include <sys/sysctl.h>
-#include <sys/syslog.h>
-#include <sys/unistd.h>
-#include <sys/vmmeter.h>
-#include <machine/atomic.h>
-#include <machine/cpu.h>
-#include <machine/md_var.h>
-#include <machine/stdarg.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/bus.h>
+#include <uinet_sys/conf.h>
+#include <uinet_sys/cpuset.h>
+#include <uinet_sys/rtprio.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/interrupt.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/kthread.h>
+#include <uinet_sys/ktr.h>
+#include <uinet_sys/limits.h>
+#include <uinet_sys/lock.h>
+#include <uinet_sys/malloc.h>
+#include <uinet_sys/mutex.h>
+#include <uinet_sys/priv.h>
+#include <uinet_sys/proc.h>
+#include <uinet_sys/random.h>
+#include <uinet_sys/resourcevar.h>
+#include <uinet_sys/sched.h>
+#include <uinet_sys/smp.h>
+#include <uinet_sys/sysctl.h>
+#include <uinet_sys/syslog.h>
+#include <uinet_sys/unistd.h>
+#include <uinet_sys/vmmeter.h>
+#include <uinet_machine/atomic.h>
+#include <uinet_machine/cpu.h>
+#include <uinet_machine/md_var.h>
+#include <uinet_machine/stdarg.h>
 #ifdef DDB
-#include <ddb/ddb.h>
-#include <ddb/db_sym.h>
+#include <uinet_ddb/ddb.h>
+#include <uinet_ddb/db_sym.h>
 #endif
 
 

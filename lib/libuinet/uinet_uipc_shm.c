@@ -23,9 +23,9 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/systm.h>
-#include <sys/mman.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/systm.h>
+#include <uinet_sys/mman.h>
 
 void
 shm_path(struct shmfd *shmfd, char *path, size_t size)

@@ -29,11 +29,11 @@
  */
 
 
-#include <sys/param.h>
-#include <sys/systm.h>
+#include <uinet_sys/param.h>
+#include <uinet_sys/systm.h>
 
-#include <vm/vm.h>
-#include <vm/vm_object.h>
+#include <uinet_vm/vm.h>
+#include <uinet_vm/vm_object.h>
 
 struct vm_object kernel_object_store;
 struct vm_object kmem_object_store;
