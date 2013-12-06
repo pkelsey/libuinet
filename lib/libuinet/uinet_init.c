@@ -119,7 +119,7 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 	/* first get size required, then alloc memory, then give that memory to the second call */
 	v = 0;
         v = kern_timeout_callwheel_alloc(v);
-	kern_timeout_callwheel_alloc(malloc(round_page(v), M_DEVBUF, M_ZERO));
+	kern_timeout_callwheel_alloc(malloc(round_page((vm_offset_t)v), M_DEVBUF, M_ZERO));
         kern_timeout_callwheel_init();
 
 	uinet_init_thread0();
