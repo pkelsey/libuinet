@@ -27,22 +27,14 @@
 #include <uinet_sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include "opt_ktrace.h"
-
 #include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/mutex.h>
-#include <uinet_sys/proc.h>
 #include <uinet_sys/kernel.h>
-#include <uinet_sys/ktr.h>
 #include <uinet_sys/condvar.h>
-#include <uinet_sys/sched.h>
-#include <uinet_sys/signalvar.h>
-#include <uinet_sys/sleepqueue.h>
-#include <uinet_sys/resourcevar.h>
 
+#undef _KERNEL
 #include <pthread.h>
+#define _KERNEL
+
 
 /*
  * Initialize a condition variable.  Must be called before use.
