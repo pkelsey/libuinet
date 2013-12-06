@@ -28,20 +28,25 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
 
 #include <time.h>
 
+
+/*
+ * Reproduced from sys/systm.h, which is not included here in order to avoid
+ * conflicts with the host OS time.h included above.
+ */
+extern void	DELAY(int usec);
+
 void
-DELAY(int delay)
+DELAY(int usec)
 {
 	struct timespec rqt;
 
-	if (delay < 1000)
+	if (usec < 1000)
 		return;
 	
-	rqt.tv_nsec = 1000*((unsigned long)delay);
+	rqt.tv_nsec = 1000*((unsigned long)usec);
 	rqt.tv_sec = 0;
 	nanosleep(&rqt, NULL);
 }
