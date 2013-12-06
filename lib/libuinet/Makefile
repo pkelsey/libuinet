@@ -4,6 +4,7 @@
 #
 DEBUG=-ggdb -O0
 
+TOPDIR?=${CURDIR}/../../../..
 S=${TOPDIR}/network/uinet/sys
 API_INCLUDES_ROOT:=${CURDIR}/api_include
 SHIM_INCLUDES_ROOT:=${CURDIR}/shim_include
