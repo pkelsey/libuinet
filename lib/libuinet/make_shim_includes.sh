@@ -27,7 +27,7 @@ while [ "$1" != "" ]; do
 	for f in `find $find_base -name '*.h'`; do
 	    dst_dir=$dst_base/$src_prefix/uinet_`dirname $f`
 	    [ -d $dst_dir ] || mkdir -p $dst_dir
-	    sed -r 's/(#include(_next)?[       ]+<)([^>]+\/)/\1uinet_\3/' < $f > $dst_dir/`basename $f`
+	    sed -E 's/(#include(_next)?[       ]+<)([^>]+\/)/\1uinet_\3/' < $f > $dst_dir/`basename $f`
 	done
     else
 	echo $src_base/$src_prefix/$find_base does not exist, skipping...
