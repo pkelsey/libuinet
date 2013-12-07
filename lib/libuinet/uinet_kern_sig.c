@@ -28,9 +28,9 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/proc.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
 
 
 struct filterops sig_filtops;

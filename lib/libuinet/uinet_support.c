@@ -36,10 +36,10 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/types.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/systm.h>
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
 
 
 int

@@ -28,11 +28,11 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/racct.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
+#include <sys/racct.h>
 
 
 uint64_t

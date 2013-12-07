@@ -23,10 +23,10 @@
  * SUCH DAMAGE.
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/sysctl.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/sysctl.h>
 
 SYSCTL_NODE(, 0,	  sysctl, CTLFLAG_RW, 0,
 	"Sysctl internal magic");

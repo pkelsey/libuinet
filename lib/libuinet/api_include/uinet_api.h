@@ -37,7 +37,6 @@ extern "C" {
 
 void  uinet_finalize_thread(void);
 int   uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
-uinet_in_addr_t uinet_inet_addr(const char *cp);
 char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
 int   uinet_inet6_enabled(void);
 int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback);

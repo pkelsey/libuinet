@@ -23,27 +23,27 @@
  * SUCH DAMAGE.
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/time.h>
-#include <uinet_sys/socket.h>
-#include <uinet_sys/module.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/kthread.h>
-#include <uinet_sys/sched.h>
-#include <uinet_sys/sockio.h>
+#include <sys/param.h>
+#include <sys/time.h>
+#include <sys/socket.h>
+#include <sys/module.h>
+#include <sys/kernel.h>
+#include <sys/proc.h>
+#include <sys/kthread.h>
+#include <sys/sched.h>
+#include <sys/sockio.h>
 
-#include <uinet_net/if.h>
-#include <uinet_net/if_var.h>
-#include <uinet_net/if_types.h>
-#include <uinet_net/ethernet.h>
-#include <uinet_net/if_arp.h>
-#include <uinet_net/if_tap.h>
-#include <uinet_net/if_dl.h>
-#include <uinet_net/netmap.h>
-#include <uinet_net/netmap_user.h>
+#include <net/if.h>
+#include <net/if_var.h>
+#include <net/if_types.h>
+#include <net/ethernet.h>
+#include <net/if_arp.h>
+#include <net/if_tap.h>
+#include <net/if_dl.h>
+#include <net/netmap.h>
+#include <net/netmap_user.h>
 
-#include <uinet_machine/atomic.h>
+#include <machine/atomic.h>
 
 #include "uinet_config_internal.h"
 #include "uinet_host_interface.h"

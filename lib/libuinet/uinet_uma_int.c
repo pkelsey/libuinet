@@ -23,14 +23,14 @@
  * SUCH DAMAGE.
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/mutex.h>
-#include <uinet_sys/proc.h>
-#include <uinet_vm/vm.h>
-#include <uinet_vm/vm_page.h>
-#include <uinet_vm/uma.h>
-#include <uinet_vm/uma_int.h>
+#include <sys/param.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/proc.h>
+#include <vm/vm.h>
+#include <vm/vm_page.h>
+#include <vm/uma.h>
+#include <vm/uma_int.h>
 
 
 static void thread_bucket_lock_init(void) __attribute__((constructor));

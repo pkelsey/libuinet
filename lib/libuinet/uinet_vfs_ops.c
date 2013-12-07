@@ -28,21 +28,21 @@
  *
  */
 
-#include <uinet_sys/cdefs.h>
-#include <uinet_sys/param.h>
-#include <uinet_sys/types.h>
-#include <uinet_sys/limits.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/namei.h>
-#include <uinet_sys/refcount.h>
-#include <uinet_sys/resourcevar.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/priv.h>
-#include <uinet_sys/time.h>
-#include <uinet_sys/ucred.h>
-#include <uinet_sys/vnode.h>
-#include <uinet_sys/uio.h>
+#include <sys/cdefs.h>
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/limits.h>
+#include <sys/malloc.h>
+#include <sys/namei.h>
+#include <sys/refcount.h>
+#include <sys/resourcevar.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
+#include <sys/priv.h>
+#include <sys/time.h>
+#include <sys/ucred.h>
+#include <sys/vnode.h>
+#include <sys/uio.h>
 
 
 void

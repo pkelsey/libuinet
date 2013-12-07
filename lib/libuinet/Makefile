@@ -7,7 +7,6 @@ DEBUG=-ggdb -O0
 TOPDIR?=${CURDIR}/../../../..
 S=${TOPDIR}/network/uinet/sys
 API_INCLUDES_ROOT:=${CURDIR}/api_include
-SHIM_INCLUDES_ROOT:=${CURDIR}/shim_include
 MACHINE_INCLUDES_ROOT:=${CURDIR}/machine_include
 OVERRIDE_INCLUDES_ROOT:=${CURDIR}/override_include
 X86_INCLUDES=0
@@ -15,13 +14,14 @@ X86_INCLUDES=0
 include ${TOPDIR}/network/uinet/mk/kern.pre.mk
 
 KERNPREINCLUDES:= ${INCLUDES}
-INCLUDES= -I${OVERRIDE_INCLUDES_ROOT} ${KERNPREINCLUDES}
+INCLUDES= -I${OVERRIDE_INCLUDES_ROOT} -I${API_INCLUDES_ROOT} ${KERNPREINCLUDES}
 INCLUDES+= -I./machine_include
 INCLUDES+= -I./opt
 
-SHIM_INCLUDES= -I. -I${SHIM_INCLUDES_ROOT}/override -I${API_INCLUDES_ROOT} -I${SHIM_INCLUDES_ROOT} -I${SHIM_INCLUDES_ROOT}/contrib/altq -I./opt
+# Include search path for files that only include host OS header
+HOST_INCLUDES= -I. -I${API_INCLUDES_ROOT} 
 
-SHIM_C= ${CC} -c ${CFLAGS} ${SHIM_INCLUDES} ${WERROR} ${PROF} $<
+HOST_C= ${CC} -c ${CFLAGS} ${HOST_INCLUDES} ${WERROR} ${PROF} $<
 
 
 ifneq ($(filter amd64 i386,${MACHINE_CPUARCH}),)
@@ -85,15 +85,10 @@ VPATH+= $S/libkern
 
 UINET_SRCS+=			\
 	uinet_api.c		\
-	uinet_api_errno.c	\
-	uinet_arc4random.c	\
 	uinet_clock.c		\
-	uinet_config.c		\
 	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
-	uinet_host_interface.c  \
 	uinet_if_netmap.c	\
-	uinet_if_netmap_host.c	\
 	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
@@ -115,7 +110,6 @@ UINET_SRCS+=			\
 	uinet_kern_resource.c	\
 	uinet_kern_rmlock.c	\
 	uinet_kern_rwlock.c	\
-	uinet_kern_shutdown.c	\
 	uinet_kern_sig.c	\
 	uinet_kern_sx.c		\
 	uinet_kern_synch.c	\
@@ -144,8 +138,16 @@ UINET_SRCS+=			\
 	uinet_vm_meter.c	\
 	uinet_vm_object.c
 
+UINET_HOST_SRCS+=		\
+	uinet_api_errno.c	\
+	uinet_arc4random.c	\
+	uinet_config.c		\
+	uinet_host_interface.c  \
+	uinet_if_netmap_host.c	\
+	uinet_kern_shutdown.c
 
-CRYPTO_SRCS+=		\
+
+CRYPTO_SRCS+=			\
 	sha1.c
 
 
@@ -271,13 +273,13 @@ MHEADERS+= vnode_if.h vnode_if_newproto.h vnode_if_typedef.h
 
 MSRCS= $(patsubst %.m,%.c,${KERN_MSRCS})
 
-SRCS=  ${CRYPTO_SRCS} ${KERN_SRCS} ${LIBKERN_SRCS} ${MACHINE_SRCS}
+SRCS=  ${UINET_SRCS} ${CRYPTO_SRCS} ${KERN_SRCS} ${LIBKERN_SRCS} ${MACHINE_SRCS}
 SRCS+= ${MSRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS} ${VM_SRCS}
 
-SHIM_SRCS = ${UINET_SRCS}
+HOST_SRCS = ${UINET_HOST_SRCS}
 
 OBJS+= $(patsubst %.c,%.o,${SRCS})
-SHIM_OBJS+= $(patsubst %.c,%.o,${SHIM_SRCS})
+HOST_OBJS+= $(patsubst %.c,%.o,${HOST_SRCS})
 
 PROGRAM=uinet_test
 
@@ -290,8 +292,8 @@ LDADD+= -lpthread
 # Then, only the symbols that are part of the UINET API are made
 # externally available.
 #
-libuinet.a: machine_includes shim_includes ${MHEADERS} ${MSRCS} ${SHIM_OBJS} ${OBJS}
-	${LD} -r -o $*.ro ${SHIM_OBJS} ${OBJS}
+libuinet.a: machine_includes ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS}
+	${LD} -r -o $*.ro ${HOST_OBJS} ${OBJS}
 	nm $*.ro  | grep -v ' U ' | cut -d ' ' -f 3 > $*_localize_list.tmp
 	objcopy --localize-symbols=$*_localize_list.tmp $*.ro 
 	rm $*_localize_list.tmp
@@ -300,11 +302,11 @@ libuinet.a: machine_includes shim_includes ${MHEADERS} ${MSRCS} ${SHIM_OBJS} ${O
 	ar -cqs $@ $*.ro
 	rm -f $*.ro
 
-${PROGRAM}: machine_includes shim_includes ${MHEADERS} ${MSRCS} ${OBJS}
+${PROGRAM}: machine_includes ${MHEADERS} ${MSRCS} ${OBJS}
 	${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
 
-${SHIM_OBJS}: %.o: %.c
-	${SHIM_C}
+${HOST_OBJS}: %.o: %.c
+	${HOST_C}
 
 ${OBJS}: %.o: %.c
 	${NORMAL_C}
@@ -317,30 +319,8 @@ ${OBJS}: %.o: %.c
 
 .PHONY: clean
 clean:
-	rm -f ${MHEADERS} ${MSRCS} ${SHIM_OBJS} ${OBJS} ${PROGRAM}
+	rm -f ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS} ${PROGRAM}
 	rm -rf ${MACHINE_INCLUDES_ROOT}
-	rm -rf ${SHIM_INCLUDES_ROOT}
-
-
-
-SHIM_SYS_INCLUDES_SRC_DIRS= bsm contrib/altq/altq libkern net netinet netinet6 sys vm
-SHIM_MACHINE_INCLUDES_SRC_DIRS= machine
-SHIM_OVERRIDE_INCLUDES_SRC_DIRS= machine sys vm
-
-ifneq (${X86_INCLUDES},0)
-SHIM_MACHINE_INCLUDES_SRC_DIRS+= x86
-endif
-
-.PHONY: shim_includes
-shim_includes:
-	@echo Building shim includes tree
-	@rm -rf ${SHIM_INCLUDES_ROOT}
-	@echo " Building shim sys includes"
-	@./make_shim_includes.sh ${SHIM_INCLUDES_ROOT} $S ${SHIM_SYS_INCLUDES_SRC_DIRS}
-	@echo " Building shim machine includes"
-	@./make_shim_includes.sh ${SHIM_INCLUDES_ROOT} ${MACHINE_INCLUDES_ROOT} ${SHIM_MACHINE_INCLUDES_SRC_DIRS} 
-	@echo " Building shim override includes"
-	@./make_shim_includes.sh ${SHIM_INCLUDES_ROOT}/override ${OVERRIDE_INCLUDES_ROOT} ${SHIM_OVERRIDE_INCLUDES_SRC_DIRS} 
 
 
 .PHONY: machine_includes

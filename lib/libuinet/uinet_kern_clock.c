@@ -26,11 +26,11 @@
 #include "opt_device_polling.h"
 #include "opt_watchdog.h"
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/limits.h>
-#include <uinet_sys/timetc.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/limits.h>
+#include <sys/timetc.h>
 
 
 

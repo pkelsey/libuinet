@@ -24,7 +24,7 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/vmmeter.h>
+#include <sys/param.h>
+#include <sys/vmmeter.h>
 
 struct vmmeter cnt;

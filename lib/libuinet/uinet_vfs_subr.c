@@ -23,9 +23,9 @@
  * SUCH DAMAGE.
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/event.h>
-#include <uinet_sys/stat.h>
+#include <sys/param.h>
+#include <sys/event.h>
+#include <sys/stat.h>
 
 int vttoif_tab[10] = {
 	0, S_IFREG, S_IFDIR, S_IFBLK, S_IFCHR, S_IFLNK,

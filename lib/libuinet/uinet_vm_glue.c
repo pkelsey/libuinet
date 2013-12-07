@@ -29,11 +29,11 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
+#include <sys/param.h>
+#include <sys/systm.h>
 
-#include <uinet_vm/vm.h>
-#include <uinet_vm/vm_extern.h>
+#include <vm/vm.h>
+#include <vm/vm_extern.h>
 
 
 int

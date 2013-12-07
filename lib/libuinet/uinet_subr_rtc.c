@@ -28,8 +28,8 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/time.h>
+#include <sys/param.h>
+#include <sys/time.h>
 
 void
 resettodr(void)

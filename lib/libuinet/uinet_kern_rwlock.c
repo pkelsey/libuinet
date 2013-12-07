@@ -28,11 +28,11 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/conf.h>
-#include <uinet_sys/rwlock.h>
-#include <uinet_sys/proc.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/conf.h>
+#include <sys/rwlock.h>
+#include <sys/proc.h>
 
 #include "uinet_host_interface.h"
 

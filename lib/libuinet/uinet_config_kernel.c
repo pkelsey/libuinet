@@ -24,8 +24,8 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/sysctl.h>
+#include <sys/param.h>
+#include <sys/sysctl.h>
 
 #include "uinet_config.h"
 #include "uinet_config_internal.h"

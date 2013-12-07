@@ -28,13 +28,13 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/sx.h>
-#include <uinet_sys/sysctl.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/proc.h>
+#include <sys/lock.h>
+#include <sys/sx.h>
+#include <sys/sysctl.h>
 
 struct proclist allproc;
 struct sx allproc_lock;

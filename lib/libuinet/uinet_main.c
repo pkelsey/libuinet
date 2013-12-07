@@ -29,26 +29,26 @@
 
 #include <time.h>
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/file.h>
-#include <uinet_sys/limits.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/kthread.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/mutex.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/protosw.h>
-#include <uinet_sys/socket.h>
-#include <uinet_sys/socketvar.h>
-#include <uinet_sys/sockio.h>
-#include <uinet_sys/sysctl.h>
-#include <uinet_sys/uio.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/file.h>
+#include <sys/limits.h>
+#include <sys/malloc.h>
+#include <sys/kthread.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/proc.h>
+#include <sys/protosw.h>
+#include <sys/socket.h>
+#include <sys/socketvar.h>
+#include <sys/sockio.h>
+#include <sys/sysctl.h>
+#include <sys/uio.h>
 
-#include <uinet_net/if.h>
-#include <uinet_netinet/in.h>
-#include <uinet_netinet/in_promisc.h>
+#include <net/if.h>
+#include <netinet/in.h>
+#include <netinet/in_promisc.h>
 
 #include "uinet_api.h"
 #include "uinet_config.h"

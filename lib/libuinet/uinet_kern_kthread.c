@@ -30,19 +30,19 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/types.h>
-#include <uinet_sys/kthread.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/mutex.h>
-#include <uinet_sys/condvar.h>
-#include <uinet_sys/ucred.h>
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/kthread.h>
+#include <sys/malloc.h>
+#include <sys/proc.h>
+#include <sys/systm.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/condvar.h>
+#include <sys/ucred.h>
 
 /* XXX - should we really be picking up the host stdarg? */ 
-#include <uinet_machine/stdarg.h>
+#include <machine/stdarg.h>
 
 #include "uinet_host_interface.h"
 

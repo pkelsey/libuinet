@@ -29,9 +29,9 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/types.h>
-#include <uinet_sys/priv.h>
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/priv.h>
 
 
 int

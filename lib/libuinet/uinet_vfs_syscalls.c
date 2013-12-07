@@ -28,11 +28,11 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/syscallsubr.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/malloc.h>
+#include <sys/proc.h>
+#include <sys/syscallsubr.h>
 
 MALLOC_DEFINE(M_FADVISE, "fadvise", "posix_fadvise(2) information");
 

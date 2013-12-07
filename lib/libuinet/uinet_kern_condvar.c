@@ -24,15 +24,15 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <uinet_sys/cdefs.h>
+#include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/mutex.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/condvar.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/lock.h>
+#include <sys/mutex.h>
+#include <sys/systm.h>
+#include <sys/condvar.h>
 
 #include "uinet_host_interface.h"
 

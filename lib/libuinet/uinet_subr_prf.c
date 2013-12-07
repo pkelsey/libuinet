@@ -34,39 +34,39 @@
  *	@(#)subr_prf.c	8.3 (Berkeley) 1/21/94
  */
 
-#include <uinet_sys/cdefs.h>
+#include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
 #include "opt_ddb.h"
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/kdb.h>
-#include <uinet_sys/mutex.h>
-#include <uinet_sys/sx.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/msgbuf.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/priv.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/stddef.h>
-#include <uinet_sys/sysctl.h>
-#include <uinet_sys/tty.h>
-#include <uinet_sys/syslog.h>
-#include <uinet_sys/cons.h>
-#include <uinet_sys/uio.h>
-#include <uinet_sys/ctype.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/lock.h>
+#include <sys/kdb.h>
+#include <sys/mutex.h>
+#include <sys/sx.h>
+#include <sys/kernel.h>
+#include <sys/msgbuf.h>
+#include <sys/malloc.h>
+#include <sys/priv.h>
+#include <sys/proc.h>
+#include <sys/stddef.h>
+#include <sys/sysctl.h>
+#include <sys/tty.h>
+#include <sys/syslog.h>
+#include <sys/cons.h>
+#include <sys/uio.h>
+#include <sys/ctype.h>
 
 #ifdef DDB
-#include <uinet_ddb/ddb.h>
+#include <ddb/ddb.h>
 #endif
 
 /*
  * Note that stdarg.h and the ANSI style va_start macro is used for both
  * ANSI and traditional C compilers.
  */
-#include <uinet_machine/stdarg.h>
+#include <machine/stdarg.h>
 
 #define TOCONS	0x01
 #define TOTTY	0x02

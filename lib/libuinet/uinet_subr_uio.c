@@ -28,14 +28,14 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/limits.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/vnode.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/limits.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
+#include <sys/proc.h>
+#include <sys/vnode.h>
 
 #include "uinet_host_interface.h"
 

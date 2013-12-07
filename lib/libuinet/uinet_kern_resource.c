@@ -29,13 +29,13 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/refcount.h>
-#include <uinet_sys/resourcevar.h>
-#include <uinet_sys/sysent.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/malloc.h>
+#include <sys/proc.h>
+#include <sys/refcount.h>
+#include <sys/resourcevar.h>
+#include <sys/sysent.h>
 
 
 

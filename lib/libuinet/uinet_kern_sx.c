@@ -28,11 +28,11 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/conf.h>
-#include <uinet_sys/rwlock.h>
-#include <uinet_sys/sx.h>
-#include <uinet_sys/proc.h>
+#include <sys/param.h>
+#include <sys/conf.h>
+#include <sys/rwlock.h>
+#include <sys/sx.h>
+#include <sys/proc.h>
 
 
 struct lock_class lock_class_sx = {

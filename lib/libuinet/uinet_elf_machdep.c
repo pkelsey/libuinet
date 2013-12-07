@@ -36,9 +36,9 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/linker.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/linker.h>
 
 
 #if 0

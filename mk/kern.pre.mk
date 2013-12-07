@@ -53,7 +53,7 @@ INCLUDES+= -I$S/contrib/altq
 INCLUDES+= -I$S/contrib/pf
 
 CFLAGS=	${COPTFLAGS} ${C_DIALECT} ${DEBUG} ${CWARNFLAGS}
-CFLAGS+= -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
+KERNEL_CFLAGS= -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
 ifneq (${COMPILER_TYPE},clang)
 CFLAGS+= -fno-common -finline-limit=${INLINE_LIMIT}
 ifneq (${MACHINE_CPUARCH},mips)
@@ -69,7 +69,7 @@ endif
 WERROR?= -Werror
 
 # XXX LOCORE means "don't declare C stuff" not "for locore.s".
-ASM_CFLAGS= -x assembler-with-cpp -DLOCORE ${CFLAGS}
+ASM_CFLAGS= -x assembler-with-cpp -DLOCORE ${CFLAGS} ${KERNEL_CFLAGS}
 
 ifeq (${COMPILER_TYPE},clang)
 CLANG_NO_IAS= -no-integrated-as
@@ -84,13 +84,13 @@ CFLAGS+=	${CONF_CFLAGS}
 # Optional linting. This can be overridden in /etc/make.conf.
 LINTFLAGS=	${LINTOBJKERNFLAGS}
 
-NORMAL_C= ${CC} -c ${CFLAGS} ${INCLUDES} ${WERROR} ${PROF} $<
+NORMAL_C= ${CC} -c ${CFLAGS} ${KERNEL_CFLAGS} ${INCLUDES} ${WERROR} ${PROF} $<
 NORMAL_S= ${CC} -c ${ASM_CFLAGS} ${WERROR} $<
-PROFILE_C= ${CC} -c ${CFLAGS} ${INCLUDES} ${WERROR} $<
-NORMAL_C_NOWERROR= ${CC} -c ${CFLAGS} ${INCLUDES} ${PROF} $<
+PROFILE_C= ${CC} -c ${CFLAGS} ${KERNEL_CFLAGS} ${INCLUDES} ${WERROR} $<
+NORMAL_C_NOWERROR= ${CC} -c ${CFLAGS} ${KERNEL_CFLAGS} ${INCLUDES} ${PROF} $<
 
 NORMAL_M= ${AWK} -f $S/tools/makeobjops.awk $< -c ; \
-	  ${CC} -c ${CFLAGS} ${WERROR} ${PROF} $*.c
+	  ${CC} -c ${CFLAGS} ${KERNEL_CFLAGS} ${WERROR} ${PROF} $*.c
 
 GEN_CFILES= $S/$M/$M/genassym.c ${MFILES:T:S/.m$/.c/}
 SYSTEM_CFILES= config.c env.c hints.c vnode_if.c

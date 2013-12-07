@@ -29,8 +29,8 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
+#include <sys/param.h>
+#include <sys/systm.h>
 
 const char *
 devtoname(struct cdev *dev)

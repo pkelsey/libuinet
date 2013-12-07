@@ -29,10 +29,10 @@
  *
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/types.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/types.h>
 
 /*
  * This include will catch the libuinet sys/malloc.h, which redefines the
@@ -41,7 +41,7 @@
  * prototypes for the uinet_ variants below, as well as the other
  * sys/malloc.h #defines and declarations to use.
  */
-#include <uinet_sys/malloc.h>
+#include <sys/malloc.h>
 
 
 #include "uinet_host_interface.h"

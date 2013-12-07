@@ -29,11 +29,11 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/pcpu.h>
-#include <uinet_sys/smp.h>
-#include <uinet_sys/systm.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/pcpu.h>
+#include <sys/smp.h>
+#include <sys/systm.h>
 
 
 /* This is used in modules that need to work in both SMP and UP. */

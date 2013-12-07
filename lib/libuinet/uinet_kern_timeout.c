@@ -38,27 +38,27 @@
  *	From: @(#)kern_clock.c	8.5 (Berkeley) 1/21/94
  */
 
-#include <uinet_sys/cdefs.h>
+#include <sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/bus.h>
-#include <uinet_sys/callout.h>
-#include <uinet_sys/condvar.h>
-#include <uinet_sys/event.h>
-#include <uinet_sys/interrupt.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/kthread.h>
-#include <uinet_sys/ktr.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/mutex.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/sdt.h>
-#include <uinet_sys/sysctl.h>
-#include <uinet_sys/smp.h>
-#include <uinet_sys/timetc.h>
+#include <sys/param.h>
+#include <sys/systm.h>
+#include <sys/bus.h>
+#include <sys/callout.h>
+#include <sys/condvar.h>
+#include <sys/event.h>
+#include <sys/interrupt.h>
+#include <sys/kernel.h>
+#include <sys/kthread.h>
+#include <sys/ktr.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
+#include <sys/mutex.h>
+#include <sys/proc.h>
+#include <sys/sdt.h>
+#include <sys/sysctl.h>
+#include <sys/smp.h>
+#include <sys/timetc.h>
 
 #include "uinet_host_interface.h"
 

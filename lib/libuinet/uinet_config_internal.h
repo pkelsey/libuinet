@@ -28,12 +28,12 @@
 #define	_UINET_CONFIG_INTERNAL_H_
 
 
-#include <uinet_sys/queue.h>
-#include <uinet_sys/socket.h>
+#include <sys/queue.h>
+#include <sys/socket.h>
 
-#include <uinet_net/if.h>
+#include <net/if.h>
 
-#include <uinet_config.h>
+#include "uinet_config.h"
 
 struct uinet_config_if {
 	TAILQ_ENTRY(uinet_config_if) link;

@@ -23,9 +23,9 @@
  * SUCH DAMAGE.
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/libkern.h>
-#include <uinet_sys/random.h>
+#include <sys/param.h>
+#include <sys/libkern.h>
+#include <sys/random.h>
 
 /* Structure holding the desired entropy sources */
 struct harvest_select harvest = { 0, 0, 0, 0 };

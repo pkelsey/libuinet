@@ -24,7 +24,7 @@
  */
 
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/systm.h>
+#include <sys/param.h>
+#include <sys/systm.h>
 
 int                        cpu_disable_deep_sleep = 0; /* Timer dies in C3. */

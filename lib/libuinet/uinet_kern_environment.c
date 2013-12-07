@@ -32,23 +32,23 @@
  * still be available.
  */
 
-#include <uinet_sys/cdefs.h>
+#include <sys/cdefs.h>
 __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_environment.c 225617 2011-09-16 13:58:51Z kmacy $");
 
-#include <uinet_sys/types.h>
-#include <uinet_sys/param.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/queue.h>
-#include <uinet_sys/lock.h>
-#include <uinet_sys/malloc.h>
-#include <uinet_sys/mutex.h>
-#include <uinet_sys/priv.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/sysent.h>
-#include <uinet_sys/sysproto.h>
-#include <uinet_sys/libkern.h>
-#include <uinet_sys/kenv.h>
+#include <sys/types.h>
+#include <sys/param.h>
+#include <sys/proc.h>
+#include <sys/queue.h>
+#include <sys/lock.h>
+#include <sys/malloc.h>
+#include <sys/mutex.h>
+#include <sys/priv.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+#include <sys/sysent.h>
+#include <sys/sysproto.h>
+#include <sys/libkern.h>
+#include <sys/kenv.h>
 
 
 static MALLOC_DEFINE(M_KENV, "kenv", "kernel environment");

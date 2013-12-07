@@ -30,9 +30,9 @@
  */
 
 #undef _KERNEL
-#include <uinet_sys/param.h>
+#include <sys/param.h>
 
-#include <uinet_vm/vm.h>
+#include <vm/vm.h>
 
 
 #include "uinet_host_interface.h"

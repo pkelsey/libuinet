@@ -23,11 +23,11 @@
  * SUCH DAMAGE.
  */
 
-#include <uinet_sys/param.h>
-#include <uinet_sys/types.h>
-#include <uinet_sys/systm.h>
-#include <uinet_sys/kernel.h>
-#include <uinet_sys/proc.h>
-#include <uinet_sys/vnode.h>
+#include <sys/param.h>
+#include <sys/types.h>
+#include <sys/systm.h>
+#include <sys/kernel.h>
+#include <sys/proc.h>
+#include <sys/vnode.h>
 
 struct vnode *rootvnode;
