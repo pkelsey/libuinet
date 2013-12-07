@@ -618,7 +618,7 @@ int
 uhi_rwlock_tryupgrade(uhi_rwlock_t *rw)
 {
 	/*
-	 * Always succeeds as this implementation is always an exlcusive
+	 * Always succeeds as this implementation is always an exclusive
 	 * lock
 	 */
 	return (0);
