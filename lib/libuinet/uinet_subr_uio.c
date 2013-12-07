@@ -37,7 +37,7 @@
 #include <uinet_sys/proc.h>
 #include <uinet_sys/vnode.h>
 
-#include <pthread.h>
+#include "uinet_host_interface.h"
 
 int
 copyout_nofault(const void *kaddr, void *udaddr, size_t len)
@@ -49,7 +49,7 @@ static void
 uio_yield(void)
 {
 
-	pthread_yield();
+	uhi_thread_yield();
 }
 
 int

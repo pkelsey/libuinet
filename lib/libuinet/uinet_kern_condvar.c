@@ -29,11 +29,12 @@ __FBSDID("$FreeBSD$");
 
 #include <uinet_sys/param.h>
 #include <uinet_sys/kernel.h>
+#include <uinet_sys/lock.h>
+#include <uinet_sys/mutex.h>
+#include <uinet_sys/systm.h>
 #include <uinet_sys/condvar.h>
 
-#undef _KERNEL
-#include <pthread.h>
-#define _KERNEL
+#include "uinet_host_interface.h"
 
 
 /*
@@ -42,10 +43,9 @@ __FBSDID("$FreeBSD$");
 void
 cv_init(struct cv *cvp, const char *desc)
 {
-	pthread_condattr_t ca;
-    
 	cvp->cv_description = desc;
-	pthread_cond_init(&cvp->cv_cond, &ca);
+	if (0 != uhi_cond_init(&cvp->cv_cond))
+		panic("Could not initialize condition variable");
 }
 
 /*
@@ -56,7 +56,7 @@ void
 cv_destroy(struct cv *cvp)
 {
 
-	pthread_cond_destroy(&cvp->cv_cond);
+	uhi_cond_destroy(&cvp->cv_cond);
 }
 
 /*
@@ -69,8 +69,15 @@ cv_destroy(struct cv *cvp)
 void
 _cv_wait(struct cv *cvp, struct lock_object *lock)
 {
+	struct mtx *m = (struct mtx *)lock;
 
-	pthread_cond_wait(&cvp->cv_cond, (pthread_mutex_t *)lock);
+	/*
+	 * We only support sleep mutexes since that's what the underlying
+	 * pthread_cond_wait works with.
+	 */
+	KASSERT(LOCK_CLASS(lock) == lock_class_mtx_sleep, ("non-sleep mutex used with condition variable"));
+
+	uhi_cond_wait(&cvp->cv_cond, &m->mtx_lock);
 }
 
 /*
@@ -82,8 +89,17 @@ _cv_wait(struct cv *cvp, struct lock_object *lock)
 int
 _cv_wait_sig(struct cv *cvp, struct lock_object *lock)
 {
+	struct mtx *m = (struct mtx *)lock;
 
-	return (pthread_cond_wait(&cvp->cv_cond, (pthread_mutex_t *)lock));
+	/*
+	 * We only support sleep mutexes since that's what the underlying
+	 * pthread_cond_wait works with.
+	 */
+	KASSERT(LOCK_CLASS(lock) == lock_class_mtx_sleep, ("non-sleep mutex used with condition variable"));
+
+	uhi_cond_wait(&cvp->cv_cond, &m->mtx_lock);
+
+	return (0);
 }
 
 /*
@@ -94,19 +110,16 @@ _cv_wait_sig(struct cv *cvp, struct lock_object *lock)
 int
 _cv_timedwait(struct cv *cvp, struct lock_object *lock, int timo)
 {
-	struct timespec abstime;
-	int secs = timo/hz;
-	int nsecs = (timo%hz)*((1000*1000*1000)/hz);
+	uint64_t nsecs = ((uint64_t)timo * (1000UL*1000UL*1000UL)) / hz;
+	struct mtx *m = (struct mtx *)lock;
 
-	abstime.tv_sec = secs;
-	abstime.tv_nsec = nsecs;
-
-	/* XXX
-	 * how do we handle getting interrupted by a signal?
-	 * set the sigmask?
+	/*
+	 * We only support sleep mutexes since that's what the underlying
+	 * pthread_cond_timedwait works with.
 	 */
-	return (pthread_cond_timedwait(&cvp->cv_cond, (pthread_mutex_t *)lock,
-		    &abstime));
+	KASSERT(LOCK_CLASS(lock) == lock_class_mtx_sleep, ("non-sleep mutex used with condition variable"));
+
+	return (uhi_cond_timedwait(&cvp->cv_cond, &m->mtx_lock, nsecs) ? EWOULDBLOCK : 0);
 }
 
 /*
@@ -118,15 +131,20 @@ _cv_timedwait(struct cv *cvp, struct lock_object *lock, int timo)
 int
 _cv_timedwait_sig(struct cv *cvp, struct lock_object *lock, int timo)
 {
-	struct timespec abstime;
-	int secs = timo/hz;
-	int nsecs = (timo%hz)*((1000*1000*1000)/hz);
+	return (_cv_timedwait(cvp, lock, timo));
+}
 
-	abstime.tv_sec = secs;
-	abstime.tv_nsec = nsecs;
-
-	return (pthread_cond_timedwait(&cvp->cv_cond, (pthread_mutex_t *)lock,
-		    &abstime));
+/*
+ * Signal a condition variable, wakes up one waiting thread.  Will also wakeup
+ * the swapper if the process is not in memory, so that it can bring the
+ * sleeping process in.  Note that this may also result in additional threads
+ * being made runnable.  Should be called with the same mutex as was passed to
+ * cv_wait held.
+ */
+void
+cv_signal(struct cv *cvp)
+{
+	uhi_cond_signal(&cvp->cv_cond);
 }
 
 /*
@@ -136,6 +154,5 @@ _cv_timedwait_sig(struct cv *cvp, struct lock_object *lock, int timo)
 void
 cv_broadcastpri(struct cv *cvp, int pri)
 {
-
-	pthread_cond_broadcast(&cvp->cv_cond);
+	uhi_cond_broadcast(&cvp->cv_cond);
 }

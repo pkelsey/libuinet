@@ -29,79 +29,26 @@
  *
  */
 
-#undef _KERNEL
+
 #include <uinet_sys/param.h>
 #include <uinet_sys/types.h>
 #include <uinet_sys/kthread.h>
-#include <uinet_sys/mman.h>
-#include <uinet_sys/refcount.h>
-#include <uinet_sys/stat.h>
-#include <uinet_sys/time.h>
-#include <uinet_sys/stdint.h>
-#include <uinet_sys/uio.h>
-
-#define _KERNEL
-#include <uinet_sys/errno.h>
+#include <uinet_sys/malloc.h>
 #include <uinet_sys/proc.h>
+#include <uinet_sys/systm.h>
 #include <uinet_sys/lock.h>
 #include <uinet_sys/mutex.h>
-#include <uinet_sys/sx.h>
-#include <uinet_sys/linker.h>
+#include <uinet_sys/condvar.h>
 #include <uinet_sys/ucred.h>
-#undef _KERNEL
 
-#include <stdlib.h>
-#include <pthread.h>
-#include <pthread_np.h>
-#include <stdarg.h>
-#include <stdio.h>
+/* XXX - should we really be picking up the host stdarg? */ 
+#include <uinet_machine/stdarg.h>
 
+#include "uinet_host_interface.h"
 
-#if defined(UINET_PROFILE)
-static struct itimerval prof_itimer;
-#endif /* UINET_PROFILE */
-
-__thread struct thread *pcurthread;
-
-struct pthread_start_args 
-{
-	struct thread *psa_td;
-	void (*psa_start_routine)(void *);
-	void *psa_arg;
-};
-
-
-int
-_pthread_create(pthread_t *thread, const pthread_attr_t *attr,
-	       void *(*start_routine)(void *), void *arg);
 
 void uinet_init_thread0(void);
 struct thread *uinet_thread_alloc(struct proc *p);
-
-
-static void *
-pthread_start_routine(void *arg)
-{
-	struct pthread_start_args *psa = arg;
-
-#if defined(UINET_PROFILE)
-	setitimer(ITIMER_PROF, &prof_itimer, NULL);
-#endif /* UINET_PROFILE */
-
-	pcurthread = psa->psa_td;
-	pcurthread->td_proc = &proc0;
-
-	/*
-	 * Ensure tc_wchan is valid before thread body executes, in case the
-	 * thread starts before this gets set in kthread_add.
-	 */
-	pcurthread->td_wchan = pthread_self();
-	psa->psa_start_routine(psa->psa_arg);
-	free(psa->psa_td);
-	free(psa);
-
-	return (NULL);
-}
 
 
 struct thread *
@@ -109,38 +56,48 @@ uinet_thread_alloc(struct proc *p)
 {
 	struct thread *td = NULL;
 	struct mtx *lock = NULL;
-	pthread_cond_t *cond = NULL;
+	struct cv *cond = NULL;
 
 	if (NULL == p) {
 		p = &proc0;
 	}
 
-	td = malloc(sizeof(struct thread));
+	td = malloc(sizeof(struct thread), M_DEVBUF, M_WAITOK);
 	if (NULL == td)
 		goto error;
 
-	lock = malloc(sizeof(struct mtx));
+	lock = malloc(sizeof(struct mtx), M_DEVBUF, M_WAITOK);
 	if (NULL == lock)
 		goto error;
 
-	cond = malloc(sizeof(pthread_cond_t));
+	cond = malloc(sizeof(struct cv), M_DEVBUF, M_WAITOK);
 	if (NULL == cond)
 		goto error;
 
-	pthread_cond_init(cond, NULL);
+	cv_init(cond, "thread_sleepq");
 	mtx_init(lock, "thread_lock", NULL, MTX_DEF);
 	td->td_lock = lock;
-	td->td_sleepqueue = (void *)cond;
+	td->td_sleepqueue = (struct sleepqueue *)cond;
 	td->td_ucred = crhold(p->p_ucred);
+	td->td_proc = p;
 
 	return (td);
 
 error:
-	if (td) free(td);
-	if (lock) free(lock);
-	if (cond) free(cond);
+	if (td) free(td, M_DEVBUF);
+	if (lock) free(lock, M_DEVBUF);
+	if (cond) free(cond, M_DEVBUF);
 
 	return (NULL);
+}
+
+
+static void
+thread_end_routine(struct uhi_thread_start_args *start_args)
+{
+	struct thread *td = start_args->thread_specific_data;
+
+	cv_destroy((struct cv *)&td->td_sleepqueue);
 }
 
 
@@ -154,11 +111,9 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
     const char *str, ...)
 {
 	int error;
-	pthread_t thread;
-	pthread_attr_t attr;
-	struct pthread_start_args *psa;
+	uhi_thread_t host_thread;
+	struct uhi_thread_start_args *tsa;
 	struct thread *td;
-	char name[32];
 	va_list ap;
 
 	td = uinet_thread_alloc(p);
@@ -168,34 +123,34 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	if (tdp)
 		*tdp = td;
 
-	psa = malloc(sizeof(struct pthread_start_args));
-	psa->psa_start_routine = start_routine;
-	psa->psa_arg = arg;
-	psa->psa_td = td;
-	
-	pthread_attr_init(&attr); 
-	if (pages) {
-		pthread_attr_setstacksize(&attr, pages * PAGE_SIZE);
-	}
-	error = _pthread_create(&thread, &attr, pthread_start_routine, psa);
+	tsa = malloc(sizeof(struct uhi_thread_start_args), M_DEVBUF, M_WAITOK);
+	tsa->start_routine = start_routine;
+	tsa->start_routine_arg = arg;
+	tsa->end_routine = thread_end_routine;
+	tsa->thread_specific_data = td;
+
+	/* Have uhi_thread_create() store the host thread ID in td_wchan */
+	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("kthread_add: can't safely store host thread id"));
+	tsa->host_thread_id = &td->td_wchan;
 
 	va_start(ap, str);
-	vsnprintf(name, sizeof(name), str, ap);
+	vsnprintf(tsa->name, sizeof(tsa->name), str, ap);
 	va_end(ap);
-	pthread_set_name_np(thread, name);
+
+	error = uhi_thread_create(&host_thread, tsa, pages * PAGE_SIZE); 
 
 	/*
 	 * Ensure tc_wchan is valid before kthread_add returns, in case the
 	 * thread has not started yet.
 	 */
-	td->td_wchan = thread;
+	td->td_wchan = (void *)host_thread; /* safety of this cast checked by the KASSERT above */
 	return (error);
 }
 
 void
 kthread_exit(void)
 {
-	pthread_exit(NULL);
+	uhi_thread_exit();
 }
 
 /*
@@ -209,11 +164,9 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
     const char * procname, const char *str, ...)
 {
 	int error;
-	pthread_t thread;
+	uhi_thread_t host_thread;
+	struct uhi_thread_start_args *tsa;
 	struct thread *td;
-	pthread_attr_t attr;
-	struct pthread_start_args *psa;
-	char name[32];
 	va_list ap;
 
 	td = uinet_thread_alloc(*p);
@@ -223,27 +176,27 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	if (tdp)
 		*tdp = td;
 
-	psa = malloc(sizeof(struct pthread_start_args));
-	psa->psa_start_routine = start_routine;
-	psa->psa_arg = arg;
-	psa->psa_td = td;
-	
-	pthread_attr_init(&attr); 
-	if (pages) {
-		pthread_attr_setstacksize(&attr, pages * PAGE_SIZE);
-	}
-	error = _pthread_create(&thread, &attr, pthread_start_routine, psa);
+	tsa = malloc(sizeof(struct uhi_thread_start_args), M_DEVBUF, M_WAITOK);
+	tsa->start_routine = start_routine;
+	tsa->start_routine_arg = arg;
+	tsa->end_routine = thread_end_routine;
+	tsa->thread_specific_data = td;
+
+	/* Have uhi_thread_create() store the host thread ID in td_wchan */
+	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("kproc_kthread_add: can't safely store host thread id"));
+	tsa->host_thread_id = &td->td_wchan;
 
 	va_start(ap, str);
-	vsnprintf(name, sizeof(name), str, ap);
+	vsnprintf(tsa->name, sizeof(tsa->name), str, ap);
 	va_end(ap);
-	pthread_set_name_np(thread, name);
+
+	error = uhi_thread_create(&host_thread, tsa, pages * PAGE_SIZE); 
 
 	/*
 	 * Ensure tc_wchan is valid before kthread_add returns, in case the
 	 * thread has not started yet.
 	 */
-	td->td_wchan = thread;
+	td->td_wchan = (void *)host_thread; /* safety of this cast checked by the KASSERT above */
 	return (error);
 }
 
@@ -251,17 +204,15 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 void
 uinet_init_thread0(void)
 {
-	pcurthread = &thread0;
-	pcurthread->td_proc = &proc0;
-	pcurthread->td_wchan = pthread_self();
+	struct thread *td;
+
+	td = &thread0;
+	td->td_proc = &proc0;
+
+	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_init_thread0: can't safely store host thread id"));
+	td->td_wchan = (void *)uhi_thread_self();
+
+	uhi_thread_set_thread_specific_data(td);
 }
 
 
-#if defined(UINET_PROFILE)
-void gprof_init(void) __attribute__((constructor)); 
-
-void gprof_init(void) {
-	printf("getting prof timer\n");
-	getitimer(ITIMER_PROF, &prof_itimer);
-}
-#endif /* UINET_PROFILE */

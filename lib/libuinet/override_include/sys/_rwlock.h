@@ -27,15 +27,14 @@
 #ifndef	_SYS__RWLOCK_H_
 #define _SYS__RWLOCK_H_
 
-struct pthread_rwlock;
-#include <sys/_pthreadtypes.h>
+#include "uinet_host_interface.h"
 
 /*
  * Reader/writer lock.
  */
 struct rwlock {
 	struct lock_object	lock_object;
-	pthread_mutex_t		rw_lock;
+	uhi_rwlock_t		rw_lock;
 };
 
 #endif	/* _SYS__RWLOCK_H_ */

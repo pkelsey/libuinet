@@ -32,9 +32,9 @@
 #include <uinet_sys/conf.h>
 #include <uinet_sys/mutex.h>
 #include <uinet_sys/proc.h>
+#include <uinet_sys/systm.h>
 
-#include <stdio.h>
-#include <pthread.h>
+#include "uinet_host_interface.h"
 
 struct mtx Giant;
 
@@ -104,33 +104,23 @@ void
 mutex_init(void)
 {
 	mtx_init(&Giant, "Giant", NULL, MTX_DEF | MTX_RECURSE);
+
+	mtx_init(&proc0.p_mtx, "process lock", NULL, MTX_DEF | MTX_DUPOK);
 }
 
 void
 mtx_init(struct mtx *m, const char *name, const char *type, int opts)
 {
-	pthread_mutexattr_t attr;
-
 	lock_init(&m->lock_object, &lock_class_mtx_sleep, name, type, opts);
 
-	pthread_mutexattr_init(&attr);
-
-	if (opts & MTX_RECURSE) {
-		if (0 != pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE)) 
-			printf("Warning: mtx will not be recursive\n");
-	} else {
-		if (0 != pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ADAPTIVE_NP))
-			pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);
-	}
-
-	pthread_mutex_init(&m->mtx_lock, &attr);
+	if (0 != uhi_mutex_init(&m->mtx_lock, opts & MTX_RECURSE ? UHI_MTX_RECURSE : 0))
+		panic("Could not initialize mutex");
 }
 
 void
 mtx_destroy(struct mtx *m)
 {
-
-	pthread_mutex_destroy(&m->mtx_lock);
+	uhi_mutex_destroy(&m->mtx_lock);
 }
 
 void
@@ -145,33 +135,33 @@ void
 _mtx_lock_flags(struct mtx *m, int opts, const char *file, int line)
 {
 
-	pthread_mutex_lock(&m->mtx_lock);
+	uhi_mutex_lock(&m->mtx_lock);
 }
 
 void
 _mtx_unlock_flags(struct mtx *m, int opts, const char *file, int line)
 {
 
-	pthread_mutex_unlock(&m->mtx_lock);
+	uhi_mutex_unlock(&m->mtx_lock);
 }
 
 int
 _mtx_trylock(struct mtx *m, int opts, const char *file, int line)
 {
 
-	return (pthread_mutex_trylock(&m->mtx_lock));
+	return (uhi_mutex_trylock(&m->mtx_lock));
 }
 
 void
 _mtx_lock_spin_flags(struct mtx *m, int opts, const char *file, int line)
 {
 
-	pthread_mutex_lock(&m->mtx_lock);
+	uhi_mutex_lock(&m->mtx_lock);
 }
 
 void
 _mtx_unlock_spin_flags(struct mtx *m, int opts, const char *file, int line)
 {
 
-	pthread_mutex_unlock(&m->mtx_lock);
+	uhi_mutex_unlock(&m->mtx_lock);
 }

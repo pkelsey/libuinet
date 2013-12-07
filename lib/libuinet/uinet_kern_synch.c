@@ -28,10 +28,6 @@
  *
  */
 
-#undef _KERNEL
-#include <errno.h>
-#define _KERNEL
-
 #include <uinet_sys/cdefs.h>
 __FBSDID("$FreeBSD$");
 
@@ -60,8 +56,7 @@ __FBSDID("$FreeBSD$");
 #endif
 
 
-#include <pthread.h>
-
+#include "uinet_host_interface.h"
 
 
 int	hogticks;
@@ -71,7 +66,7 @@ typedef struct sleep_entry {
 	LIST_ENTRY(sleep_entry) list_entry;
 	void 		*chan;
 	const char 	*wmesg;
-	pthread_cond_t	cond;
+	struct cv	cond;
 	int		waiters;
 } *sleep_entry_t;
 
@@ -81,17 +76,15 @@ SYSINIT(synch_setup, SI_SUB_INTR, SI_ORDER_FIRST, synch_setup,
 
 static struct se_head *se_active;
 static u_long se_hashmask;
-static pthread_mutex_t synch_lock;
+static struct mtx synch_lock;
 #define SE_HASH(chan)	(((uintptr_t)chan) & se_hashmask)
 LIST_HEAD(se_head, sleep_entry);
 
 static void
 synch_setup(void *arg)
 {
-	pthread_mutexattr_t attr;
+	mtx_init(&synch_lock, "synch_lock", NULL, MTX_DEF);
 
-	pthread_mutexattr_init(&attr);
-	pthread_mutex_init(&synch_lock, &attr);
 	se_active = hashinit(64, M_TEMP, &se_hashmask);
 }
 
@@ -100,15 +93,12 @@ se_alloc(void *chan, const char *wmesg)
 {
 	sleep_entry_t se;
 	struct se_head *hash_list;
-	int rv;
 
 	se = malloc(sizeof(*se), M_DEVBUF, 0);
 	se->chan = chan;
 	se->wmesg = wmesg;
 	se->waiters = 1;
-	rv = pthread_cond_init(&se->cond, NULL);
-	if (rv)
-		printf("pthread_cond_init failed error=%d\n", rv);
+	cv_init(&se->cond, "sleep entry cv");
 
 	/* insert in hash table */
 	hash_list = &se_active[SE_HASH(chan)];
@@ -137,7 +127,7 @@ se_free(sleep_entry_t se)
 
 	if (--se->waiters == 0) {
 		LIST_REMOVE(se, list_entry);
-		pthread_cond_destroy(&se->cond);
+		cv_destroy(&se->cond);
 		free(se, M_DEVBUF);
 	}
 }
@@ -162,45 +152,35 @@ _sleep(void *ident, struct lock_object *lock, int priority,
     const char *wmesg, int timo)
 {
 	sleep_entry_t se = NULL;
-	int rv = 0, tick_s;
-	struct timespec ts;
-	struct timespec rts;
-	pthread_mutex_t *plock = NULL;
+	int rv = 0;
+	struct mtx *m = (struct mtx *)lock;
 
 	if (lock) {
-		plock = &((struct mtx *)lock)->mtx_lock;
-
-		pthread_mutex_lock(&synch_lock);
+		mtx_lock(&synch_lock);
 		if ((se = se_lookup(ident)) != NULL)
 			se->waiters++;
 		else
 			se = se_alloc(ident, wmesg);
-		pthread_mutex_unlock(&synch_lock);
+		mtx_unlock(&synch_lock);
 	}
 
 	if (timo) {
-		tick_s = ts.tv_sec = timo/hz;
-		ts.tv_nsec = (timo - (tick_s*hz))*(1000000000ULL/hz);
-
 		if (lock) {
-			rv = pthread_cond_timedwait(&se->cond, plock, &ts);
+			rv = cv_timedwait(&se->cond, m, timo);
 		} else {
-			while ((-1 == (rv = nanosleep(&ts, &rts))) && (EINTR == errno)) {
-				ts = rts;
-			}
-			if (-1 == rv) {
-				rv = errno;
-			}
+			uint64_t nsecs = ((uint64_t)timo * (1000UL*1000UL*1000UL)) / hz;
+			uhi_nanosleep(nsecs);
+			rv = EWOULDBLOCK;
 		}
 
 	} else if (lock) {
-		rv = pthread_cond_wait(&se->cond, plock);
+		cv_wait(&se->cond, m);
 	}
 
 	if (lock) {
-		pthread_mutex_lock(&synch_lock);
+		mtx_lock(&synch_lock);
 		se_free(se);
-		pthread_mutex_unlock(&synch_lock);
+		mtx_unlock(&synch_lock);
 	}
 
 	return (rv);
@@ -210,24 +190,23 @@ int
 msleep_spin(void *ident, struct mtx *mtx, const char *wmesg, int timo)
 {
 	sleep_entry_t se;
-	int rv;
-	struct timespec ts;
+	int rv = 0;
 
-	pthread_mutex_lock(&synch_lock);
+	mtx_lock(&synch_lock);
 	if ((se = se_lookup(ident)) != NULL)
 		se->waiters++;
 	else
 		se = se_alloc(ident, wmesg);
-	pthread_mutex_unlock(&synch_lock);
+	mtx_unlock(&synch_lock);
 
 	if (timo)
-		rv = pthread_cond_timedwait(&se->cond, &mtx->mtx_lock, &ts);
+		rv = cv_timedwait(&se->cond, mtx, timo);
 	else
-		rv = pthread_cond_wait(&se->cond, &mtx->mtx_lock);
+		cv_wait(&se->cond, mtx);
 
-	pthread_mutex_lock(&synch_lock);
+	mtx_lock(&synch_lock);
 	se_free(se);
-	pthread_mutex_unlock(&synch_lock);
+	mtx_unlock(&synch_lock);
 
 	return (rv);
 }
@@ -254,10 +233,10 @@ wakeup(void *chan)
 {
 	sleep_entry_t se;
 
-	pthread_mutex_lock(&synch_lock);
+	mtx_lock(&synch_lock);
 	if ((se = se_lookup(chan)) != NULL)
-		pthread_cond_broadcast(&se->cond);
-	pthread_mutex_unlock(&synch_lock);
+		cv_broadcast(&se->cond);
+	mtx_unlock(&synch_lock);
 }
 
 
@@ -266,14 +245,14 @@ wakeup_one(void *chan)
 {
 	sleep_entry_t se;
 
-	pthread_mutex_lock(&synch_lock);
+	mtx_lock(&synch_lock);
 	if ((se = se_lookup(chan)) != NULL)
-		pthread_cond_signal(&se->cond);
-	pthread_mutex_unlock(&synch_lock);
+		cv_signal(&se->cond);
+	mtx_unlock(&synch_lock);
 }
 
 void
 kern_yield(int prio)
 {
-	pthread_yield();
+	uhi_thread_yield();
 }

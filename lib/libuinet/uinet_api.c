@@ -43,9 +43,8 @@
 
 #include <arpa/inet.h>
 
-#include <pthread.h>
-
 #include "uinet_api.h"
+#include "uinet_host_interface.h"
 
 #include "opt_inet6.h"
 
@@ -69,14 +68,17 @@ uinet_initialize_thread(void)
 {
 	struct thread *td;
 
-	if (NULL == pcurthread) {
+	if (NULL == uhi_thread_get_thread_specific_data()) {
 		td = uinet_thread_alloc(NULL);
 		if (NULL == td)
 			return (ENOMEM);
 		
-		pcurthread = td;
-		pcurthread->td_proc = &proc0;
-		pcurthread->td_wchan = pthread_self();
+		td->td_proc = &proc0;
+
+		KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_initialize_thread: can't safely store host thread id"));
+		td->td_wchan = (void *)uhi_thread_self();
+
+		uhi_thread_set_thread_specific_data(td);
 	}
 
 	return (0);
@@ -86,7 +88,7 @@ uinet_initialize_thread(void)
 void
 uinet_finalize_thread(void)
 {
-	struct thread *td = pcurthread;
+	struct thread *td = curthread;
 	
 	free(td, M_TEMP);
 }

@@ -60,7 +60,7 @@ __FBSDID("$FreeBSD$");
 #include <uinet_sys/smp.h>
 #include <uinet_sys/timetc.h>
 
-#include <pthread.h>
+#include "uinet_host_interface.h"
 
 
 extern int errno;
@@ -87,10 +87,10 @@ SYSCTL_INT(_debug, OID_AUTO, to_avg_mpcalls, CTLFLAG_RD, &avg_mpcalls, 0,
  */
 int callwheelsize, callwheelbits, callwheelmask;
 
-pthread_cond_t callout_cv;
+struct cv callout_cv;
 
 struct callout_cpu {
-	pthread_mutex_t		cc_lock;
+	struct mtx		cc_lock;
 	struct callout		*cc_callout;
 	struct callout_tailq	*cc_callwheel;
 	struct callout_list	cc_callfree;
@@ -111,8 +111,8 @@ struct callout_cpu cc_cpu;
 #define	CC_CPU(cpu)	&cc_cpu
 #define	CC_SELF()	&cc_cpu
 #endif
-#define	CC_LOCK(cc)	pthread_mutex_lock(&(cc)->cc_lock)
-#define	CC_UNLOCK(cc)	pthread_mutex_unlock(&(cc)->cc_lock)
+#define	CC_LOCK(cc)	mtx_lock(&(cc)->cc_lock)
+#define	CC_UNLOCK(cc)	mtx_unlock(&(cc)->cc_lock)
 
 static int timeout_cpu;
 
@@ -174,7 +174,7 @@ callout_cpu_init(struct callout_cpu *cc)
 	struct callout *c;
 	int i;
 
-	pthread_mutex_init(&cc->cc_lock, NULL);
+	mtx_init(&cc->cc_lock, "callout mtx", NULL, MTX_DEF);
 	SLIST_INIT(&cc->cc_callfree);
 	for (i = 0; i < callwheelsize; i++)
 		TAILQ_INIT(&cc->cc_callwheel[i]);
@@ -260,7 +260,7 @@ callout_tick(void)
 	 */
 	need_softclock = 0;
 	cc = CC_SELF();
-	pthread_mutex_lock(&cc->cc_lock);
+	mtx_lock(&cc->cc_lock);
 	for (; (cc->cc_softticks - ticks) < 0; cc->cc_softticks++) {
 		bucket = cc->cc_softticks & callwheelmask;
 		if (!TAILQ_EMPTY(&cc->cc_callwheel[bucket])) {
@@ -268,7 +268,7 @@ callout_tick(void)
 			break;
 		}
 	}
-	pthread_mutex_unlock(&cc->cc_lock);
+	mtx_unlock(&cc->cc_lock);
 	/*
 	 * swi_sched acquires the thread lock, so we don't want to call it
 	 * with cc_lock held; incorrect locking order.
@@ -477,7 +477,7 @@ softclock(void *arg)
 					 */
 					cc->cc_waiting = 0;
 					CC_UNLOCK(cc);
-					pthread_cond_broadcast(&callout_cv);
+					cv_broadcast(&callout_cv);
 					CC_LOCK(cc);
 				}
 				steps = 0;
@@ -715,7 +715,7 @@ _callout_stop_safe(c, safe)
 			 * finish.
 			 */
 			while (cc->cc_curr == c) {
-				pthread_cond_wait(&callout_cv, &cc->cc_lock);
+				cv_wait(&callout_cv, &cc->cc_lock);
 			}
 		} else if (use_lock && !cc->cc_cancel) {
 			/*
@@ -801,41 +801,21 @@ timer_intr(void *arg)
 {
 	struct timespec base_tick_period, tick_period;
 	struct timespec start, target_period, delta;
+	int64_t sec;
 	long nsec;
 	int hardclocks;
 	const int calibration_period = 5;
 	int i;
-	pthread_t t;
-	int policy;
-	struct sched_param sparam;
 
 	/* XXX arbitrary prioritization: If able to schedule as a real-time
 	 * thread, set to ~80% max real-time priority, otherwise set to max
 	 * time-sharing priority.
 	 */
 
-	t = pthread_self();
-
-	policy = SCHED_RR;
-	sparam.sched_priority =
-	    sched_get_priority_min(policy) +
-	    ((sched_get_priority_max(policy) - sched_get_priority_min(policy)) * 8) / 10;
-
-	if (0 != pthread_setschedparam(t, policy, &sparam)) {
-		policy = SCHED_FIFO;
-		sparam.sched_priority =
-		    sched_get_priority_min(policy) +
-		    ((sched_get_priority_max(policy) - sched_get_priority_min(policy)) * 8) / 10;
-
-		if (0 != pthread_setschedparam(t, policy, &sparam)) {
-			printf("Warning: Timer interrupt thread will not run at real-time priority.\n");
-
-			policy = SCHED_OTHER;
-			sparam.sched_priority = sched_get_priority_max(policy);
-			if (0 != pthread_setschedparam(t, policy, &sparam)) {
-				printf("Warning: Timer interrupt thread priority could not be adjusted.\n");
-			}
-		}
+	if (0 != uhi_thread_setprio_rt(80)) {
+		printf("Warning: Timer interrupt thread will not run at real-time priority.\n");
+		if (0 != uhi_thread_setprio(80))
+			printf("Warning: Timer interrupt thread priority could not be adjusted.\n");
 	}
 
 	nsec = 1000000000UL / hz;
@@ -855,14 +835,11 @@ timer_intr(void *arg)
 	hardclocks = 0;
 	tick_period = base_tick_period;
 
-	clock_gettime(CLOCK_MONOTONIC, &start);
+	uhi_clock_gettime(UHI_CLOCK_MONOTONIC, &sec, &nsec);
+	start.tv_sec = sec;
+	start.tv_nsec = nsec;
 	while (1) {
-		struct timespec rq, rm;
-
-		rq = tick_period;
-		while ((-1 == nanosleep(&rq, &rm)) && (EINTR == errno)) {
-			rq = rm;
-		}
+		uhi_nanosleep(UHI_TS_TO_NSEC(tick_period));
 
 		uinet_hardclock();
 
@@ -872,7 +849,9 @@ timer_intr(void *arg)
 
 			hardclocks = 0;
 
-			clock_gettime(CLOCK_MONOTONIC, &now);
+			uhi_clock_gettime(CLOCK_MONOTONIC, &sec, &nsec);
+			now.tv_sec = sec;
+			now.tv_nsec = nsec;
 
 			elapsed = now;
 			timespecsub(&elapsed, &start);
@@ -924,10 +903,7 @@ timer_intr(void *arg)
 				correction.tv_nsec /= calibration_period * 2;
 				timespecadd(&tick_period, &correction);
 
-				rq = delta;
-				while ((-1 == nanosleep(&rq, &rm)) && (EINTR == errno)) {
-					rq = rm;
-				}
+				uhi_nanosleep(UHI_TS_TO_NSEC(delta));
 
 				delta.tv_sec = 0;
 				delta.tv_nsec = 0;

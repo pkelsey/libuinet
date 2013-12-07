@@ -32,8 +32,6 @@
 #include <uinet_sys/systm.h>
 #include <uinet_sys/proc.h>
 
-#include <signal.h>
-
 
 struct filterops sig_filtops;
 
@@ -41,8 +39,7 @@ struct filterops sig_filtops;
 void
 tdsignal(struct thread *td, int sig)
 {
-
-	pthread_kill(td->td_wchan, sig);
+	panic("thread signaling not implemented\n");
 }
 
 /*

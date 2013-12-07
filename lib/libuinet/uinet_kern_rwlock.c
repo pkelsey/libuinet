@@ -34,7 +34,7 @@
 #include <uinet_sys/rwlock.h>
 #include <uinet_sys/proc.h>
 
-#include <pthread.h>
+#include "uinet_host_interface.h"
 
 static void
 assert_rw(struct lock_object *lock, int what)
@@ -64,18 +64,14 @@ rw_sysinit(void *arg)
 	rw_init(args->ra_rw, args->ra_desc);
 }
 
-#ifdef notyet
+
 void
 rw_init_flags(struct rwlock *rw, const char *name, int opts)
 {
-	pthread_rwlockattr_t attr;
 	int flags;
 
 	MPASS((opts & ~(RW_DUPOK | RW_NOPROFILE | RW_NOWITNESS | RW_QUIET |
 	    RW_RECURSE)) == 0);
-	ASSERT_ATOMIC_LOAD_PTR(rw->rw_lock,
-	    ("%s: rw_lock not aligned for %s: %p", __func__, name,
-	    &rw->rw_lock));
 
 	flags = LO_UPGRADABLE;
 	if (opts & RW_DUPOK)
@@ -90,8 +86,8 @@ rw_init_flags(struct rwlock *rw, const char *name, int opts)
 		flags |= LO_QUIET;
 
 	lock_init(&rw->lock_object, &lock_class_rw, name, NULL, flags);
-	pthread_rwlockattr_init(&attr);
-	pthread_rwlock_init(&rw->rw_lock, &attr);
+	if (0 != uhi_rwlock_init(&rw->rw_lock, opts & RW_RECURSE ? UHI_RW_WRECURSE : 0))
+		panic("Could not initialize rwlock");
 }
 
 
@@ -99,187 +95,60 @@ void
 rw_destroy(struct rwlock *rw)
 {
 	
-	pthread_rwlock_destroy(&rw->rw_lock);
+	uhi_rwlock_destroy(&rw->rw_lock);
 }
 
 void
 _rw_wlock(struct rwlock *rw, const char *file, int line)
 {
 
-	pthread_rwlock_wrlock(&rw->rw_lock);
+	uhi_rwlock_wlock(&rw->rw_lock);
 }
 
 int
 _rw_try_wlock(struct rwlock *rw, const char *file, int line)
 {
 
-	return (!pthread_rwlock_trywrlock(&rw->rw_lock));
+	return (uhi_rwlock_trywlock(&rw->rw_lock));
 }
 
 void
 _rw_wunlock(struct rwlock *rw, const char *file, int line)
 {
 	
-	pthread_rwlock_unlock(&rw->rw_lock);
+	uhi_rwlock_wunlock(&rw->rw_lock);
 }
 
 void
 _rw_rlock(struct rwlock *rw, const char *file, int line)
 {
 	
-	pthread_rwlock_rdlock(&rw->rw_lock);
+	uhi_rwlock_rlock(&rw->rw_lock);
 }
 
 int
 _rw_try_rlock(struct rwlock *rw, const char *file, int line)
 {
 	
-	return (!pthread_rwlock_tryrdlock(&rw->rw_lock));
+	return (uhi_rwlock_tryrlock(&rw->rw_lock));
 }
 
 void
 _rw_runlock(struct rwlock *rw, const char *file, int line)
 {
 	
-	pthread_rwlock_unlock(&rw->rw_lock);
+	uhi_rwlock_runlock(&rw->rw_lock);
 }
 
 int
 _rw_try_upgrade(struct rwlock *rw, const char *file, int line)
 {
-	
-	return (0);
+	return (uhi_rwlock_tryupgrade(&rw->rw_lock));
 }
 
 void
 _rw_downgrade(struct rwlock *rw, const char *file, int line)
 {
-
-	pthread_rwlock_unlock(&rw->rw_lock);
-	/* XXX */
-	pthread_rwlock_rdlock(&rw->rw_lock);
-}
-
-#endif
-
-void
-rw_init_flags(struct rwlock *rw, const char *name, int opts)
-{
-	pthread_mutexattr_t attr;
-	int flags;
-
-	MPASS((opts & ~(RW_DUPOK | RW_NOPROFILE | RW_NOWITNESS | RW_QUIET |
-	    RW_RECURSE)) == 0);
-	ASSERT_ATOMIC_LOAD_PTR(rw->rw_lock,
-	    ("%s: rw_lock not aligned for %s: %p", __func__, name,
-	    &rw->rw_lock));
-
-	flags = LO_UPGRADABLE;
-	if (opts & RW_DUPOK)
-		flags |= LO_DUPOK;
-	if (opts & RW_NOPROFILE)
-		flags |= LO_NOPROFILE;
-	if (!(opts & RW_NOWITNESS))
-		flags |= LO_WITNESS;
-	if (opts & RW_RECURSE)
-		flags |= LO_RECURSABLE;
-	if (opts & RW_QUIET)
-		flags |= LO_QUIET;
-
-	lock_init(&rw->lock_object, &lock_class_rw, name, NULL, flags);
-	pthread_mutexattr_init(&attr);
-
-	/* XXX
-	 *
-	 * An rwlock always allows recursive read locks and allows recursive
-	 * write locks if RW_RECURSE is specified.  pthread_mutex can either
-	 * be recursive or not, so we always specify a recursive
-	 * pthread_mutex in order to not break the always-read-recursive
-	 * behavior of rwlocks.
-	 *
-	 * Note that pthread_rwlocks do not allow recursion, so aren't a
-	 * contender for implementing the rwlock API.
-	 *
-	 */
-
-	if (0 != pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE)) {
-		printf("Warning: rwlock will not be read recursive\n");
-		if (opts & RW_RECURSE)
-			printf("Warning: rwlock will not be write recursive\n");
-	}
-
-	if (0 != pthread_mutexattr_setprotocol(&attr, PTHREAD_PRIO_INHERIT)) {
-		printf("Warning: priority will not propagate to rwlock holder\n");
-	}
-
-	pthread_mutex_init(&rw->rw_lock, &attr);
-}
-
-
-void
-rw_destroy(struct rwlock *rw)
-{
-	
-	pthread_mutex_destroy(&rw->rw_lock);
-}
-
-void
-_rw_wlock(struct rwlock *rw, const char *file, int line)
-{
-
-	pthread_mutex_lock(&rw->rw_lock);
-}
-
-int
-_rw_try_wlock(struct rwlock *rw, const char *file, int line)
-{
-
-	return (!pthread_mutex_trylock(&rw->rw_lock));
-}
-
-void
-_rw_wunlock(struct rwlock *rw, const char *file, int line)
-{
-	
-	pthread_mutex_unlock(&rw->rw_lock);
-}
-
-void
-_rw_rlock(struct rwlock *rw, const char *file, int line)
-{
-	
-	pthread_mutex_lock(&rw->rw_lock);
-}
-
-int
-_rw_try_rlock(struct rwlock *rw, const char *file, int line)
-{
-	
-	return (!pthread_mutex_trylock(&rw->rw_lock));
-}
-
-void
-_rw_runlock(struct rwlock *rw, const char *file, int line)
-{
-	
-	pthread_mutex_unlock(&rw->rw_lock);
-}
-
-
-int
-_rw_try_upgrade(struct rwlock *rw, const char *file, int line)
-{
-	/* Always succeeds as this implementation is always an exlcusive
-	 * lock
-	 */
-	return (0);
-}
-
-void
-_rw_downgrade(struct rwlock *rw, const char *file, int line)
-{
-	/* Nothing to do here.  In this implementation, there is only one
-	 * grade of this lock.
-	 */
+	uhi_rwlock_downgrade(&rw->rw_lock);
 }
 

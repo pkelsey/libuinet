@@ -27,15 +27,14 @@
 #ifndef	_SYS__RMLOCK_H_
 #define _SYS__RMLOCK_H_
 
-struct pthread_rwlock;
-#include <sys/_pthreadtypes.h>
+#include "uinet_host_interface.h"
 
 /*
  * Read mostly lock same as rwlock in this implementation
  */
 struct rmlock {
 	struct lock_object	lock_object;
-	pthread_mutex_t		rm_lock;
+	uhi_rwlock_t		rm_lock;
 };
 
 struct rm_priotracker {

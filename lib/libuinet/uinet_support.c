@@ -36,28 +36,10 @@
  *
  */
 
+#include <uinet_sys/param.h>
 #include <uinet_sys/types.h>
-
-/*
- * Reproduced from sys/libsystm.h, which is not included directly in order to
- * avoid massive definition conflict between it and std*.h below.
- */
-int	copystr(const void * __restrict kfaddr, void * __restrict kdaddr,
-	    size_t len, size_t * __restrict lencopied)
-	    __nonnull(1) __nonnull(2);
-int	copyinstr(const void * __restrict udaddr, void * __restrict kaddr,
-	    size_t len, size_t * __restrict lencopied)
-	    __nonnull(1) __nonnull(2);
-int	copyin(const void * __restrict udaddr, void * __restrict kaddr,
-	    size_t len) __nonnull(1) __nonnull(2);
-int	copyout(const void * __restrict kaddr, void * __restrict udaddr,
-	    size_t len) __nonnull(1) __nonnull(2);
-
-int	subyte(void *base, int byte);
-int	fubyte(void *base);
-
-
-#include <string.h>
+#include <uinet_sys/kernel.h>
+#include <uinet_sys/systm.h>
 
 
 int
@@ -116,8 +98,8 @@ subyte(void *base, int byte)
 
 
 int
-fubyte(void *base)
+fubyte(const void *base)
 {
 
-	return (*(uint8_t *)base);
+	return (*(const uint8_t *)base);
 }

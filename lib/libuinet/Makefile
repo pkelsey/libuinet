@@ -100,7 +100,9 @@ UINET_SRCS+=			\
 	uinet_config.c		\
 	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
+	uinet_host_interface.c  \
 	uinet_if_netmap.c	\
+	uinet_if_netmap_host.c	\
 	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\

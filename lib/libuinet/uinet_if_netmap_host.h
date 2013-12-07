@@ -23,27 +23,19 @@
  * SUCH DAMAGE.
  */
 
+#ifndef _UINET_IF_NETMAP_HOST_H_
+#define _UINET_IF_NETMAP_HOST_H_
 
-/*
- * Reproduced from sys/libkern.h, which is not included directly in order to
- * avoid massive definition conflict between it and std*.h below.
- */
-void	 arc4rand(void *ptr, unsigned int len, int reseed);
+struct nmreq;
+
+void if_netmap_api_check(unsigned int ifnamesiz);
+
+int if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr);
+int if_netmap_register_if(int nmfd, struct nmreq *req, const char *ifname, unsigned int qno);
+int if_netmap_rxsync(int nmfd);
+int if_netmap_txsync(int nmfd);
+int if_netmap_set_offload(int nmfd, const char *ifname, int on);
+int if_netmap_set_promisc(int nmfd, const char *ifname, int on);
 
 
-#undef _KERNEL
-#include <stdlib.h>
-
-
-/* 
- * Redirect to the user-space library version.
- */
-void
-arc4rand(void *ptr, unsigned int len, int reseed)
-{
-	if (reseed) {
-		arc4random_stir();
-	}
-
-	arc4random_buf(ptr, len);
-}
+#endif /* _UINET_IF_NETMAP_HOST_H_ */

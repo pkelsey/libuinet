@@ -23,10 +23,6 @@
  * SUCH DAMAGE.
  */
 
-#undef _KERNEL
-#include <errno.h>
-#define _KERNEL
-
 #include <uinet_sys/param.h>
 #include <uinet_sys/time.h>
 #include <uinet_sys/socket.h>
@@ -35,6 +31,7 @@
 #include <uinet_sys/proc.h>
 #include <uinet_sys/kthread.h>
 #include <uinet_sys/sched.h>
+#include <uinet_sys/sockio.h>
 
 #include <uinet_net/if.h>
 #include <uinet_net/if_var.h>
@@ -49,18 +46,9 @@
 #include <uinet_machine/atomic.h>
 
 #include "uinet_config_internal.h"
+#include "uinet_host_interface.h"
+#include "uinet_if_netmap_host.h"
 
-#undef _KERNEL
-#include <sys/types.h>
-#include <sys/ioctl.h>
-#include <sys/mman.h>
-#include <sys/socket.h>
-#include <sys/uio.h>
-
-#include <ctype.h>
-#include <ifaddrs.h>
-#include <fcntl.h>
-#include <poll.h>
 
 /*
  *  IF_NETMAP_RXRING_ZCOPY_FRAC_NUM and IF_NETMAP_RXRING_ZCOPY_FRAC_DEN are
@@ -88,16 +76,6 @@
  */
 #define IF_NETMAP_RXRING_ZCOPY_FRAC_NUM 1
 #define IF_NETMAP_RXRING_ZCOPY_FRAC_DEN 2
-
-
-/* stdio */
-extern void	perror(const char *string);
-
-/* stdlib */
-extern int	 atoi(const char *);
-
-/* unistd */
-extern int	close(int d);
 
 
 struct if_netmap_bufinfo {
@@ -140,8 +118,6 @@ struct if_netmap_softc {
 
 
 static int if_netmap_setup_interface(struct if_netmap_softc *sc);
-static int if_netmap_set_offload(struct if_netmap_softc *sc, bool on);
-static int if_netmap_set_promisc(struct if_netmap_softc *sc, bool on);
 
 
 
@@ -263,7 +239,6 @@ static int
 if_netmap_attach(struct uinet_config_if *cfg)
 {
 	struct if_netmap_softc *sc;
-	struct ifaddrs *ifa, *ifa_current;
 	int fd, error, rv;
 	uint32_t pool_size;
 
@@ -272,16 +247,16 @@ if_netmap_attach(struct uinet_config_if *cfg)
 
 	sc = malloc(sizeof(struct if_netmap_softc), M_DEVBUF, M_WAITOK);
 	if (NULL == sc) {
-		perror("if_netmap_softc allocation failed");
+		printf("if_netmap_softc allocation failed");
 		return (ENOMEM);
 	}
 	memset(sc, 0, sizeof(struct if_netmap_softc));
 
 	sc->cfg = cfg;
 
-	fd = open("/dev/netmap", O_RDWR);
+	fd = uhi_open("/dev/netmap", UHI_O_RDWR);
 	if (fd < 0) {
-		perror("/dev/netmap open failed");
+		printf("/dev/netmap open failed");
 		return (ENXIO);
 	}
 
@@ -297,32 +272,29 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	 *
 	 */
 
-	error = if_netmap_set_offload(sc, false);
+	error = if_netmap_set_offload(sc->fd, sc->cfg->name, false);
 	if (error != 0) {
 		printf("set offload failed\n");
 		goto fail;
 	}
 
-	error = if_netmap_set_promisc(sc, true);
+	error = if_netmap_set_promisc(sc->fd, sc->cfg->name, true);
 	if (error != 0) {
 		printf("set promisc failed\n");
 		goto fail;
 	}
 
-	sc->req.nr_version = NETMAP_API;
-	sc->req.nr_ringid = NETMAP_NO_TX_POLL | NETMAP_HW_RING | sc->cfg->queue;
-	strlcpy(sc->req.nr_name, sc->cfg->name, sizeof(sc->req.nr_name));
-	rv = ioctl(sc->fd, NIOCREGIF, &sc->req);
+	rv = if_netmap_register_if(sc->fd, &sc->req, sc->cfg->name, sc->cfg->queue);
 	if (rv == -1) {
-		printf("NIOCREGIF failed\n");
-		if_netmap_set_promisc(sc, false);
+		printf("Failed to reegister netmap interface\n");
+		if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
 		goto fail;
 	}
 
-	sc->mem = mmap(NULL, sc->req.nr_memsize, PROT_READ | PROT_WRITE, MAP_NOCORE | MAP_SHARED, sc->fd, 0);
-	if (sc->mem == MAP_FAILED) {
+	sc->mem = uhi_mmap(NULL, sc->req.nr_memsize, UHI_PROT_READ | UHI_PROT_WRITE, UHI_MAP_NOCORE | UHI_MAP_SHARED, sc->fd, 0);
+	if (sc->mem == UHI_MAP_FAILED) {
 		printf("mmap failed\n");
-		if_netmap_set_promisc(sc, false);
+		if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
 		goto fail;
 	}
 
@@ -337,7 +309,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	error = if_netmap_bufinfo_pool_init(&sc->rx_bufinfo, pool_size);
 	if (error != 0) {
 		printf("bufinfo pool init failed\n");
-		if_netmap_set_promisc(sc, false);
+		if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
 		goto fail;
 	}
 
@@ -349,32 +321,9 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	 */
 	sc->hw_rx_ring->reserved = 0;
 
-	if (-1 == getifaddrs(&ifa)) {
-		printf("getifaddrs failed\n");
-		if_netmap_set_promisc(sc, false);
-		goto fail;
-	}
-
-	ifa_current = ifa;
-	error = -1;
-	while (NULL != ifa_current) {
-		if ((0 == strcmp(ifa_current->ifa_name, sc->cfg->name)) &&
-		    (AF_LINK == ifa_current->ifa_addr->sa_family) &&
-		    (NULL != ifa_current->ifa_data)) {
-			    struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa_current->ifa_addr;
-
-			    memcpy(sc->addr, &sdl->sdl_data[sdl->sdl_nlen], ETHER_ADDR_LEN);
-			    error = 0;
-			    break;
-		}
-		ifa_current = ifa_current->ifa_next;
-	}
-
-	freeifaddrs(ifa);
-
-	if (0 != error) {
+	if (0 != if_netmap_get_ifaddr(sc->cfg->name, sc->addr)) {
 		printf("failed to find interface address\n");
-		if_netmap_set_promisc(sc, false);
+		if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
 		goto fail;
 	}
 
@@ -382,12 +331,12 @@ if_netmap_attach(struct uinet_config_if *cfg)
 		return (0);
 	}
 
-	if_netmap_set_promisc(sc, false);
+	if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
 
 fail:
 	if_netmap_bufinfo_pool_destroy(&sc->rx_bufinfo);
 
-	close(sc->fd);
+	uhi_close(sc->fd);
 	free(sc, M_DEVBUF);
 	return (ENXIO);
 }
@@ -423,7 +372,7 @@ if_netmap_send(void *arg)
 	struct if_netmap_softc *sc = (struct if_netmap_softc *)arg;
 	struct ifnet *ifp = sc->ifp;
 	struct netmap_ring *txr;
-	struct pollfd pfd;
+	struct uhi_pollfd pfd;
 	uint32_t avail;
 	uint32_t cur;
 	u_int pktlen;
@@ -440,9 +389,9 @@ if_netmap_send(void *arg)
 
 		txr = sc->hw_tx_ring;
 	
-		rv = ioctl(sc->fd, NIOCTXSYNC);
+		rv = if_netmap_txsync(sc->fd);
 		if (rv == -1) {
-			perror("could not sync tx descriptors before transmit");
+			printf("could not sync tx descriptors before transmit");
 		}
 	
 		while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
@@ -452,11 +401,11 @@ if_netmap_send(void *arg)
 				memset(&pfd, 0, sizeof(pfd));
 
 				pfd.fd = sc->fd;
-				pfd.events = POLLOUT;
+				pfd.events = UHI_POLLOUT;
 				
-				rv = poll(&pfd, 1, -1);
-				if (rv == -1 && errno != EINTR)
-					perror("error from poll for transmit");
+				rv = uhi_poll(&pfd, 1, -1);
+				if (rv == -1)
+					printf("error from poll for transmit");
 					
 				avail = txr->avail;
 			}
@@ -483,9 +432,9 @@ if_netmap_send(void *arg)
 
 			txr->avail = avail;
 			txr->cur = cur;
-			rv = ioctl(sc->fd, NIOCTXSYNC);
+			rv = if_netmap_txsync(sc->fd);
 			if (rv == -1) {
-				perror("could not sync tx descriptors after transmit");
+				printf("could not sync tx descriptors after transmit");
 			}
 		}
 	}
@@ -577,7 +526,7 @@ if_netmap_receive(void *arg)
 {
 	struct if_netmap_softc *sc;
 	struct netmap_ring *rxr;
-	struct pollfd pfd;
+	struct uhi_pollfd pfd;
 	struct mbuf *m;
 	struct if_netmap_bufinfo *bi;
 	uint32_t cur;
@@ -614,9 +563,9 @@ if_netmap_receive(void *arg)
 	sc = (struct if_netmap_softc *)arg;
 	rxr = sc->hw_rx_ring;
 
-	rv = ioctl(sc->fd, NIOCRXSYNC);
+	rv = if_netmap_rxsync(sc->fd);
 	if (rv == -1)
-		perror("could not sync rx descriptors before receive loop");
+		printf("could not sync rx descriptors before receive loop");
 
 	sc->hw_rx_rsvd_begin = rxr->cur;
 
@@ -625,11 +574,11 @@ if_netmap_receive(void *arg)
 			memset(&pfd, 0, sizeof pfd);
 
 			pfd.fd = sc->fd;
-			pfd.events = POLLIN;
+			pfd.events = UHI_POLLIN;
 
-			rv = poll(&pfd, 1, -1);
-			if (rv == -1 && errno != EINTR)
-				perror("error from poll for receive");
+			rv = uhi_poll(&pfd, 1, -1);
+			if (rv == -1)
+				printf("error from poll for receive");
 		}
 
 		if (avail > sc->req.nr_rx_slots) {
@@ -718,9 +667,9 @@ if_netmap_receive(void *arg)
 		}
 		rxr->reserved -= returned;
 
-		rv = ioctl(sc->fd, NIOCRXSYNC);
+		rv = if_netmap_rxsync(sc->fd);
 		if (rv == -1)
-			perror("could not sync rx descriptors after receive");
+			printf("could not sync rx descriptors after receive");
 
 	}
 }
@@ -789,78 +738,13 @@ if_netmap_detach(struct uinet_config_if *cfg)
 
 
 static int
-if_netmap_set_offload(struct if_netmap_softc *sc, bool on)
-{
-	struct ifreq ifr;
-	int rv;
-
-	memset(&ifr, 0, sizeof ifr);
-	strlcpy(ifr.ifr_name, sc->cfg->name, sizeof ifr.ifr_name);
-	rv = ioctl(sc->fd, SIOCGIFCAP, &ifr);
-	if (rv == -1) {
-		perror("get interface capabilities failed");
-		return (-1);
-	}
-
-	ifr.ifr_reqcap = ifr.ifr_curcap;
-
-	if (on)
-		ifr.ifr_reqcap |= IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO;
-	else
-		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
-
-	rv = ioctl(sc->fd, SIOCSIFCAP, &ifr);
-	if (rv == -1) {
-		perror("set interface capabilities failed");
-		return (-1);
-	}
-
-	return (0);
-}
-
-
-static int
-if_netmap_set_promisc(struct if_netmap_softc *sc, bool on)
-{
-	struct ifreq ifr;
-	uint32_t flags;
-	int rv;
-
-	memset(&ifr, 0, sizeof ifr);
-	strlcpy(ifr.ifr_name, sc->cfg->name, sizeof ifr.ifr_name);
-	rv = ioctl(sc->fd, SIOCGIFFLAGS, &ifr);
-	if (rv == -1) {
-		perror("get interface flags failed");
-		return (-1);
-	}
-
-	flags = (ifr.ifr_flags & 0xffff) | (ifr.ifr_flagshigh << 16);
-
-	if (on)
-		flags |= IFF_PPROMISC;
-	else
-		flags &= ~IFF_PPROMISC;
-
-	ifr.ifr_flags = flags & 0xffff;
-	ifr.ifr_flagshigh = (flags >> 16) & 0xffff;
-
-	rv = ioctl(sc->fd, SIOCSIFFLAGS, &ifr);
-	if (rv == -1) {
-		perror("set interface flags failed");
-		return (-1);
-	}
-
-	return (0);
-}
-
-
-static int
 if_netmap_modevent(module_t mod, int type, void *data)
 {
 	struct uinet_config_if *cfg = NULL;
 
 	switch (type) {
 	case MOD_LOAD:
+		if_netmap_api_check(IFNAMSIZ);
 		while (NULL != (cfg = uinet_config_if_next(cfg))) {
 			if (UINET_IFTYPE_NETMAP == cfg->type)
 				if_netmap_attach(cfg);

@@ -30,12 +30,8 @@
 #define	_SYS_CONDVAR_H_
 
 #ifndef	LOCORE
-#include <sys/queue.h>
 
-struct lock_object;
-struct thread;
-
-TAILQ_HEAD(cv_waitq, thread);
+#include "uinet_host_interface.h"
 
 /*
  * Condition variable.  The waiters count is protected by the mutex that
@@ -43,9 +39,9 @@ TAILQ_HEAD(cv_waitq, thread);
  * and is held across calls to cv_signal() and cv_broadcast().  It is an
  * optimization to avoid looking up the sleep queue if there are no waiters.
  */
-struct	cv {
+struct cv {
 	const char *cv_description;
-	pthread_cond_t cv_cond;
+	uhi_cond_t cv_cond;
 };
 
 #ifdef _KERNEL

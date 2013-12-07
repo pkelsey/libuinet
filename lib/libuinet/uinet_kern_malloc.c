@@ -31,6 +31,7 @@
 
 #include <uinet_sys/param.h>
 #include <uinet_sys/kernel.h>
+#include <uinet_sys/systm.h>
 #include <uinet_sys/types.h>
 
 /*
@@ -42,17 +43,9 @@
  */
 #include <uinet_sys/malloc.h>
 
-/*
- * Now we undefine the names that were redefined by the libuinet
- * sys/malloc.h above so we can use the stdlib.h versions in the
- * implementation below.
- */
-#undef malloc
-#undef free
-#undef realloc
-#undef reallocf
-#include <stdlib.h>
-#include <strings.h>
+
+#include "uinet_host_interface.h"
+
 
 MALLOC_DEFINE(M_DEVBUF, "devbuf", "device driver memory");
 MALLOC_DEFINE(M_TEMP, "temp", "misc temporary data buffers");
@@ -83,7 +76,7 @@ void *
 uinet_malloc(unsigned long size, struct malloc_type *type, int flags)
 {
 	void *alloc;
-	alloc = malloc(size);
+	alloc = uhi_malloc(size);
 
 	if ((flags & M_ZERO) && alloc != NULL)
 		bzero(alloc, size);
@@ -95,7 +88,7 @@ void
 uinet_free(void *addr, struct malloc_type *type)
 {
 
-	free(addr);
+	uhi_free(addr);
 }
 
 
@@ -103,7 +96,7 @@ void *
 uinet_realloc(void *addr, unsigned long size, struct malloc_type *type,
 	      int flags)
 {
-	return (realloc(addr, size));
+	return (uhi_realloc(addr, size));
 }
 
 
@@ -111,5 +104,5 @@ void *
 uinet_reallocf(void *addr, unsigned long size, struct malloc_type *type,
 	      int flags)
 {
-	return (reallocf(addr, size));
+	return (uhi_reallocf(addr, size));
 }

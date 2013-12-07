@@ -27,15 +27,14 @@
 #ifndef	_SYS__MUTEX_H_
 #define _SYS__MUTEX_H_
 
-struct pthread_mutex;
-#include <sys/_pthreadtypes.h>
+#include "uinet_host_interface.h"
 
 /*
  * Sleep/spin mutex
  */
 struct mtx {
 	struct lock_object	lock_object;
-	pthread_mutex_t		mtx_lock;
+	uhi_mutex_t		mtx_lock;
 };
 
 #endif	/* _SYS__MUTEX_H_ */

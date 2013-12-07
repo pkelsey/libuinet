@@ -24,6 +24,8 @@
  */
 
 #include <uinet_sys/param.h>
+#include <uinet_sys/lock.h>
+#include <uinet_sys/mutex.h>
 #include <uinet_sys/proc.h>
 #include <uinet_vm/vm.h>
 #include <uinet_vm/vm_page.h>
@@ -31,25 +33,30 @@
 #include <uinet_vm/uma_int.h>
 
 
-#include <pthread.h>
+static void thread_bucket_lock_init(void) __attribute__((constructor));
 
-/* XXX making the currently safe assumption that PTHREAD_MUTEX_INITIALIZER is 0 */
-pthread_mutex_t bucket_lock;
 
+struct mtx bucket_lock;
 int uma_page_mask;
-
 struct uma_page_head *uma_page_slab_hash;
+
+
+static void
+thread_bucket_lock_init(void)
+{
+	mtx_init(&bucket_lock, "bucket lock", NULL, MTX_DEF);
+}
 
 void
 thread_bucket_lock(void)
 {
 
-        pthread_mutex_lock(&bucket_lock);
+        mtx_lock(&bucket_lock);
 }
 
 void
 thread_bucket_unlock(void)
 {
 
-        pthread_mutex_unlock(&bucket_lock);
+        mtx_unlock(&bucket_lock);
 }

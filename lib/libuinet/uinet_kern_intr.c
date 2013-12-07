@@ -67,7 +67,6 @@ __FBSDID("$FreeBSD$");
 #endif
 
 
-#include <pthread.h>
 
 /*
  * Describe an interrupt thread.  There is one of these per interrupt event.
@@ -686,7 +685,7 @@ intr_event_schedule_thread(struct intr_event *ie)
 	thread_lock(td);
 	if (TD_AWAITING_INTR(td)) {
 		TD_CLR_IWAIT(td);
-		pthread_cond_signal((pthread_cond_t *)td->td_sleepqueue);
+		cv_signal((struct cv *)td->td_sleepqueue);
 	}
 	thread_unlock(td);
 	return (0);
@@ -1059,7 +1058,7 @@ ithread_loop(void *arg)
 			CTR3(KTR_INTR, "%s: pid %d (%s) exiting", __func__,
 			    p->p_pid, td->td_name);
 			free(ithd, M_ITHREAD);
-			pthread_exit(NULL);
+			kthread_exit();
 		}
 
 		/*
@@ -1090,8 +1089,8 @@ ithread_loop(void *arg)
 		if (!ithd->it_need && !(ithd->it_flags & IT_DEAD)) {
 			TD_SET_IWAIT(td);
 			ie->ie_count = 0;
-			pthread_cond_wait((pthread_cond_t *)td->td_sleepqueue, 
-					  &td->td_lock->mtx_lock);
+			cv_wait((struct cv *)td->td_sleepqueue, 
+				td->td_lock);
 		}
 		thread_unlock(td);
 	}

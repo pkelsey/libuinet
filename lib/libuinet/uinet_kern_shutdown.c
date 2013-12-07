@@ -23,13 +23,12 @@
  * SUCH DAMAGE.
  */
 
-#include <uinet_sys/cdefs.h>
 
 /*
  * Reproduced from sys/libkern.h, which is not included directly in order to
  * avoid massive definition conflict between it and std*.h below.
  */
-void	panic(const char *, ...) __dead2 __printflike(1, 2);
+void	panic(const char *, ...) __attribute__((__noreturn__));
 
 
 #include <stdarg.h>

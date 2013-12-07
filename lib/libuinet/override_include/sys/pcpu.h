@@ -31,18 +31,12 @@
 #undef curcpu
 #undef curthread
 
+/* XXX for where this is used, is a constant 0 sensible? */
 #define	curcpu	0
 
-extern __thread struct thread *pcurthread;
+#include "uinet_host_interface.h"
 
-static __inline struct thread *
-__curthread_uinet(void)
-{
-
-	return (pcurthread);
-}
-
-#define curthread __curthread_uinet()
+#define curthread ((struct thread *)uhi_thread_get_thread_specific_data())
 
 
 #endif	/* _UINET_SYS_PCPU_H_ */

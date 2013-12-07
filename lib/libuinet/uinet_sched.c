@@ -26,11 +26,10 @@
 
 #include <uinet_sys/param.h>
 #include <uinet_sys/systm.h>
-#include <uinet_sys/cpuset.h>
 #include <uinet_sys/proc.h>
 #include <uinet_sys/sched.h>
 
-#include <pthread_np.h>
+#include "uinet_host_interface.h"
 
 
 /*
@@ -39,14 +38,9 @@
 void
 sched_bind(struct thread *td, int cpu)
 {
-	pthread_t pt;
-	cpuset_t cpuset;
-
 	KASSERT(td == curthread, ("sched_bind: can only bind curthread"));
 	
-	pt = (pthread_t)td->td_wchan;
-	
-	CPU_ZERO(&cpuset);
-	CPU_SET(cpu, &cpuset);
-	pthread_setaffinity_np(pt, sizeof(cpuset_t), &cpuset);
+	if (cpu >= 0) {
+		uhi_thread_bind(cpu);
+	}
 }

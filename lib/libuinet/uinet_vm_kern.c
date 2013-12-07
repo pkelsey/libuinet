@@ -31,9 +31,11 @@
 
 #undef _KERNEL
 #include <uinet_sys/param.h>
-#include <sys/mman.h>
 
 #include <uinet_vm/vm.h>
+
+
+#include "uinet_host_interface.h"
 
 
 vm_offset_t kmem_malloc(void * map, int bytes, int wait);
@@ -46,7 +48,7 @@ vm_offset_t
 kmem_malloc(void * map, int bytes, int wait)
 {
 
-	return ((vm_offset_t)mmap(NULL, bytes, PROT_READ|PROT_WRITE, MAP_ANON, -1, 0));
+	return ((vm_offset_t)uhi_mmap(NULL, bytes, UHI_PROT_READ|UHI_PROT_WRITE, UHI_MAP_ANON, -1, 0));
 }
 
 
@@ -54,5 +56,5 @@ void
 kmem_free(void *map, vm_offset_t addr, vm_size_t size)
 {
 
-	munmap((void *)addr, size);
+	uhi_munmap((void *)addr, size);
 }

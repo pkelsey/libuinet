@@ -43,8 +43,6 @@
 #include <uinet_vm/vm_page.h>
 #include <uinet_vm/uma.h>
 #include <uinet_vm/uma_int.h>
-#include <pthread.h>
-#include <spawn.h>
 
 #include "uinet_api.h"
 #include "uinet_config.h"
@@ -61,8 +59,10 @@ extern void mi_startup(void);
 extern void uinet_init_thread0(void);
 extern void mutex_init(void);
 
+#if 0
 pthread_mutex_t init_lock;
 pthread_cond_t init_cond;
+#endif
 
 int
 uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
@@ -132,8 +132,10 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 	uma_page_slab_hash = malloc(sizeof(struct uma_page)*num_hash_buckets, M_DEVBUF, M_ZERO);
 	uma_page_mask = num_hash_buckets - 1;
 
+#if 0
 	pthread_mutex_init(&init_lock, NULL);
 	pthread_cond_init(&init_cond, NULL);
+#endif
 	mutex_init();
         mi_startup();
 	sx_init(&proctree_lock, "proctree");

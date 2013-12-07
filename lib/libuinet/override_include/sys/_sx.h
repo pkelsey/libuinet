@@ -27,15 +27,14 @@
 #ifndef	_SYS__SX_H_
 #define _SYS__SX_H_
 
-struct pthread_rwlock;
-#include <sys/_pthreadtypes.h>
+#include "uinet_host_interface.h"
 
 /*
  * Shared/exclusive lock same as rwlock in this implementation
  */
 struct sx {
 	struct lock_object	lock_object;
-	pthread_mutex_t		sx_lock;
+	uhi_rwlock_t		sx_lock;
 };
 
 #endif	/* _SYS__SX_H_ */
