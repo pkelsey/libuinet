@@ -31,7 +31,6 @@
 void	 arc4rand(void *ptr, unsigned int len, int reseed);
 
 
-#undef _KERNEL
 #include <stdlib.h>
 
 

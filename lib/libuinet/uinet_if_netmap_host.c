@@ -23,7 +23,6 @@
  * SUCH DAMAGE.
  */
 
-#undef _KERNEL
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>

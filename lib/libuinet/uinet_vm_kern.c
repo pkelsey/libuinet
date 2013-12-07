@@ -29,7 +29,7 @@
  *
  */
 
-#undef _KERNEL
+
 #include <sys/param.h>
 
 #include <vm/vm.h>
