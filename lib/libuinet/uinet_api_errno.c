@@ -129,13 +129,10 @@ uinet_errno_to_os(int uinet_errno)
 	case UINET_ECANCELED:		os_errno = ECANCELED; break;
 	case UINET_EILSEQ:		os_errno = EILSEQ; break;
 	case UINET_ENOATTR:		os_errno = ENOATTR; break;
-	case UINET_EDOOFUS:		os_errno = EDOOFUS; break;
 	case UINET_EBADMSG:		os_errno = EBADMSG; break;
 	case UINET_EMULTIHOP:		os_errno = EMULTIHOP; break;
 	case UINET_ENOLINK:		os_errno = ENOLINK; break;
 	case UINET_EPROTO:		os_errno = EPROTO; break;
-	case UINET_ENOTCAPABLE:		os_errno = ENOTCAPABLE; break;
-	case UINET_ECAPMODE:		os_errno = ECAPMODE; break;
 	default:			os_errno = uinet_errno; break;
 	}
 
