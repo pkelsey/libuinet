@@ -11,8 +11,11 @@ COMPILER_TYPE:=	clang
 _COMPILER_VERSION:= $(shell ${CC} --version)
    ifneq ($(filter gcc (GCC),${_COMPILER_VERSION}),)
 COMPILER_TYPE:=	gcc
-   else ifneq ($(filter clang,${_COMPILER_VERSION}),)
+   else ifneq ($(findstring clang,${_COMPILER_VERSION}),)
 COMPILER_TYPE:=	clang
+      ifneq ($(filter Apple,${_COMPILER_VERSION}),)
+NO_FORMAT_EXTENSIONS:=1
+      endif
    else
 $(error  Unable to determine compiler type for ${CC}.  Consider setting COMPILER_TYPE.)
    endif

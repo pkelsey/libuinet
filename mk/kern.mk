@@ -4,9 +4,15 @@
 #
 # Warning flags for compiling the kernel and components of the kernel:
 #
+ifdef NO_FORMAT_EXTENSIONS
+FORMAT_EXTENSIONS=
+else
+FORMAT_EXTENIONS= -fformat-extensions
+endif
+
 CWARNFLAGS?=	-Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes \
 		-Wmissing-prototypes -Wpointer-arith -Winline -Wcast-qual \
-		-Wno-pointer-sign -fformat-extensions \
+		-Wno-pointer-sign ${FORMAT_EXTENSIONS} \
 		-Wmissing-include-dirs -fdiagnostics-show-option \
 		${CWARNEXTRA}
 #
@@ -30,7 +36,8 @@ NO_WSOMETIMES_UNINITIALIZED=	-Wno-error-sometimes-uninitialized
 # enough to error out the whole kernel build.  Display them anyway, so there is
 # some incentive to fix them eventually.
 CWARNEXTRA?=	-Wno-error-tautological-compare -Wno-error-empty-body \
-		-Wno-error-parentheses-equality
+		-Wno-error-parentheses-equality -Wno-incompatible-library-redeclaration \
+		-Wno-builtin-requires-header
 endif
 
 #
