@@ -50,6 +50,7 @@ INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. -I$S
 # This hack lets us use the OpenBSD altq code without spamming a new
 # include path into contrib'ed source files.
 INCLUDES+= -I$S/contrib/altq
+INCLUDES+= -I$S/contrib/pf
 
 CFLAGS=	${COPTFLAGS} ${C_DIALECT} ${DEBUG} ${CWARNFLAGS}
 CFLAGS+= -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
