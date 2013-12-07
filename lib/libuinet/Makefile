@@ -86,6 +86,7 @@ VPATH+= $S/libkern
 UINET_SRCS+=			\
 	uinet_api.c		\
 	uinet_clock.c		\
+	uinet_config.c		\
 	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
 	uinet_if_netmap.c	\
@@ -141,7 +142,6 @@ UINET_SRCS+=			\
 UINET_HOST_SRCS+=		\
 	uinet_api_errno.c	\
 	uinet_arc4random.c	\
-	uinet_config.c		\
 	uinet_host_interface.c  \
 	uinet_if_netmap_host.c	\
 	uinet_kern_shutdown.c

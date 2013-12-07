@@ -24,11 +24,11 @@
  */
 
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include <errno.h>
+#include <sys/param.h>
+#include <sys/ctype.h>
+#include <sys/libkern.h>
+#include <sys/malloc.h>
+#include <sys/systm.h>
 
 #include "uinet_config.h"
 #include "uinet_config_internal.h"
@@ -108,7 +108,7 @@ int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, 
 
 	unit = strtoul(p + 1, NULL, 10);
 
-	cfg = malloc(sizeof(struct uinet_config_if));
+	cfg = malloc(sizeof(struct uinet_config_if), M_DEVBUF, M_WAITOK);
 	if (NULL == cfg) {
 		return (ENOMEM);
 	}
