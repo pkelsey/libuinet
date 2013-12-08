@@ -41,7 +41,7 @@ OBJS+= $(patsubst %.cc,%.o,$(patsubst %.c,%.o,${SRCS}))
 #
 UINET_LIB_PATHS:= $(foreach lib,${UINET_LIBS},${TOPDIR}/network/uinet/lib/lib$(lib))
 UINET_LIB_INCS:= $(foreach libpath,${UINET_LIB_PATHS},$(libpath)/Makefile.inc)
-UINET_CFLAGS:= $(foreach lib,${UINET_LIBS}, -I${TOPDIR}/network/uinet/lib/lib$(lib)/include)
+UINET_CFLAGS:= $(foreach lib,${UINET_LIBS}, -I${TOPDIR}/network/uinet/lib/lib$(lib)/api_include)
 UINET_LDADD:= $(foreach lib,${UINET_LIBS}, -L${TOPDIR}/network/uinet/lib/lib$(lib) -l$(lib))
 
 -include ${UINET_LIB_INCS}
@@ -59,5 +59,5 @@ endif
 
 
 clean:
-	rm ${PROG} ${OBJS}
+	@rm -f ${PROG} ${OBJS}
 
