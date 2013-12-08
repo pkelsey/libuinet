@@ -693,7 +693,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 	if (proxy->verbose > 1)
 		printf("proxy_syn_filter\n");
 
-	uinet_synfilter_get_conninfo(cookie, &inc);
+	uinet_synfilter_getconninfo(cookie, &inc);
 
 	if (NULL == splice_table_lookup(&proxy->splicetab, &inc)) {
 
@@ -731,9 +731,9 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 			goto err;
 		}
 
-		uinet_synfilter_get_l2info(cookie, &l2i);
-		if ((error = uinet_setl2info(so, l2i.inl2i_foreign_addr, l2i.inl2i_local_addr,
-					     l2i.inl2i_tags, l2i.inl2i_mask, l2i.inl2i_cnt))) {
+		uinet_synfilter_getl2info(cookie, &l2i);
+		if ((error = uinet_setl2info2(so, l2i.inl2i_foreign_addr, l2i.inl2i_local_addr,
+					      l2i.inl2i_tags, l2i.inl2i_mask, l2i.inl2i_cnt))) {
 			printf("Failed to set l2info on socket (%d)\n", error);
 			goto err;
 		}
@@ -823,7 +823,7 @@ create_proxy(unsigned int client_fib, unsigned int server_fib,
 	
 	uinet_soupcall_set(listener, UINET_SO_RCV, listener_upcall, proxy);
 	
-	if ((error = uinet_setl2info(listener, NULL, NULL, NULL, 0, -1))) {
+	if ((error = uinet_setl2info2(listener, NULL, NULL, NULL, 0, -1))) {
 		printf("Listen socket L2 info set failed (%d)\n", error);
 		goto fail;
 	}
@@ -933,19 +933,25 @@ int main (int argc, char **argv)
 	}
 	
 	for (i = 0; i < num_ifs; i++) {
-		uinet_config_if(ifnames[i], 0, i + 1);
+		uinet_config_if(ifnames[i], UINET_IFTYPE_NETMAP, 0, i + 1);
 	}
 
-	uinet_init(1, 128*1024);
+	uinet_init(1, 128*1024, 0);
 
 	for (i = 0; i < num_ifs; i++) {
-		uinet_interface_up(ifnames[i], 0);
+		uinet_interface_up(ifnames[i], 0, 1);
 	}
 
 	struct proxy_context *proxy;
 
+	struct uinet_in_addr addr;
+	if (uinet_inet_pton(UINET_AF_INET, listen_addr, &addr) <= 0) {
+		printf("Malformed address %s\n", listen_addr);
+		return (1);
+	}
+
 	proxy = create_proxy(1, 2,
-			     uinet_inet_addr(listen_addr), listen_port,
+			     addr.s_addr, listen_port,
 			     verbose);
 
 	while (1) {

@@ -1,5 +1,7 @@
 
 
+TOPDIR?=${CURDIR}/../../../..
+
 PROG=tproxy
 
 UINET_LIBS=uinet
