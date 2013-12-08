@@ -101,6 +101,13 @@ uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size)
 }
 
 
+int
+uinet_inet_pton(int af, const char *src, void *dst)
+{
+	return (inet_pton(af, src, dst));
+}
+
+
 static int
 uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *canonical_name, int qno)
 {
@@ -345,6 +352,37 @@ uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i)
 		ts_internal->inl2t_cnt = l2i->inl2i_cnt;
 		ts_internal->inl2t_mask = l2i->inl2i_mask;
 		memcpy(ts_internal->inl2t_tags, l2i->inl2i_tags, sizeof(uint32_t) * l2i->inl2i_cnt);
+	}
+
+	error = so_setsockopt(so_internal, SOL_SOCKET, SO_L2INFO, &l2i_internal, sizeof(l2i_internal));
+
+	return (error);
+}
+
+
+int
+uinet_setl2info2(struct uinet_socket *so, uint8_t *local_addr, uint8_t *foreign_addr,
+		 uint32_t *tags, uint32_t tagmask, int tagcnt)
+{
+	struct socket *so_internal = (struct socket *)so;
+	struct in_l2info l2i_internal;
+	struct in_l2tagstack *ts_internal = &l2i_internal.inl2i_tagstack;
+	int error = 0;
+
+	memset(&l2i_internal, 0, sizeof(l2i_internal));
+
+	if (local_addr)
+		memcpy(l2i_internal.inl2i_local_addr, local_addr, ETHER_ADDR_LEN);
+
+	if (foreign_addr)
+		memcpy(l2i_internal.inl2i_foreign_addr, foreign_addr, ETHER_ADDR_LEN);
+
+	if (tagcnt < 0) {
+		l2i_internal.inl2i_flags |= INL2I_TAG_ANY;
+	} else if (tagcnt > 0) {
+		ts_internal->inl2t_cnt = tagcnt;
+		ts_internal->inl2t_mask = tagmask;
+		memcpy(ts_internal->inl2t_tags, tags, sizeof(uint32_t) * tagcnt);
 	}
 
 	error = so_setsockopt(so_internal, SOL_SOCKET, SO_L2INFO, &l2i_internal, sizeof(l2i_internal));

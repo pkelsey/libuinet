@@ -5,6 +5,7 @@ uinet_finalize_thread
 uinet_free_sockaddr
 uinet_getl2info
 uinet_inet_ntoa
+uinet_inet_pton
 uinet_inet6_enabled
 uinet_init
 uinet_initialize_thread
@@ -14,6 +15,7 @@ uinet_interface_up
 uinet_mac_aton
 uinet_make_socket_promiscuous
 uinet_setl2info
+uinet_setl2info2
 uinet_soaccept
 uinet_sobind
 uinet_soclose

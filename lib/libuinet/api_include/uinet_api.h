@@ -38,6 +38,7 @@ extern "C" {
 void  uinet_finalize_thread(void);
 int   uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
 char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
+int   uinet_inet_pton(int af, const char *src, void *dst);
 int   uinet_inet6_enabled(void);
 int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback);
 int   uinet_initialize_thread(void);
@@ -48,6 +49,8 @@ int   uinet_interface_up(const char *canonical_name, int qno, unsigned int promi
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
 int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
 int   uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
+int   uinet_setl2info2(struct uinet_socket *so, uint8_t *local_addr, uint8_t *foreign_addr,
+		       uint32_t *tags, uint32_t tagmask, int tagcnt);
 int   uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struct uinet_socket **aso);
 int   uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam);
 int   uinet_soclose(struct uinet_socket *so);
