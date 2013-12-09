@@ -292,7 +292,7 @@ LDADD+= -lpthread
 # Then, only the symbols that are part of the UINET API are made
 # externally available.
 #
-libuinet.a: machine_includes ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS}
+libuinet.a: machine_includes uinet_api.symlist ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS}
 	${LD} -r -o $*.ro ${HOST_OBJS} ${OBJS}
 	nm $*.ro  | grep -v ' U ' | cut -d ' ' -f 3 > $*_localize_list.tmp
 	objcopy --localize-symbols=$*_localize_list.tmp $*.ro 

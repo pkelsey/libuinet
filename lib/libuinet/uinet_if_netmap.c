@@ -45,6 +45,7 @@
 
 #include "uinet_config_internal.h"
 #include "uinet_host_interface.h"
+#include "uinet_if_netmap.h"
 #include "uinet_if_netmap_host.h"
 
 
@@ -77,12 +78,13 @@
 
 
 struct if_netmap_bufinfo {
-	u_int refcnt;
+	unsigned int refcnt;
 	uint32_t nm_index;  /* netmap buffer index */
 	uint32_t bi_index;  /* bufinfo index */
 };
 
 struct if_netmap_bufinfo_pool {
+	unsigned int initialized;
 	struct mtx tail_lock;
 	struct if_netmap_bufinfo *pool;
 	uint32_t *free_list;
@@ -149,6 +151,8 @@ if_netmap_bufinfo_pool_init(struct if_netmap_bufinfo_pool *p, uint32_t max)
 	}
 
 	mtx_init(&p->tail_lock, "bitllk", NULL, MTX_DEF);
+
+	p->initialized = 1;
 
 	return (0);
 }
@@ -230,11 +234,12 @@ if_netmap_bufinfo_free(struct if_netmap_bufinfo_pool *p, struct if_netmap_bufinf
 }
 
 
-static int
+int
 if_netmap_attach(struct uinet_config_if *cfg)
 {
-	struct if_netmap_softc *sc;
-	int fd, error;
+	struct if_netmap_softc *sc = NULL;
+	int fd = -1;
+	int error = 0;
 	uint32_t pool_size;
 
 
@@ -243,7 +248,8 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	sc = malloc(sizeof(struct if_netmap_softc), M_DEVBUF, M_WAITOK);
 	if (NULL == sc) {
 		printf("if_netmap_softc allocation failed");
-		return (ENOMEM);
+		error = ENOMEM;
+		goto fail;
 	}
 	memset(sc, 0, sizeof(struct if_netmap_softc));
 
@@ -252,7 +258,8 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	fd = uhi_open("/dev/netmap", UHI_O_RDWR);
 	if (fd < 0) {
 		printf("/dev/netmap open failed");
-		return (ENXIO);
+		error = ENXIO;
+		goto fail;
 	}
 
 	sc->fd = fd;
@@ -261,6 +268,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	sc->nm_host_ctx = if_netmap_register_if(sc->fd, sc->cfg->name, sc->cfg->queue);
 	if (NULL == sc->nm_host_ctx) {
 		printf("Failed to register netmap interface\n");
+		error = ENXIO;
 		goto fail;
 	}
 
@@ -275,29 +283,39 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	error = if_netmap_bufinfo_pool_init(&sc->rx_bufinfo, pool_size);
 	if (error != 0) {
 		printf("bufinfo pool init failed\n");
-		if_netmap_set_promisc(sc->nm_host_ctx, false);
 		goto fail;
 	}
 
 	if (0 != if_netmap_get_ifaddr(sc->cfg->name, sc->addr)) {
 		printf("failed to find interface address\n");
-		if_netmap_set_promisc(sc->nm_host_ctx, false);
+		error = ENXIO;
 		goto fail;
 	}
 
-	if (0 == if_netmap_setup_interface(sc)) {
-		cfg->ifdata = sc;
-		return (0);
+	if (0 != if_netmap_setup_interface(sc)) {
+		error = ENXIO;
+		goto fail;
 	}
 
-	if_netmap_set_promisc(sc->nm_host_ctx, false);
+	cfg->ifdata = sc;
+
+	return (0);
 
 fail:
-	if_netmap_bufinfo_pool_destroy(&sc->rx_bufinfo);
+	if (sc) {
+		if (sc->nm_host_ctx)
+			if_netmap_deregister_if(sc->nm_host_ctx);
 
-	uhi_close(sc->fd);
-	free(sc, M_DEVBUF);
-	return (ENXIO);
+		if (sc->rx_bufinfo.initialized)
+			if_netmap_bufinfo_pool_destroy(&sc->rx_bufinfo);
+
+		if (sc->fd >= 0)
+			uhi_close(sc->fd);
+
+		free(sc, M_DEVBUF);
+	}
+
+	return (error);
 }
 
 
@@ -654,13 +672,15 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 }
 
 
-static int
+int
 if_netmap_detach(struct uinet_config_if *cfg)
 {
 	struct if_netmap_softc *sc = cfg->ifdata;
 
 	if (sc) {
 		if_netmap_deregister_if(sc->nm_host_ctx);
+		
+		if_netmap_bufinfo_pool_destroy(&sc->rx_bufinfo);
 
 		uhi_close(sc->fd);
 
@@ -671,37 +691,3 @@ if_netmap_detach(struct uinet_config_if *cfg)
 }
 
 
-static int
-if_netmap_modevent(module_t mod, int type, void *data)
-{
-	struct uinet_config_if *cfg = NULL;
-
-	switch (type) {
-	case MOD_LOAD:
-		while (NULL != (cfg = uinet_config_if_next(cfg))) {
-			if (UINET_IFTYPE_NETMAP == cfg->type)
-				if_netmap_attach(cfg);
-		}
-		break;
-
-	case MOD_UNLOAD:
-		while (NULL != (cfg = uinet_config_if_next(cfg))) {
-			if (UINET_IFTYPE_NETMAP == cfg->type)
-				if_netmap_detach(cfg);
-		}
-		break;
-
-	default:
-		return (EOPNOTSUPP);
-	}
-	return (0);
-}
-
-
-static moduledata_t if_netmap_mod = {
-	"if_netmap",
-	if_netmap_modevent,
-	0
-};
-
-DECLARE_MODULE(if_netmap, if_netmap_mod, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_ANY);

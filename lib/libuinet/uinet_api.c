@@ -109,7 +109,7 @@ uinet_inet_pton(int af, const char *src, void *dst)
 
 
 static int
-uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *canonical_name, int qno)
+uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *canonical_name, unsigned int qno)
 {
 	struct thread *td = curthread;
 	int error;
@@ -120,11 +120,7 @@ uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *canonica
 		return (error);
 	}
 
-	if (qno >= 0)
-		snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s:%u", canonical_name, qno);
-	else
-		strlcpy(ifr->ifr_name, canonical_name, sizeof(ifr->ifr_name));
-
+	snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s:%u", canonical_name, qno);
 	
 	return (0);
 }
@@ -151,7 +147,7 @@ uinet_ifconfig_end(struct socket *so)
 
 
 int
-uinet_interface_add_alias(const char *canonical_name, int qno,
+uinet_interface_add_alias(const char *canonical_name, unsigned int qno,
 			  const char *addr, const char *braddr, const char *mask)
 {
 	struct socket *cfg_so;
@@ -163,7 +159,7 @@ uinet_interface_add_alias(const char *canonical_name, int qno,
 	int error;
 
 	/*
-	 * The cast of ina to (struct ifreq *) is safe bcause they both
+	 * The cast of ina to (struct ifreq *) is safe because they both
 	 * begin with the same size name field, and uinet_ifconfig_begin
 	 * only touches the name field.
 	 */
@@ -200,7 +196,7 @@ out:
 
 
 int
-uinet_interface_create(const char *canonical_name, int qno)
+uinet_interface_create(const char *canonical_name, unsigned int qno)
 {
 	struct socket *cfg_so;
 	struct ifreq ifr;
@@ -219,7 +215,7 @@ uinet_interface_create(const char *canonical_name, int qno)
 
 
 int
-uinet_interface_up(const char *canonical_name, int qno, unsigned int promisc)
+uinet_interface_up(const char *canonical_name, unsigned int qno, unsigned int promisc)
 {
 	struct socket *cfg_so;
 	struct ifreq ifr;

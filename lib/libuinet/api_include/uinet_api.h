@@ -42,10 +42,10 @@ int   uinet_inet_pton(int af, const char *src, void *dst);
 int   uinet_inet6_enabled(void);
 int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback);
 int   uinet_initialize_thread(void);
-int   uinet_interface_add_alias(const char *canonical_name, int qno,
+int   uinet_interface_add_alias(const char *canonical_name, unsigned int qno,
 				const char *addr, const char *braddr, const char *mask);
-int   uinet_interface_create(const char *canonical_name, int qno);
-int   uinet_interface_up(const char *canonical_name, int qno, unsigned int promisc);
+int   uinet_interface_create(const char *canonical_name, unsigned int qno);
+int   uinet_interface_up(const char *canonical_name, unsigned int qno, unsigned int promisc);
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
 int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
 int   uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);

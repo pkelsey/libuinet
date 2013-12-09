@@ -46,32 +46,52 @@ typedef enum {
 } uinet_iftype_t;
 
 /*
- *  Add an interface to the config.  If called twice for the same interface,
- *  the second config replaces the first.
+ *  Create a network interface with the given name, of the given type, in
+ *  the given connection domain, and bound to the given cpu.
  *
  *  ifname	is of the form <base><unit>:<queue>, e.g. em0:1.
  *  		<base><unit> is a synonym for <base><unit>:0.
  *
  *  type	is the type of interface to create.  This determines the
- *		interface driver that will claim this config entry.
+ *		interface driver that will attach to the given name.
  *
  *  cdom	is the connection domain for ifname.  When looking up an
- *		inbound connection on ifname, only control blocks in the
- *		same connection domain will be searched.
+ *		inbound packet on ifname, only protocol control blocks in
+ *		the same connection domain will be searched.
  *
  *  cpu		is the cpu number on which to perform stack processing on
  *		packets received on ifname.  -1 means leave it up to the
  *		scheduler.
  *
- *  returns:
  *
- *  0		Configuration successfully added.
+ *  Return values:
  *
- *  ENOMEM	Too many configs
+ *  0			Interface created successfully
  *
- *  EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
+ *  UINET_ENXIO		Unable to configure the inteface
+ *
+ *  UINET_ENOMEM	No memory available for interface creation
+ *
+ *  UINET_EEXIST	An interface with the given name or cdom already exists
+ *
+ *  UINET_EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
  */
-int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, int cpu);
+int uinet_ifcreate(const char *ifname, uinet_iftype_t type, unsigned int cdom, int cpu);
+
+
+/*
+ *  Destroy the network interface with the given name.
+ *
+ *
+ *  Return values:
+ *
+ *  0			Interface destroyed successfully
+ *
+ *  UINET_ENXIO		Unable to destroy the inteface
+ *
+ *  UINET_EINVAL	No interface with the given name found
+ */
+int uinet_ifdestroy(const char *ifname);
 
 
 /*

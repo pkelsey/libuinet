@@ -32,41 +32,90 @@
 
 #include "uinet_config.h"
 #include "uinet_config_internal.h"
-
+#include "uinet_if_netmap.h"
 
 static TAILQ_HEAD(config_head, uinet_config_if) if_conf = TAILQ_HEAD_INITIALIZER(if_conf);
 
 
-int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, int cpu)
+static struct uinet_config_if *
+uinet_iffind_byname(const char *ifname)
+{
+	struct uinet_config_if *cfg;
+
+	TAILQ_FOREACH(cfg, &if_conf, link) {
+		if (0 == strcmp(ifname, cfg->spec)) {
+			return (cfg);
+		}
+	}
+
+	return (NULL);
+}
+
+
+static struct uinet_config_if *
+uinet_iffind_bycdom(unsigned int cdom)
+{
+	struct uinet_config_if *cfg;
+
+	TAILQ_FOREACH(cfg, &if_conf, link) {
+		if (cdom == cfg->cdom) {
+			return (cfg);
+		}
+	}
+
+	return (NULL);
+}
+
+
+int uinet_ifcreate(const char *ifname, uinet_iftype_t type, unsigned int cdom, int cpu)
 {
 	const char *colon, *p, *p_orig;
 	unsigned int queue;
 	unsigned int unit;
-	struct uinet_config_if *cfg;
+	struct uinet_config_if *cfg = NULL;
 	int copylen;
+	int error = 0;
 
 	
 	if (NULL == ifname) {
-		return (EINVAL);
+		error = EINVAL;
+		goto out;
 	}
 
 	if (strlen(ifname) >= IF_NAMESIZE) {
-		return (EINVAL);
+		error = EINVAL;
+		goto out;
 	}
 
+	if (NULL != uinet_iffind_byname(ifname)) {
+		error = EEXIST;
+		goto out;
+	}
+
+	/*
+	 * CDOM 0 is for non-promiscuous-inet interfaces and can contain
+	 * multiple interfaces.  All other CDOMs are for promiscuous-inet
+	 * interfaces and can only contain one interface.
+	 */
+	if ((cdom != 0) && (NULL != uinet_iffind_bycdom(cdom))) {
+		error = EEXIST;
+		goto out;
+	}
 
 	/* parse ifname into base, unit, and queue */
 	colon = strchr(ifname, ':');
 	if (colon) {
 		if (colon == ifname) {
 			/* no base or unit */
-			return (EINVAL);
+			error = EINVAL;
+			goto out;
 		}
 		
 		p = colon + 1;
 		if ('\0' == *p) {
 			/* colon at the end */
-			return (EINVAL);
+			error = EINVAL;
+			goto out;
 		}
 
 		while (isdigit(*p) && ('\0' != *p))
@@ -74,7 +123,8 @@ int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, 
 
 		if ('\0' != *p) {
 			/* non-numeric chars after colon */
-			return (EINVAL);
+			error = EINVAL;
+			goto out;
 		}
 
 		p = colon + 1;
@@ -96,12 +146,14 @@ int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, 
 	
 	if (p == p_orig) {
 		/* no unit number */
-		return (EINVAL);
+		error = EINVAL;
+		goto out;
 	}
 
 	if (p == ifname) {
 		/* it's all numeric up to the colon */
-		return (EINVAL);
+		error = EINVAL;
+		goto out;
 	}
 
 	/* p now points to last char of base name */
@@ -110,7 +162,8 @@ int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, 
 
 	cfg = malloc(sizeof(struct uinet_config_if), M_DEVBUF, M_WAITOK);
 	if (NULL == cfg) {
-		return (ENOMEM);
+		error = ENOMEM;
+		goto out;
 	}
 
 	cfg->type = type;
@@ -135,19 +188,47 @@ int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, 
 
 	cfg->ifdata = NULL;
 
-	TAILQ_INSERT_TAIL(&if_conf, cfg, link);
-
-	return (0);
-}
-
-
-struct uinet_config_if *
-uinet_config_if_next(struct uinet_config_if *cur)
-{
-	if (NULL == cur) {
-		return (TAILQ_FIRST(&if_conf));
-	} else {
-		return (TAILQ_NEXT(cur, link));
+	switch (cfg->type) {
+	case UINET_IFTYPE_NETMAP:
+		error = if_netmap_attach(cfg);
+		break;
+	default:
+		printf("Error attaching interface %s: unknown interface type %d\n", cfg->spec, cfg->type);
+		error = ENXIO;
+		break;
 	}
+
+	if (0 == error)
+		TAILQ_INSERT_TAIL(&if_conf, cfg, link);
+
+out:
+	if (error && cfg)
+		free(cfg, M_DEVBUF);
+
+	return (error);
 }
 
+
+int uinet_ifdestroy(const char *ifname)
+{
+	struct uinet_config_if *cfg;
+	int error = EINVAL;
+
+	cfg = uinet_iffind_byname(ifname);
+	if (NULL != cfg) {
+		switch (cfg->type) {
+		case UINET_IFTYPE_NETMAP:
+			error = if_netmap_detach(cfg);
+			break;
+		default:
+			printf("Error detaching interface %s: unknown interface type %d\n", cfg->spec, cfg->type);
+			error = ENXIO;
+			break;
+		}
+
+		TAILQ_REMOVE(&if_conf, cfg, link);
+		free(cfg, M_DEVBUF);
+	}
+
+	return (error);
+}
