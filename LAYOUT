@@ -2,6 +2,7 @@ uinet directory layout:
 
 Directory	Description
 =============	=============================================================
+bin		Test/sample programs that use libuinet.
 lib		Libraries that are or use the user-space networking stack.
 lib/libuinet	Library containing the user-space port of the FreeBSD TCP/IP
 		stack and additional management and configuration interfaces.
@@ -9,9 +10,10 @@ lib/libuinet	Library containing the user-space port of the FreeBSD TCP/IP
 		reimplemented for the port.  Kernel functionality implemented
 		in <kern_file>.c in the kernel source tree can generally be
 		found in uinet_<kern_file>.c in this directory. 
-lib/libuinet/include
-		Public and private includes for the libuinet port and header
-		overrides for some of the FreeBSD kernel headers.
+lib/libuinet/api_include
+		Public includes for libuinet.
+lib/libuinet/override_include
+		Header overrides for some of the FreeBSD kernel headers.
 lib/libuinet/opt
 		Kernel option headers required by the port. The kernel
 		configuration is modified by editing these files.
