@@ -886,6 +886,7 @@ int main (int argc, char **argv)
 	int listen_port = -1;
 	int verbose = 0;
 	int i;
+	int error;
 
 	while ((ch = getopt(argc, argv, "hi:l:p:v")) != -1) {
 		switch (ch) {
@@ -933,13 +934,16 @@ int main (int argc, char **argv)
 	}
 	
 	for (i = 0; i < num_ifs; i++) {
-		uinet_config_if(ifnames[i], UINET_IFTYPE_NETMAP, 0, i + 1);
+		uinet_config_if(ifnames[i], UINET_IFTYPE_NETMAP, i + 1, 0);
 	}
 
 	uinet_init(1, 128*1024, 0);
 
 	for (i = 0; i < num_ifs; i++) {
-		uinet_interface_up(ifnames[i], 0, 1);
+		error = uinet_interface_up(ifnames[i], 0, 1);
+		if (0 != error) {
+			printf("Failed to bring up interface %s (%d)\n", ifnames[i], error);
+		}
 	}
 
 	struct proxy_context *proxy;
