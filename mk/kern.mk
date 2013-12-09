@@ -7,7 +7,7 @@
 ifdef NO_FORMAT_EXTENSIONS
 FORMAT_EXTENSIONS=
 else
-FORMAT_EXTENIONS= -fformat-extensions
+FORMAT_EXTENSIONS= -fformat-extensions
 endif
 
 CWARNFLAGS?=	-Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes \
