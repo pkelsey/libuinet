@@ -26,16 +26,28 @@
 #ifndef _UINET_IF_NETMAP_HOST_H_
 #define _UINET_IF_NETMAP_HOST_H_
 
-struct nmreq;
+struct if_netmap_host_context;
 
 void if_netmap_api_check(unsigned int ifnamesiz);
 
 int if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr);
-int if_netmap_register_if(int nmfd, struct nmreq *req, const char *ifname, unsigned int qno);
-int if_netmap_rxsync(int nmfd);
-int if_netmap_txsync(int nmfd);
-int if_netmap_set_offload(int nmfd, const char *ifname, int on);
-int if_netmap_set_promisc(int nmfd, const char *ifname, int on);
+struct if_netmap_host_context *if_netmap_register_if(int nmfd, const char *ifname, unsigned int qno);
+void if_netmap_deregister_if(struct if_netmap_host_context *ctx);
+int if_netmap_rxsync(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur, const uint32_t *reserved);
+uint32_t if_netmap_rxavail(struct if_netmap_host_context *ctx);
+uint32_t if_netmap_rxcur(struct if_netmap_host_context *ctx);
+uint32_t if_netmap_rxreserved(struct if_netmap_host_context *ctx);
+uint32_t if_netmap_rxslots(struct if_netmap_host_context *ctx);
+uint32_t if_netmap_rxbufsize(struct if_netmap_host_context *ctx);
+void *if_netmap_rxslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t *len, uint32_t *index);
+void if_netmap_rxsetslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t index);
+int if_netmap_txsync(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur);
+uint32_t if_netmap_txavail(struct if_netmap_host_context *ctx);
+uint32_t if_netmap_txcur(struct if_netmap_host_context *ctx);
+uint32_t if_netmap_txslots(struct if_netmap_host_context *ctx);
+void *if_netmap_txslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t len);
+int if_netmap_set_offload(struct if_netmap_host_context *ctx, int on);
+int if_netmap_set_promisc(struct if_netmap_host_context *ctx, int on);
 
 
 #endif /* _UINET_IF_NETMAP_HOST_H_ */

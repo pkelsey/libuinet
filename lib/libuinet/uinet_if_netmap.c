@@ -40,8 +40,6 @@
 #include <net/if_arp.h>
 #include <net/if_tap.h>
 #include <net/if_dl.h>
-#include <net/netmap.h>
-#include <net/netmap_user.h>
 
 #include <machine/atomic.h>
 
@@ -101,13 +99,10 @@ struct if_netmap_softc {
 	const struct uinet_config_if *cfg;
 	uint8_t addr[ETHER_ADDR_LEN];
 	int fd;
-	struct nmreq req;
-	void *mem;
 	uint16_t queue;
 
 	uint32_t hw_rx_rsvd_begin;
-	struct netmap_ring *hw_rx_ring;
-	struct netmap_ring *hw_tx_ring;
+	struct if_netmap_host_context *nm_host_ctx;
 
 	struct if_netmap_bufinfo_pool rx_bufinfo;
 
@@ -239,7 +234,7 @@ static int
 if_netmap_attach(struct uinet_config_if *cfg)
 {
 	struct if_netmap_softc *sc;
-	int fd, error, rv;
+	int fd, error;
 	uint32_t pool_size;
 
 
@@ -263,38 +258,9 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	sc->fd = fd;
 
 
-	/*
-	 * Disable TCP and checksum offload, which can impact throughput
-	 * and also cause packets to be dropped or modified gratuitously.
-	 *
-	 * Also disable VLAN offload/filtering - we want to talk straight to
-	 * the wire.
-	 *
-	 */
-
-	error = if_netmap_set_offload(sc->fd, sc->cfg->name, false);
-	if (error != 0) {
-		printf("set offload failed\n");
-		goto fail;
-	}
-
-	error = if_netmap_set_promisc(sc->fd, sc->cfg->name, true);
-	if (error != 0) {
-		printf("set promisc failed\n");
-		goto fail;
-	}
-
-	rv = if_netmap_register_if(sc->fd, &sc->req, sc->cfg->name, sc->cfg->queue);
-	if (rv == -1) {
-		printf("Failed to reegister netmap interface\n");
-		if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
-		goto fail;
-	}
-
-	sc->mem = uhi_mmap(NULL, sc->req.nr_memsize, UHI_PROT_READ | UHI_PROT_WRITE, UHI_MAP_NOCORE | UHI_MAP_SHARED, sc->fd, 0);
-	if (sc->mem == UHI_MAP_FAILED) {
-		printf("mmap failed\n");
-		if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
+	sc->nm_host_ctx = if_netmap_register_if(sc->fd, sc->cfg->name, sc->cfg->queue);
+	if (NULL == sc->nm_host_ctx) {
+		printf("Failed to register netmap interface\n");
 		goto fail;
 	}
 
@@ -305,25 +271,17 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	 * given time as a failure to allocate a zero-copy context in the
 	 * receive loop causes the buffer to be copied to the stack.
 	 */
-	pool_size = (sc->req.nr_rx_slots * IF_NETMAP_RXRING_ZCOPY_FRAC_NUM) / IF_NETMAP_RXRING_ZCOPY_FRAC_DEN;
+	pool_size = (if_netmap_rxslots(sc->nm_host_ctx) * IF_NETMAP_RXRING_ZCOPY_FRAC_NUM) / IF_NETMAP_RXRING_ZCOPY_FRAC_DEN;
 	error = if_netmap_bufinfo_pool_init(&sc->rx_bufinfo, pool_size);
 	if (error != 0) {
 		printf("bufinfo pool init failed\n");
-		if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
+		if_netmap_set_promisc(sc->nm_host_ctx, false);
 		goto fail;
 	}
 
-        sc->hw_rx_ring = NETMAP_RXRING(NETMAP_IF(sc->mem, sc->req.nr_offset), sc->cfg->queue);
-	sc->hw_tx_ring = NETMAP_TXRING(NETMAP_IF(sc->mem, sc->req.nr_offset), sc->cfg->queue);
-
-	/* NIOCREGIF will reset the hardware rings, but the reserved count
-	 * might still be non-zero from a previous user's activities
-	 */
-	sc->hw_rx_ring->reserved = 0;
-
 	if (0 != if_netmap_get_ifaddr(sc->cfg->name, sc->addr)) {
 		printf("failed to find interface address\n");
-		if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
+		if_netmap_set_promisc(sc->nm_host_ctx, false);
 		goto fail;
 	}
 
@@ -331,7 +289,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 		return (0);
 	}
 
-	if_netmap_set_promisc(sc->fd, sc->cfg->name, false);
+	if_netmap_set_promisc(sc->nm_host_ctx, false);
 
 fail:
 	if_netmap_bufinfo_pool_destroy(&sc->rx_bufinfo);
@@ -371,7 +329,6 @@ if_netmap_send(void *arg)
 	struct mbuf *m;
 	struct if_netmap_softc *sc = (struct if_netmap_softc *)arg;
 	struct ifnet *ifp = sc->ifp;
-	struct netmap_ring *txr;
 	struct uhi_pollfd pfd;
 	uint32_t avail;
 	uint32_t cur;
@@ -386,16 +343,14 @@ if_netmap_send(void *arg)
 			mtx_sleep(&ifp->if_drv_flags, &sc->tx_lock, 0, "wtxlk", 0);
 		}
 		mtx_unlock(&sc->tx_lock);
-
-		txr = sc->hw_tx_ring;
 	
-		rv = if_netmap_txsync(sc->fd);
+		rv = if_netmap_txsync(sc->nm_host_ctx, NULL, NULL);
 		if (rv == -1) {
 			printf("could not sync tx descriptors before transmit");
 		}
 	
 		while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
-			avail = txr->avail;
+			avail = if_netmap_txavail(sc->nm_host_ctx);
 
 			while (0 == avail) {
 				memset(&pfd, 0, sizeof(pfd));
@@ -407,32 +362,27 @@ if_netmap_send(void *arg)
 				if (rv == -1)
 					printf("error from poll for transmit");
 					
-				avail = txr->avail;
+				avail = if_netmap_txavail(sc->nm_host_ctx);
 			}
 
-			cur = txr->cur;
+			cur = if_netmap_txcur(sc->nm_host_ctx);
 
 			while (avail) {
 				IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
 				avail--;
 
 				pktlen = m_length(m, NULL);
-				KASSERT(pktlen <= txr->nr_buf_size, ("if_netmap_send: packet too large"));
 
-				txr->slot[cur].len = pktlen;
-				m_copydata(m, 0, pktlen, NETMAP_BUF(txr, txr->slot[cur].buf_idx));
+				m_copydata(m, 0, pktlen,
+					   if_netmap_txslot(sc->nm_host_ctx, &cur, pktlen)); 
 				m_freem(m);
-
-				cur = NETMAP_RING_NEXT(txr, cur);
 
 				if (IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
 					break;
 				}
 			}
 
-			txr->avail = avail;
-			txr->cur = cur;
-			rv = if_netmap_txsync(sc->fd);
+			rv = if_netmap_txsync(sc->nm_host_ctx, &avail, &cur);
 			if (rv == -1) {
 				printf("could not sync tx descriptors after transmit");
 			}
@@ -489,23 +439,18 @@ if_netmap_free(void *arg1, void *arg2)
 static uint32_t
 if_netmap_sweep_trail(struct if_netmap_softc *sc)
 {
-	struct netmap_ring *rxr;
 	struct if_netmap_bufinfo_pool *p;
 	uint32_t i;
 	uint32_t returned;
 	unsigned int n;
 
-	rxr = sc->hw_rx_ring;
 	i = sc->hw_rx_rsvd_begin;
 	
 	p = &sc->rx_bufinfo;
 
 	returned = p->returnable;
 	for (n = 0; n < returned; n++) {
-		rxr->slot[i].buf_idx = p->pool[p->free_list[p->trail]].nm_index;
-		rxr->slot[i].flags |= NS_BUF_CHANGED;
-
-		i = NETMAP_RING_NEXT(rxr, i);
+		if_netmap_rxsetslot(sc->nm_host_ctx, &i, p->pool[p->free_list[p->trail]].nm_index);
 
 		p->trail++;
 		if (p->trail == p->max) {
@@ -525,12 +470,15 @@ static void
 if_netmap_receive(void *arg)
 {
 	struct if_netmap_softc *sc;
-	struct netmap_ring *rxr;
 	struct uhi_pollfd pfd;
 	struct mbuf *m;
 	struct if_netmap_bufinfo *bi;
+	void *slotbuf;
+	uint32_t slotindex;
+	uint32_t pktlen;
 	uint32_t cur;
 	uint32_t avail;
+	uint32_t reserved;
 	uint32_t returned;
 	uint32_t new_reserved;
 	unsigned int n;
@@ -561,16 +509,16 @@ if_netmap_receive(void *arg)
 	 */
 
 	sc = (struct if_netmap_softc *)arg;
-	rxr = sc->hw_rx_ring;
 
-	rv = if_netmap_rxsync(sc->fd);
+	rv = if_netmap_rxsync(sc->nm_host_ctx, NULL, NULL, NULL);
 	if (rv == -1)
 		printf("could not sync rx descriptors before receive loop");
 
-	sc->hw_rx_rsvd_begin = rxr->cur;
+	reserved = if_netmap_rxreserved(sc->nm_host_ctx);
+	sc->hw_rx_rsvd_begin = if_netmap_rxcur(sc->nm_host_ctx);
 
 	for (;;) {
-		while (0 == (avail = rxr->avail)) {
+		while (0 == (avail = if_netmap_rxavail(sc->nm_host_ctx))) {
 			memset(&pfd, 0, sizeof pfd);
 
 			pfd.fd = sc->fd;
@@ -581,14 +529,11 @@ if_netmap_receive(void *arg)
 				printf("error from poll for receive");
 		}
 
-		if (avail > sc->req.nr_rx_slots) {
-			printf("bogus rxr->avail %u  cur=%u reserved=%u\n", rxr->avail, rxr->cur, rxr->reserved);
-			return;
-		}
-
-		cur = rxr->cur;
+		cur = if_netmap_rxcur(sc->nm_host_ctx);
 		new_reserved = 0;
 		for (n = 0; n < avail; n++) {
+			slotbuf = if_netmap_rxslot(sc->nm_host_ctx, &cur, &pktlen, &slotindex);
+
 			bi = if_netmap_bufinfo_alloc(&sc->rx_bufinfo);
 			if (NULL == bi) {
 				/* copy receive */
@@ -597,8 +542,7 @@ if_netmap_receive(void *arg)
 				 * know the data is going to fit in a
 				 * cluster
 				 */
-				m = m_devget(NETMAP_BUF(rxr, rxr->slot[cur].buf_idx),
-					     rxr->slot[cur].len, 0, sc->ifp, NULL);
+				m = m_devget(slotbuf, pktlen, 0, sc->ifp, NULL);
 
 				if (NULL == m) {
 					/* XXX dropped. should count this */
@@ -609,9 +553,7 @@ if_netmap_receive(void *arg)
 				 * reserved trail from prior zero-copy
 				 * activity.
 				 */
-				rxr->slot[sc->hw_rx_rsvd_begin].buf_idx = rxr->slot[cur].buf_idx;
-				rxr->slot[sc->hw_rx_rsvd_begin].flags |= NS_BUF_CHANGED;
-				sc->hw_rx_rsvd_begin = NETMAP_RING_NEXT(rxr, sc->hw_rx_rsvd_begin);
+				if_netmap_rxsetslot(sc->nm_host_ctx, &sc->hw_rx_rsvd_begin, slotindex);
 			} else {
 				/* zero-copy receive */
 
@@ -621,53 +563,34 @@ if_netmap_receive(void *arg)
 					printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>NO MBUFS (2)\n");
 					/* XXX dropped. should count this */
 
-					rxr->slot[sc->hw_rx_rsvd_begin].buf_idx = rxr->slot[cur].buf_idx;
-					rxr->slot[sc->hw_rx_rsvd_begin].flags |= NS_BUF_CHANGED;
-					sc->hw_rx_rsvd_begin = NETMAP_RING_NEXT(rxr, sc->hw_rx_rsvd_begin);
+					if_netmap_rxsetslot(sc->nm_host_ctx, &sc->hw_rx_rsvd_begin, slotindex);
 				} else {
-
-					bi->nm_index = rxr->slot[cur].buf_idx;
+					bi->nm_index = slotindex;
 					
-					m->m_pkthdr.len = m->m_len = rxr->slot[cur].len;
+					m->m_pkthdr.len = m->m_len = pktlen;
 					m->m_pkthdr.rcvif = sc->ifp;
 					m->m_ext.ref_cnt = &bi->refcnt;
-					m_extadd(m, NETMAP_BUF(rxr, rxr->slot[cur].buf_idx),
-						 rxr->nr_buf_size, if_netmap_free, sc, bi, 0, EXT_EXTREF);
+					m_extadd(m, slotbuf, if_netmap_rxbufsize(sc->nm_host_ctx),
+						 if_netmap_free, sc, bi, 0, EXT_EXTREF);
 
 					new_reserved++;
 				}
 
 			}
 
-			cur = NETMAP_RING_NEXT(rxr, cur);
-
 			if (m) {
 				sc->ifp->if_input(sc->ifp, m);
 			}
 		}
 
-		if (n > rxr->avail) {
-			printf("n %u > avail %u\n", n, rxr->avail);
-			return;
-		}
-		rxr->avail -= n;
-		rxr->cur = cur;
-		rxr->reserved += new_reserved;
-
-		if (avail > sc->req.nr_rx_slots) {
-			printf("bogus rxr->avail(2) %u\n", avail);
-			return;
-		}
+		avail -= n;
+		reserved += new_reserved;
 
 		/* Return any netmap buffers freed by the stack to the ring */
 		returned = if_netmap_sweep_trail(sc);
-		if (returned > rxr->reserved) {
-			printf("returned %u > reserved %u\n", returned, rxr->reserved);
-			return;
-		}
-		rxr->reserved -= returned;
+		reserved -= returned;
 
-		rv = if_netmap_rxsync(sc->fd);
+		rv = if_netmap_rxsync(sc->nm_host_ctx, &avail, &cur, &reserved);
 		if (rv == -1)
 			printf("could not sync rx descriptors after receive");
 
@@ -693,8 +616,8 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	ifp->if_start = if_netmap_start;
 
 	/* XXX what values? */
-	IFQ_SET_MAXLEN(&ifp->if_snd, sc->req.nr_tx_slots);
-	ifp->if_snd.ifq_drv_maxlen = sc->req.nr_tx_slots;
+	IFQ_SET_MAXLEN(&ifp->if_snd, if_netmap_txslots(sc->nm_host_ctx));
+	ifp->if_snd.ifq_drv_maxlen = if_netmap_txslots(sc->nm_host_ctx);
 
 	IFQ_SET_READY(&ifp->if_snd);
 
@@ -733,6 +656,8 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 static int
 if_netmap_detach(struct uinet_config_if *cfg)
 {
+	/* XXX deregister, close fd */
+
 	return (0);
 }
 
