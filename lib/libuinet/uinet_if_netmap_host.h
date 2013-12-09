@@ -28,8 +28,6 @@
 
 struct if_netmap_host_context;
 
-void if_netmap_api_check(unsigned int ifnamesiz);
-
 int if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr);
 struct if_netmap_host_context *if_netmap_register_if(int nmfd, const char *ifname, unsigned int qno);
 void if_netmap_deregister_if(struct if_netmap_host_context *ctx);

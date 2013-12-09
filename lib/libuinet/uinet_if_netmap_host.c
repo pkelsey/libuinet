@@ -54,23 +54,6 @@ struct if_netmap_host_context {
 };
 
 
-void
-if_netmap_api_check(unsigned int ifnamesiz)
-{
-	/*
-	 * Check that the value of IFNAMSIZ passed in by the caller matches
-	 * the value seen in this file.  When the caller is in a file
-	 * compiled against the UINET kernel headers, the defition of
-	 * IFNAMSIZ in the caller's environment comes from those kernel
-	 * headers, whereas the defition of IFNAMSIZ in this file comes from
-	 * the host OS headers.  If the values are different, then the
-	 * netmap data structure layout, such as struct nmreq, will not
-	 * correspond between the two environments.
-	 */
-	assert(ifnamesiz == IFNAMSIZ);
-}
-
-
 int
 if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr)
 {

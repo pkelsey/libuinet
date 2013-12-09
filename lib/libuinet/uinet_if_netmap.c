@@ -669,7 +669,6 @@ if_netmap_modevent(module_t mod, int type, void *data)
 
 	switch (type) {
 	case MOD_LOAD:
-		if_netmap_api_check(IFNAMSIZ);
 		while (NULL != (cfg = uinet_config_if_next(cfg))) {
 			if (UINET_IFTYPE_NETMAP == cfg->type)
 				if_netmap_attach(cfg);
