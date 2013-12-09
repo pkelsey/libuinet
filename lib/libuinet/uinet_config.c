@@ -133,6 +133,8 @@ int uinet_config_if(const char *ifname, uinet_iftype_t type, unsigned int cdom, 
 	cfg->cpu = cpu;
 	cfg->cdom = cdom;
 
+	cfg->ifdata = NULL;
+
 	TAILQ_INSERT_TAIL(&if_conf, cfg, link);
 
 	return (0);

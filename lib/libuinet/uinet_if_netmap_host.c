@@ -147,6 +147,8 @@ fail:
 void
 if_netmap_deregister_if(struct if_netmap_host_context *ctx)
 {
+	if_netmap_set_promisc(ctx, 0);
+
 	munmap(ctx->mem, ctx->req.nr_memsize);
 	
 	free(ctx);

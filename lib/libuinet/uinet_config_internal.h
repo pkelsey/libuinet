@@ -45,6 +45,7 @@ struct uinet_config_if {
 	unsigned int queue;
 	int cpu;
 	unsigned int cdom;
+	void *ifdata;
 };
 
 

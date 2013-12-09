@@ -286,6 +286,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	}
 
 	if (0 == if_netmap_setup_interface(sc)) {
+		cfg->ifdata = sc;
 		return (0);
 	}
 
@@ -656,7 +657,15 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 static int
 if_netmap_detach(struct uinet_config_if *cfg)
 {
-	/* XXX deregister, close fd */
+	struct if_netmap_softc *sc = cfg->ifdata;
+
+	if (sc) {
+		if_netmap_deregister_if(sc->nm_host_ctx);
+
+		uhi_close(sc->fd);
+
+		free(sc, M_DEVBUF);
+	}
 
 	return (0);
 }
