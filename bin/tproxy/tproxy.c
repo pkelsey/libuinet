@@ -769,7 +769,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 		sin.sin_addr.s_addr = inc.inc_ie.ie_laddr.s_addr;
 		sin.sin_port = inc.inc_ie.ie_lport;
 		error = uinet_soconnect(so, (struct uinet_sockaddr *)&sin);
-		if (EINPROGRESS != error) {
+		if (error && UINET_EINPROGRESS != error) {
 			char buf[32];
 			printf("Connect to %s:%u failed (%d)\n", uinet_inet_ntoa(inc.inc_ie.ie_laddr, buf, sizeof(buf)), ntohs(inc.inc_ie.ie_lport), error);
 			goto err;
