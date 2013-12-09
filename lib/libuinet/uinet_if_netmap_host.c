@@ -61,7 +61,7 @@ if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr)
 	int error;
 
 	if (-1 == getifaddrs(&ifa)) {
-		printf("getifaddrs failed\n");
+		perror("getifaddrs failed");
 		return (-1);
 	}
 
@@ -283,7 +283,7 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 	strlcpy(ifr.ifr_name, ctx->ifname, sizeof ifr.ifr_name);
 	rv = ioctl(ctx->fd, SIOCGIFCAP, &ifr);
 	if (rv == -1) {
-		printf("get interface capabilities failed");
+		perror("get interface capabilities failed");
 		return (-1);
 	}
 
@@ -296,7 +296,7 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 
 	rv = ioctl(ctx->fd, SIOCSIFCAP, &ifr);
 	if (rv == -1) {
-		printf("set interface capabilities failed");
+		perror("set interface capabilities failed");
 		return (-1);
 	}
 
@@ -315,7 +315,7 @@ if_netmap_set_promisc(struct if_netmap_host_context *ctx, int on)
 	strlcpy(ifr.ifr_name, ctx->ifname, sizeof ifr.ifr_name);
 	rv = ioctl(ctx->fd, SIOCGIFFLAGS, &ifr);
 	if (rv == -1) {
-		printf("get interface flags failed");
+		perror("get interface flags failed");
 		return (-1);
 	}
 
@@ -331,7 +331,7 @@ if_netmap_set_promisc(struct if_netmap_host_context *ctx, int on)
 
 	rv = ioctl(ctx->fd, SIOCSIFFLAGS, &ifr);
 	if (rv == -1) {
-		printf("set interface flags failed");
+		perror("set interface flags failed");
 		return (-1);
 	}
 
