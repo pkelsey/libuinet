@@ -770,7 +770,6 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 	 */
 	if ((ifp->if_flags & IFF_PROMISCINET) && (m->m_flags & M_VLANTAG)) {
 		uint32_t *tdata = &l2ts->inl2t_tags[l2ts->inl2t_cnt];
-		printf("hw decap'd vlan etype=0x%04x\n", etype);
 		*tdata = htonl((ETHERTYPE_VLAN << 16) | m->m_pkthdr.ether_vtag);
 		l2ts->inl2t_cnt++;
 		m->m_flags &= ~M_VLANTAG;
@@ -820,7 +819,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		} 
 
 		if ((vlan_bytes + ETHER_HDR_LEN > m->m_len) ||
-		    (htons(ETHERTYPE_VLAN) == pm->evl_encap_proto)) {
+		    ETHERTYPE_IS_VLAN(ntohs(pm->evl_encap_proto))) {
 #ifdef DIAGNOSTIC
 			if_printf(ifp, "malformed packet or too many VLAN headers\n");
 #endif
