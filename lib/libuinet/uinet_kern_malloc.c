@@ -104,5 +104,10 @@ void *
 uinet_reallocf(void *addr, unsigned long size, struct malloc_type *type,
 	      int flags)
 {
-	return (uhi_reallocf(addr, size));
+	void *mem;
+
+	if ((mem = uhi_realloc(addr, size)) == NULL)
+		uhi_free(addr);
+
+	return (mem);
 }

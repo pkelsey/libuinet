@@ -32,6 +32,7 @@ void	 arc4rand(void *ptr, unsigned int len, int reseed);
 
 
 #include <stdlib.h>
+#include <openssl/rand.h>
 
 
 /* 
@@ -40,9 +41,9 @@ void	 arc4rand(void *ptr, unsigned int len, int reseed);
 void
 arc4rand(void *ptr, unsigned int len, int reseed)
 {
-	if (reseed) {
-		arc4random_stir();
-	}
+	(void)reseed;
 
-	arc4random_buf(ptr, len);
+	/* XXX assuming that we don't have to manually seed this */
+
+	RAND_pseudo_bytes(ptr, len);
 }

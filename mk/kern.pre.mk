@@ -5,6 +5,7 @@
 include ${TOPDIR}/network/uinet/mk/compiler.mk
 
 MACHINE_CPUARCH:= $(shell uname -m)
+HOST_OS:=$(shell uname -s)
 
 # Convert Mac OS X name to FreeBSD one.
 ifeq (${MACHINE_CPUARCH},x86_64)
@@ -45,7 +46,7 @@ endif
 C_DIALECT= -std=c99
 NOSTDINC= -nostdinc
 
-INCLUDES= ${NOSTDINC} ${INCLMAGIC} -I. -I$S
+INCLUDES= -undef -imacros ${IMACROS_FILE} ${NOSTDINC} ${INCLMAGIC} -I. -I$S
 
 # This hack lets us use the OpenBSD altq code without spamming a new
 # include path into contrib'ed source files.
@@ -53,7 +54,7 @@ INCLUDES+= -I$S/contrib/altq
 INCLUDES+= -I$S/contrib/pf
 
 CFLAGS=	${COPTFLAGS} ${C_DIALECT} ${DEBUG} ${CWARNFLAGS}
-KERNEL_CFLAGS= -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
+KERNEL_CFLAGS= -D__FreeBSD__ -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
 ifneq (${COMPILER_TYPE},clang)
 CFLAGS+= -fno-common -finline-limit=${INLINE_LIMIT}
 ifneq (${MACHINE_CPUARCH},mips)
@@ -104,4 +105,16 @@ SYSTEM_LD= @${LD} -Bdynamic -T ${LDSCRIPT} ${LDFLAGS} --no-warn-mismatch \
 SYSTEM_LD_TAIL= @${OBJCOPY} --strip-symbol gcc2_compiled. ${.TARGET} ; \
 	${SIZE} ${.TARGET} ; chmod 755 ${.TARGET}
 SYSTEM_DEP+= ${LDSCRIPT}
+
+
+IMACROS_FILE=filtered_predefined_macros.h
+
+IMACROS_FILTER+= __STDC__ __STDC_HOSTED__
+IMACROS_FILTER+= __APPLE__ __MACH__
+IMACROS_FILTER+= __CYGWIN__ __CYGWIN32__
+IMACROS_FILTER+= __linux __linux__ __gnu__linux__ linux
+IMACROS_FILTER+= _WIN32 _WIN64
+
+SPACE= $(eval) $(eval)
+IMACROS_FILTER_EXPR:= $(subst ${SPACE},|,$(strip ${IMACROS_FILTER}))
 

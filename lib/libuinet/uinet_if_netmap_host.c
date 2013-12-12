@@ -23,25 +23,53 @@
  * SUCH DAMAGE.
  */
 
+
+#if defined(__linux__)
+/*
+ * To expose required facilities in net/if.h.
+ */
+#define _GNU_SOURCE
+#endif /* __linux__ */
+
 #include <assert.h>
+#include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#if defined(__FreeBSD__)
 #include <sys/sockio.h>
+#endif /*  __FreeBSD__ */
+#include <sys/socket.h>
+#include <sys/time.h>
 #include <sys/types.h>
 
+#if defined(__linux__)
+#include <linux/if.h>
+#include <linux/ethtool.h>
+#include <linux/sockios.h>
+#include <linux/version.h>
+#endif /* __linux__ */
+
 #include <net/ethernet.h>
+#if defined(__FreeBSD__)
 #include <net/if.h>
 #include <net/if_dl.h>
+#endif /*  __FreeBSD__ */
 #include <net/netmap.h>
 #include <net/netmap_user.h>
+
+#if defined(__linux__)
+#include <netpacket/packet.h>
+#endif /* __linux__ */
 
 #include <ifaddrs.h>
 
 #include "uinet_if_netmap_host.h"
+#include "uinet_host_interface.h"
 
 
 struct if_netmap_host_context {
@@ -59,6 +87,7 @@ int
 if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr)
 {
 	struct ifaddrs *ifa, *ifa_current;
+	int af;
 	int error;
 
 	if (-1 == getifaddrs(&ifa)) {
@@ -66,17 +95,35 @@ if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr)
 		return (-1);
 	}
 
+#if defined(__FreeBSD__)
+	af = AF_LINK;
+#elif defined(__linux__)			
+	af = AF_PACKET;
+#else
+#error  Add support for obtaining an interface MAC address to this platform.
+#endif /* __FreeBSD__*/
+
 	ifa_current = ifa;
 	error = -1;
 	while (NULL != ifa_current) {
 		if ((0 == strcmp(ifa_current->ifa_name, ifname)) &&
-		    (AF_LINK == ifa_current->ifa_addr->sa_family) &&
+		    (af == ifa_current->ifa_addr->sa_family) &&
 		    (NULL != ifa_current->ifa_data)) {
-			    struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa_current->ifa_addr;
+			unsigned char *addr;
 
-			    memcpy(ethaddr, &sdl->sdl_data[sdl->sdl_nlen], ETHER_ADDR_LEN);
-			    error = 0;
-			    break;
+#if defined(__FreeBSD__)
+			struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa_current->ifa_addr;
+			addr = &sdl->sdl_data[sdl->sdl_nlen];
+#elif defined(__linux__)			
+			struct sockaddr_ll *sll = (struct sockaddr_ll *)ifa_current->ifa_addr;
+			addr = sll->sll_addr;
+#else
+#error  Add support for obtaining an interface MAC address to this platform.
+#endif /* __FreeBSD__*/
+			
+			memcpy(ethaddr, addr, ETHER_ADDR_LEN);
+			error = 0;
+			break;
 		}
 		ifa_current = ifa_current->ifa_next;
 	}
@@ -121,13 +168,13 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 
 	ctx->req.nr_version = NETMAP_API;
 	ctx->req.nr_ringid = NETMAP_NO_TX_POLL | NETMAP_HW_RING | qno;
-	strlcpy(ctx->req.nr_name, ifname, sizeof(ctx->req.nr_name));
+	snprintf(ctx->req.nr_name, sizeof(ctx->req.nr_name), "%s", ifname);
 
 	if (-1 == ioctl(ctx->fd, NIOCREGIF, &ctx->req)) {
 		goto fail;
 	} 
 
-	ctx->mem = mmap(NULL, ctx->req.nr_memsize, PROT_READ | PROT_WRITE, MAP_NOCORE | MAP_SHARED, ctx->fd, 0);
+	ctx->mem = uhi_mmap(NULL, ctx->req.nr_memsize, UHI_PROT_READ | UHI_PROT_WRITE, UHI_MAP_NOCORE | UHI_MAP_SHARED, ctx->fd, 0);
 	if (MAP_FAILED == ctx->mem) {
 		goto fail;
 	}
@@ -278,16 +325,81 @@ if_netmap_txslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t 
 }
 
 
+#if defined(__linux__)
+static int
+if_netmap_ethtool_set_flag(struct if_netmap_host_context *ctx, struct ifreq *ifr, uint32_t flag, int on)
+{
+	struct ethtool_value etv;
+
+	ifr->ifr_data = &etv;
+
+	etv.cmd = ETHTOOL_GFLAGS;
+	if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
+		printf("ethtool get flags failed\n");
+		return (-1);
+	}
+
+	if (etv.data ^ flag) {
+		
+		if (on) 
+			etv.data |= flag;
+		else
+			etv.data &= ~flag;
+
+		etv.cmd = ETHTOOL_SFLAGS;
+		if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
+			if (EOPNOTSUPP != errno) {
+				printf("ethtool set flag 0x%08x failed (%d)\n", flag, errno);
+				return (-1);
+			}
+		}
+	}
+
+	return (0);
+}
+
+
+static int
+if_netmap_ethtool_set_discrete(struct if_netmap_host_context *ctx, struct ifreq *ifr, int getcmd, int setcmd, int on)
+{
+	struct ethtool_value etv;
+
+	ifr->ifr_data = &etv;
+
+	etv.cmd = getcmd;
+	if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
+		printf("ethtool discrete get 0x%08x failed (%d)\n", getcmd, errno);
+		return (-1);
+	}
+
+	if ((!etv.cmd && on) || (etv.cmd && !on)) {
+		etv.data = on;
+
+		etv.cmd = setcmd;
+		if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
+			if (EOPNOTSUPP != errno) {
+				printf("ethtool discrete set 0x%08x failed %d\n", setcmd, errno);
+				return (-1);
+			}
+		}
+	}
+
+	return (0);
+}
+#endif /* __linux__ */
+
+
 int
 if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 {
 	struct ifreq ifr;
-	int rv;
 
 	memset(&ifr, 0, sizeof ifr);
-	strlcpy(ifr.ifr_name, ctx->ifname, sizeof ifr.ifr_name);
-	rv = ioctl(ctx->fd, SIOCGIFCAP, &ifr);
-	if (rv == -1) {
+	snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ctx->ifname);
+
+#if defined(__FreeBSD__)
+	
+	if (-1 == ioctl(ctx->fd, SIOCGIFCAP, &ifr)) {
 		perror("get interface capabilities failed");
 		return (-1);
 	}
@@ -299,11 +411,30 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 	else
 		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
 
-	rv = ioctl(ctx->fd, SIOCSIFCAP, &ifr);
-	if (rv == -1) {
+	if (-1 == ioctl(ctx->fd, SIOCSIFCAP, &ifr)) {
 		perror("set interface capabilities failed");
 		return (-1);
 	}
+#elif defined(__linux__)
+
+	/* XXX 
+	 * Apparently there's no way to disable VLAN offload before 2.6.37?
+	 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
+	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_RXVLAN, on);
+	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_TXVLAN, on);
+#endif
+	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_NTUPLE, on);
+	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_RXHASH, on);
+
+	if_netmap_ethtool_set_discrete(ctx, &ifr, ETHTOOL_GRXCSUM, ETHTOOL_SRXCSUM, on);
+	if_netmap_ethtool_set_discrete(ctx, &ifr, ETHTOOL_GTXCSUM, ETHTOOL_STXCSUM, on);
+	if_netmap_ethtool_set_discrete(ctx, &ifr, ETHTOOL_GTSO, ETHTOOL_STSO, on);
+	if_netmap_ethtool_set_discrete(ctx, &ifr, ETHTOOL_GUFO, ETHTOOL_SUFO, on);
+
+#else
+#error  Add support for modifying interface offload functions on this platform.
+#endif /* __FreeBSD__ */
 
 	return (0);
 }
@@ -313,18 +444,18 @@ int
 if_netmap_set_promisc(struct if_netmap_host_context *ctx, int on)
 {
 	struct ifreq ifr;
-	uint32_t flags;
 	int rv;
 
 	memset(&ifr, 0, sizeof ifr);
-	strlcpy(ifr.ifr_name, ctx->ifname, sizeof ifr.ifr_name);
+	snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ctx->ifname);
 	rv = ioctl(ctx->fd, SIOCGIFFLAGS, &ifr);
 	if (rv == -1) {
 		perror("get interface flags failed");
 		return (-1);
 	}
 
-	flags = (ifr.ifr_flags & 0xffff) | (ifr.ifr_flagshigh << 16);
+#if defined(__FreeBSD__)
+	uint32_t flags = (ifr.ifr_flags & 0xffff) | (ifr.ifr_flagshigh << 16);
 
 	if (on)
 		flags |= IFF_PPROMISC;
@@ -333,6 +464,11 @@ if_netmap_set_promisc(struct if_netmap_host_context *ctx, int on)
 
 	ifr.ifr_flags = flags & 0xffff;
 	ifr.ifr_flagshigh = (flags >> 16) & 0xffff;
+#elif defined(__linux__)
+	ifr.ifr_flags |= IFF_PROMISC;
+#else
+#error  Add support for putting an interface into promiscuous mode on this platform.
+#endif /* __FreeBSD__ */
 
 	rv = ioctl(ctx->fd, SIOCSIFFLAGS, &ifr);
 	if (rv == -1) {

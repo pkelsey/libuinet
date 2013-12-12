@@ -4,16 +4,10 @@
 #
 # Warning flags for compiling the kernel and components of the kernel:
 #
-ifdef NO_FORMAT_EXTENSIONS
-FORMAT_EXTENSIONS=
-else
-FORMAT_EXTENSIONS= -fformat-extensions
-endif
 
 CWARNFLAGS?=	-Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes \
 		-Wmissing-prototypes -Wpointer-arith -Winline -Wcast-qual \
-		-Wno-pointer-sign ${FORMAT_EXTENSIONS} \
-		-Wmissing-include-dirs -fdiagnostics-show-option \
+		-Wno-pointer-sign -Wmissing-include-dirs -fdiagnostics-show-option \
 		${CWARNEXTRA}
 #
 # The following flags are next up for working on:
@@ -115,3 +109,7 @@ endif
 endif
 endif
 endif
+
+
+${IMACROS_FILE}: ${TOPDIR}/network/uinet/mk/kern.pre.mk
+	echo | ${CC} -E -dM - | grep -v -E '${IMACROS_FILTER_EXPR}' > ${IMACROS_FILE}

@@ -2250,6 +2250,8 @@ tcp_log_addrs(struct in_conninfo *inc, struct tcphdr *th, void *ip4hdr,
 	return (tcp_log_addr(inc, th, ip4hdr, ip6hdr));
 }
 
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
 static char *
 tcp_log_addr(struct in_conninfo *inc, struct tcphdr *th, void *ip4hdr,
     const void *ip6hdr)
@@ -2330,3 +2332,5 @@ tcp_log_addr(struct in_conninfo *inc, struct tcphdr *th, void *ip4hdr,
 		panic("%s: string too long", __func__);
 	return (s);
 }
+#pragma GCC diagnostic error "-Wformat"
+#pragma GCC diagnostic error "-Wformat-extra-args"

@@ -18,8 +18,12 @@ INCLUDES= -I${OVERRIDE_INCLUDES_ROOT} -I${API_INCLUDES_ROOT} ${KERNPREINCLUDES}
 INCLUDES+= -I./machine_include
 INCLUDES+= -I./opt
 
-# Include search path for files that only include host OS header
+# Include search path for files that only include host OS headers
 HOST_INCLUDES= -I. -I${API_INCLUDES_ROOT} 
+
+ifdef NETMAP_INCLUDES
+HOST_INCLUDES+= -I${NETMAP_INCLUDES}
+endif
 
 HOST_C= ${CC} -c ${CFLAGS} ${HOST_INCLUDES} ${WERROR} ${PROF} $<
 
@@ -308,8 +312,11 @@ ${PROGRAM}: machine_includes ${MHEADERS} ${MSRCS} ${OBJS}
 ${HOST_OBJS}: %.o: %.c
 	${HOST_C}
 
-${OBJS}: %.o: %.c
+${OBJS}: %.o: %.c ${IMACROS_FILE}
 	${NORMAL_C}
+
+
+.SUFFIXES: .m
 
 .m.c:
 	${AWK} -f $S/tools/makeobjops.awk $< -c
@@ -319,7 +326,7 @@ ${OBJS}: %.o: %.c
 
 .PHONY: clean
 clean:
-	rm -f ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS} ${PROGRAM}
+	rm -f ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS} ${PROGRAM} ${IMACROS_FILE}
 	rm -rf ${MACHINE_INCLUDES_ROOT}
 
 
@@ -327,10 +334,10 @@ clean:
 machine_includes:
 	@rm -rf ${MACHINE_INCLUDES_ROOT}
 	@mkdir -p ${MACHINE_INCLUDES_ROOT}/machine
-	@cp -r $S/${MACHINE_CPUARCH}/include/ ${MACHINE_INCLUDES_ROOT}/machine
+	@cp -r $S/${MACHINE_CPUARCH}/include/* ${MACHINE_INCLUDES_ROOT}/machine
 	@if [ "${X86_INCLUDES}" != "0" ]; then 				\
 		mkdir -p ${MACHINE_INCLUDES_ROOT}/x86;			\
-		cp -r $S/x86/include/ ${MACHINE_INCLUDES_ROOT}/x86;	\
+		cp -r $S/x86/include/* ${MACHINE_INCLUDES_ROOT}/x86;	\
 	fi
 
 

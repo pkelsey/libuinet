@@ -101,7 +101,6 @@ void uhi_init(void) __attribute__((constructor));
 void *uhi_malloc(uint64_t size);
 void *uhi_calloc(uint64_t number, uint64_t size);
 void *uhi_realloc(void *p, uint64_t size);
-void *uhi_reallocf(void *p, uint64_t size);
 void  uhi_free(void *p);
 
 void  uhi_clock_gettime(int id, int64_t *sec, long *nsec);

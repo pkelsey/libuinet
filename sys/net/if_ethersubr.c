@@ -1144,6 +1144,8 @@ discard:
  *
  * since there's no static buffer involved.
  */
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
 char *
 ether_sprintf(const u_char *ap)
 {
@@ -1151,10 +1153,14 @@ ether_sprintf(const u_char *ap)
 	snprintf(etherbuf, sizeof (etherbuf), "%6D", ap, ":");
 	return (etherbuf);
 }
+#pragma GCC diagnostic error "-Wformat"
+#pragma GCC diagnostic error "-Wformat-extra-args"
 
 /*
  * Perform common duties while attaching to interface list
  */
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
 void
 ether_ifattach(struct ifnet *ifp, const u_int8_t *lla)
 {
@@ -1194,6 +1200,8 @@ ether_ifattach(struct ifnet *ifp, const u_int8_t *lla)
 	if (i != ifp->if_addrlen)
 		if_printf(ifp, "Ethernet address: %6D\n", lla, ":");
 }
+#pragma GCC diagnostic error "-Wformat"
+#pragma GCC diagnostic error "-Wformat-extra-args"
 
 /*
  * Perform common duties while detaching an Ethernet interface

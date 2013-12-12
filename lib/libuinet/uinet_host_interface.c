@@ -23,21 +23,48 @@
  * SUCH DAMAGE.
  */
 
+#if defined(__linux__)
+/*
+ * To expose:
+ *     CPU_SET()
+ *     CPU_ZERO()
+ *
+ *     pthread_setaffinity_np()
+ *     pthread_setname_np()
+ *
+ */
+#define _GNU_SOURCE
+#endif /* __linux__ */
+
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#if defined(__FreeBSD__)
 #include <pthread_np.h>
+#endif /* __FreeBSD__ */
+#if defined(__linux__)
+#include <sched.h>
+#endif /* __linux__ */
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 
+#if defined(__FreeBSD__)
 #include <sys/cpuset.h>
+#endif /* __FreeBSD__ */
+
 #include <sys/mman.h>
 
 #include "uinet_host_interface.h"
+
+
+#if defined(__linux__)
+typedef cpu_set_t cpuset_t;
+#endif /* __linux__ */
 
 
 #if defined(UINET_PROFILE)
@@ -94,13 +121,6 @@ void *
 uhi_realloc(void *p, uint64_t size)
 {
 	return (realloc(p, size));
-}
-
-
-void *
-uhi_reallocf(void *p, uint64_t size)
-{
-	return (reallocf(p, size));
 }
 
 
@@ -204,7 +224,9 @@ uhi_mmap(void *addr, uint64_t len, int prot, int flags, int fd, uint64_t offset)
 	if ((flags & UHI_MAP_SHARED) == UHI_MAP_SHARED)   host_flags |= MAP_SHARED;
 	if ((flags & UHI_MAP_PRIVATE) == UHI_MAP_PRIVATE) host_flags |= MAP_PRIVATE;
 	if ((flags & UHI_MAP_ANON) == UHI_MAP_ANON)       host_flags |= MAP_ANON;
+#if defined(__FreeBSD__)
 	if ((flags & UHI_MAP_NOCORE) == UHI_MAP_NOCORE)   host_flags |= MAP_NOCORE;
+#endif
 
 	return (mmap(addr, len, host_prot, host_flags, fd, offset));
 }
@@ -271,7 +293,11 @@ pthread_start_routine(void *arg)
 		*tsa->host_thread_id = (uhi_thread_t)pthread_self();
 	}
 
+#if defined(__FreeBSD__)
 	pthread_set_name_np(pthread_self(), tsa->name);
+#elif defined(__linux__)
+	pthread_setname_np(pthread_self(), tsa->name);
+#endif
 
 	tsa->start_routine(tsa->start_routine_arg);
 	tsa->end_routine(tsa);

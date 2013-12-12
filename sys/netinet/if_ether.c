@@ -428,6 +428,8 @@ done:
  * Common length and type checks are done here,
  * then the protocol-specific routine is called.
  */
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
 static void
 arpintr(struct mbuf *m)
 {
@@ -472,6 +474,8 @@ arpintr(struct mbuf *m)
 	}
 	m_freem(m);
 }
+#pragma GCC diagnostic error "-Wformat"
+#pragma GCC diagnostic error "-Wformat-extra-args"
 
 #ifdef INET
 /*
@@ -503,6 +507,8 @@ SYSCTL_INT(_net_link_ether_inet, OID_AUTO, log_arp_permanent_modify, CTLFLAG_RW,
         "log arp replies from MACs different than the one in the permanent arp entry");
 
 
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
 static void
 in_arpinput(struct mbuf *m)
 {
@@ -874,6 +880,8 @@ reply:
 drop:
 	m_freem(m);
 }
+#pragma GCC diagnostic error "-Wformat"
+#pragma GCC diagnostic error "-Wformat-extra-args"
 #endif
 
 void

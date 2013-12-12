@@ -1403,6 +1403,8 @@ m_getptr(struct mbuf *m, int loc, int *off)
 	return (NULL);
 }
 
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
 void
 m_print(const struct mbuf *m, int maxlen)
 {
@@ -1424,12 +1426,14 @@ m_print(const struct mbuf *m, int maxlen)
 		pdata = m2->m_len;
 		if (maxlen != -1 && pdata > maxlen)
 			pdata = maxlen;
+
 		printf("mbuf: %p len: %d, next: %p, %b%s", m2, m2->m_len,
 		    m2->m_next, m2->m_flags, "\20\20freelist\17skipfw"
 		    "\11proto5\10proto4\7proto3\6proto2\5proto1\4rdonly"
 		    "\3eor\2pkthdr\1ext", pdata ? "" : "\n");
 		if (pdata)
 			printf(", %*D\n", pdata, (u_char *)m2->m_data, "-");
+
 		if (len != -1)
 			len -= m2->m_len;
 		m2 = m2->m_next;
@@ -1438,6 +1442,8 @@ m_print(const struct mbuf *m, int maxlen)
 		printf("%d bytes unaccounted for.\n", len);
 	return;
 }
+#pragma GCC diagnostic error "-Wformat"
+#pragma GCC diagnostic error "-Wformat-extra-args"
 
 u_int
 m_fixhdr(struct mbuf *m0)
