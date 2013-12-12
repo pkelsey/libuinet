@@ -1858,14 +1858,15 @@ in_pcbhash_promisc(uint32_t laddr, uint32_t faddr, uint16_t lport, uint16_t fpor
 		   uint16_t fibnum, struct in_l2info *l2i, uint32_t mask)
 {
 	uint32_t hash_input[4] = { laddr, faddr, (lport << 16) | fport, fibnum };
+	uint32_t hash_input_masks[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
 	uint32_t hash;
 
-	hash = in_promisc_hash32(hash_input, 0xffffffff,
+	hash = in_promisc_hash32(hash_input, hash_input_masks,
 				 sizeof(hash_input)/sizeof(hash_input[0]), 0);
 
 	if (l2i && l2i->inl2i_tagstack.inl2t_cnt) {
 		hash = in_promisc_hash32(l2i->inl2i_tagstack.inl2t_tags, 
-					 l2i->inl2i_tagstack.inl2t_mask,
+					 l2i->inl2i_tagstack.inl2t_masks,
 					 l2i->inl2i_tagstack.inl2t_cnt,
 					 hash);
 	}
@@ -1878,16 +1879,21 @@ static uint16_t
 in_pcbporthash_promisc(uint16_t lport, uint16_t fibnum, struct in_l2info *l2i,
 		       uint16_t mask)
 {
+	uint32_t hash_input[2] = { lport, fibnum };
+	uint32_t hash_input_masks[2] = { 0xffffffff, 0xffffffff };
 	uint32_t hash;
-	uint32_t i;
 
-	hash = ntohs(lport) ^ fibnum;
-	i = l2i->inl2i_tagstack.inl2t_cnt;
-	while (i--) {
-		hash ^=
-		    ntohl(l2i->inl2i_tagstack.inl2t_tags[i]) &
-		    ntohl(l2i->inl2i_tagstack.inl2t_mask);
+
+	hash = in_promisc_hash32(hash_input, hash_input_masks,
+				 sizeof(hash_input)/sizeof(hash_input[0]), 0);
+
+	if (l2i && l2i->inl2i_tagstack.inl2t_cnt) {
+		hash = in_promisc_hash32(l2i->inl2i_tagstack.inl2t_tags, 
+					 l2i->inl2i_tagstack.inl2t_masks,
+					 l2i->inl2i_tagstack.inl2t_cnt,
+					 hash);
 	}
+
 	hash ^= hash >> 16;
 	
 	return (hash & mask);

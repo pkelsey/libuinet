@@ -45,11 +45,13 @@ int   uinet_initialize_thread(void);
 int   uinet_interface_add_alias(const char *name, const char *addr, const char *braddr, const char *mask);
 int   uinet_interface_create(const char *name);
 int   uinet_interface_up(const char *name, unsigned int promisc);
+int   uinet_l2tagstack_cmp(const struct uinet_in_l2tagstack *ts1, const struct uinet_in_l2tagstack *ts2);
+uint32_t uinet_l2tagstack_hash(const struct uinet_in_l2tagstack *ts);
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
 int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
 int   uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
 int   uinet_setl2info2(struct uinet_socket *so, uint8_t *local_addr, uint8_t *foreign_addr,
-		       uint32_t *tags, uint32_t tagmask, int tagcnt);
+		       uint16_t flags, struct uinet_in_l2tagstack *tagstack);
 int   uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struct uinet_socket **aso);
 int   uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam);
 int   uinet_soclose(struct uinet_socket *so);

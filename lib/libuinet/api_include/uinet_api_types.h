@@ -237,15 +237,20 @@ struct uinet_uio {
 #define UINET_IN_L2INFO_MAX_TAGS	16
 #define UINET_IN_L2INFO_ADDR_MAX	6
 
+struct uinet_in_l2tagstack {
+	uint16_t inl2t_cnt;
+	uint32_t inl2t_masks[UINET_IN_L2INFO_MAX_TAGS];
+	uint32_t inl2t_tags[UINET_IN_L2INFO_MAX_TAGS]; /* in network byte order */
+};
+
+
+#define UINET_INL2I_TAG_ANY		0x01
+
 struct uinet_in_l2info {
 	uint8_t inl2i_local_addr[UINET_IN_L2INFO_ADDR_MAX];
 	uint8_t inl2i_foreign_addr[UINET_IN_L2INFO_ADDR_MAX];
-	int inl2i_cnt;			/* number of tags stored in
-					 * inl2i_tags */
-	uint32_t inl2i_mask;		/* per-element mask, in network byte
-					 * order, to be applied during
-					 * hashing and comparing */
-	uint32_t inl2i_tags[UINET_IN_L2INFO_MAX_TAGS]; /* in network byte order */
+	uint16_t inl2i_flags;
+	struct uinet_in_l2tagstack inl2i_tagstack;
 };
 
 

@@ -109,7 +109,7 @@ in_promisc_l2info_free(struct in_l2info *l2info)
 
 
 void
-in_promisc_l2info_copy(struct in_l2info *dst, struct in_l2info *src)
+in_promisc_l2info_copy(struct in_l2info *dst, const struct in_l2info *src)
 {
 	memcpy(dst->inl2i_local_addr, src->inl2i_local_addr,
 	       IN_L2INFO_ADDR_MAX);
@@ -123,31 +123,68 @@ in_promisc_l2info_copy(struct in_l2info *dst, struct in_l2info *src)
 
 
 void
-in_promisc_l2tagstack_copy(struct in_l2tagstack *dst, struct in_l2tagstack *src)
+in_promisc_l2tagstack_copy(struct in_l2tagstack *dst, const struct in_l2tagstack *src)
 {
 	memcpy(dst, src, sizeof(*dst));
 }
 
 
 int
-in_promisc_tagcmp(struct in_l2tagstack *l2ts1, struct in_l2tagstack *l2ts2)
+in_promisc_tagcmp(const struct in_l2tagstack *l2ts1, const struct in_l2tagstack *l2ts2)
 {
 	uint32_t tagcnt1, tagcnt2;
-	uint32_t i;
+	uint32_t i1, i2;
 
 	tagcnt1 = l2ts1 ? l2ts1->inl2t_cnt : 0;
 	tagcnt2 = l2ts2 ? l2ts2->inl2t_cnt : 0;
 
-	if (tagcnt1 != tagcnt2)
-		return (1);
+	/* Fast compare for empty tag stacks */
+	if (tagcnt1 + tagcnt2 == 0)
+		return (0);
 
-	for (i = 0; i < tagcnt1; i++) {
-		if ((l2ts1->inl2t_tags[i] & l2ts1->inl2t_mask) !=
-		    (l2ts2->inl2t_tags[i] & l2ts2->inl2t_mask))
+	/*
+	 * Compare tag stacks without considering zero-masked tags.
+	 */
+
+	i1 = 0;
+	i2 = 0;
+	while (1) {
+		/* skip zero-masked tags */
+		while (tagcnt1 && l2ts1->inl2t_masks[i1]) {
+			tagcnt1--;
+			i1++;
+		}
+
+		while (tagcnt2 && l2ts2->inl2t_masks[i2]) {
+			tagcnt2--;
+			i2++;
+		}
+
+		if (!tagcnt1 || !tagcnt2) {
+			/* Ran out of tags in one or both stacks. */
+
+			if (!tagcnt1 && !tagcnt2) {
+				/*
+				 * Ran out of tags in both stacks without
+				 * any miscompares.
+				 */
+				return (0);
+			}
+
+			/*
+			 * Ran out of tags in one stack and the other stack
+			 * has at least one more tag with non-zero mask.
+			 */
 			return (1);
-	}
+		}
+		
+		if ((l2ts1->inl2t_tags[i1] & l2ts1->inl2t_masks[i1]) !=
+		    (l2ts2->inl2t_tags[i2] & l2ts2->inl2t_masks[i2]))
+			return (1);
 
-	return (0);
+		tagcnt1--; i1++;
+		tagcnt2--; i2++;
+	}
 }
 
 
@@ -679,9 +716,12 @@ FORCE_INLINE uint32_t fmix32 ( uint32_t h )
 /*
  * This is MurmurHash3_x86_32 with 32-bit aligned input that is a multiple
  * of 32-bits in length, so there are no unaligned accesses, nor is there
- * any need for a tail computation.
+ * any need for a tail computation.  Note that all 32-bit blocks with a
+ * corresponding mask of zero are ignored in the computation, including that
+ * the effective block count incorporated into the hash does not include
+ * them.
  */
-uint32_t in_promisc_hash32 ( const uint32_t * key, uint32_t mask, int nblocks, uint32_t seed )
+uint32_t in_promisc_hash32 ( const uint32_t * key, const uint32_t *masks, int nblocks, uint32_t seed )
 {
   uint32_t h1 = seed;
 
@@ -692,18 +732,23 @@ uint32_t in_promisc_hash32 ( const uint32_t * key, uint32_t mask, int nblocks, u
   // body
 
   const uint32_t * blocks = key + nblocks;
+  const uint32_t * block_masks = masks + nblocks;
 
   for(int i = -nblocks; i; i++)
   {
-    uint32_t k1 = blocks[i] & mask;
+    if (block_masks[i]) {
+      uint32_t k1 = blocks[i] & block_masks[i];
 
-    k1 *= c1;
-    k1 = ROTL32(k1,15);
-    k1 *= c2;
+      k1 *= c1;
+      k1 = ROTL32(k1,15);
+      k1 *= c2;
     
-    h1 ^= k1;
-    h1 = ROTL32(h1,13); 
-    h1 = h1*5+0xe6546b64;
+      h1 ^= k1;
+      h1 = ROTL32(h1,13); 
+      h1 = h1*5+0xe6546b64;
+    } else {
+      nblocks--;
+    }
   }
 
   //----------

@@ -471,23 +471,20 @@ static uint32_t
 syncache_hash_promisc(struct in_conninfo *inc, uint16_t fib,
 		      struct in_l2info *l2i, uint32_t mask)
 {
+	uint32_t hash_input[2] = { inc->inc_laddr.s_addr, fib };
+	uint32_t hash_input_masks[2] = { 0xffffffff, 0xffffffff };
 	uint32_t hash;
-	uint32_t i;
 
 	hash = SYNCACHE_HASH(inc, mask);
 
-	if (l2i) {
-		hash ^=
-		    inc->inc_laddr.s_addr ^
-		    (inc->inc_laddr.s_addr >> 16) ^
-		    fib;
+	hash = in_promisc_hash32(hash_input, hash_input_masks,
+				 sizeof(hash_input)/sizeof(hash_input[0]), hash);
 
-		i = l2i->inl2i_tagstack.inl2t_cnt;
-		while (i--) {
-			hash ^=
-			    l2i->inl2i_tagstack.inl2t_tags[i] &
-			    l2i->inl2i_tagstack.inl2t_mask;
-		}
+	if (l2i && l2i->inl2i_tagstack.inl2t_cnt) {
+		hash = in_promisc_hash32(l2i->inl2i_tagstack.inl2t_tags, 
+					 l2i->inl2i_tagstack.inl2t_masks,
+					 l2i->inl2i_tagstack.inl2t_cnt,
+					 hash);
 	}
 
 	return (hash & mask);
@@ -499,23 +496,21 @@ static uint32_t
 syncache_hash_promisc6(struct in_conninfo *inc, uint16_t fib,
 		       struct in_l2info *l2i, uint32_t mask)
 {
+	uint32_t hash_input[3] = { inc->inc6_laddr.s6_addr32[0], inc->inc6_laddr.s6_addr32[3], fib };
+	uint32_t hash_input_masks[3] = { 0xffffffff, 0xffffffff, 0xffffffff };
 	uint32_t hash;
 	uint32_t i;
 
 	hash = SYNCACHE_HASH6(inc, mask);
 
-	if (l2i) {
-		hash ^=
-		    inc->inc6_laddr.s6_addr32[0] ^
-		    inc->inc6_laddr.s6_addr32[3] ^
-		    fib;
+	hash = in_promisc_hash32(hash_input, hash_input_masks,
+				 sizeof(hash_input)/sizeof(hash_input[0]), hash);
 
-		i = l2i->inl2i_tagstack.inl2t_cnt;
-		while (i--) {
-			hash ^=
-			    l2i->inl2i_tagstack.inl2t_tags[i] &
-			    l2i->inl2i_tagstack.inl2t_mask;
-		}
+	if (l2i && l2i->inl2i_tagstack.inl2t_cnt) {
+		hash = in_promisc_hash32(l2i->inl2i_tagstack.inl2t_tags, 
+					 l2i->inl2i_tagstack.inl2t_masks,
+					 l2i->inl2i_tagstack.inl2t_cnt,
+					 hash);
 	}
 
 	return (hash & mask);

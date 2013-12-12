@@ -735,7 +735,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 
 		uinet_synfilter_getl2info(cookie, &l2i);
 		if ((error = uinet_setl2info2(so, l2i.inl2i_foreign_addr, l2i.inl2i_local_addr,
-					      l2i.inl2i_tags, l2i.inl2i_mask, l2i.inl2i_cnt))) {
+					      l2i.inl2i_flags, &l2i.inl2i_tagstack))) {
 			printf("Failed to set l2info on socket (%d)\n", error);
 			goto err;
 		}
@@ -826,7 +826,7 @@ create_proxy(unsigned int client_fib, unsigned int server_fib,
 	
 	uinet_soupcall_set(listener, UINET_SO_RCV, listener_upcall, proxy);
 	
-	if ((error = uinet_setl2info2(listener, NULL, NULL, NULL, 0, -1))) {
+	if ((error = uinet_setl2info2(listener, NULL, NULL, UINET_INL2I_TAG_ANY, NULL))) {
 		printf("Listen socket L2 info set failed (%d)\n", error);
 		goto fail;
 	}

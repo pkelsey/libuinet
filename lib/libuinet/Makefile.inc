@@ -3,3 +3,4 @@
 #
 
 LDADD+= -lpthread
+LDADD+= -lssl

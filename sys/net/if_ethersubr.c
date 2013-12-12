@@ -760,7 +760,6 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 
 	memcpy(l2info->inl2i_local_addr, eh->ether_dhost, ETHER_ADDR_LEN);
 	memcpy(l2info->inl2i_foreign_addr, eh->ether_shost, ETHER_ADDR_LEN);
-	l2ts->inl2t_mask = htonl(0x00000fff);
 	l2ts->inl2t_cnt = 0;
 
 	/* 
@@ -771,6 +770,13 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 	if ((ifp->if_flags & IFF_PROMISCINET) && (m->m_flags & M_VLANTAG)) {
 		uint32_t *tdata = &l2ts->inl2t_tags[l2ts->inl2t_cnt];
 		*tdata = htonl((ETHERTYPE_VLAN << 16) | m->m_pkthdr.ether_vtag);
+
+		/*
+		 * Assign a zero mask to VLAN 0 tags so such
+		 * priority-only tags are not considered part of the
+		 * tag stack during comparison.
+		 */
+		l2ts->inl2t_masks[l2ts->inl2t_cnt] = (m->m_pkthdr.ether_vtag & 0xfff) ? htonl(0x00000fff) : 0;
 		l2ts->inl2t_cnt++;
 		m->m_flags &= ~M_VLANTAG;
 	}
@@ -785,6 +791,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		int needed;
 		int td_avail;
 		int vlan_bytes;
+		uint32_t *mask;
 		struct ether_vlan_header *evl;
 		struct ether_vlan_encap {
 			uint16_t evl_encap_proto;
@@ -810,10 +817,18 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		pm = (struct ether_vlan_encap *)&evl->evl_encap_proto;
 		td_avail = (IN_L2INFO_MAX_TAGS - l2ts->inl2t_cnt) * ETHER_VLAN_ENCAP_LEN;
 		vlan_bytes = 0;
+		mask = &l2ts->inl2t_masks[l2ts->inl2t_cnt];
 		while ((vlan_bytes + ETHER_VLAN_ENCAP_LEN + ETHER_HDR_LEN <= m->m_len) &&
 		       ETHERTYPE_IS_VLAN(ntohs(pm->evl_encap_proto)) &&
 		       (vlan_bytes + ETHER_VLAN_ENCAP_LEN <= td_avail)) {
 
+			/*
+			 * Assign a zero mask to VLAN 0 tags so such
+			 * priority-only tags are not considered part of the
+			 * tag stack during comparison.
+			 */
+			*mask = pm->evl_tag & htonl(0x00000fff) ? htonl(0x00000fff) : 0;
+			mask++;
 			pm++;
 			vlan_bytes += ETHER_VLAN_ENCAP_LEN;
 		} 
