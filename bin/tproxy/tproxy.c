@@ -939,11 +939,11 @@ int main (int argc, char **argv)
 	uinet_init(1, 128*1024, 0);
 
 	for (i = 0; i < num_ifs; i++) {
-		error = uinet_ifcreate(ifnames[i], UINET_IFTYPE_NETMAP, i + 1, 0);
+		error = uinet_ifcreate(UINET_IFTYPE_NETMAP, ifnames[i], ifnames[i], i + 1, 0, NULL);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", ifnames[i], error);
 		} else {
-			error = uinet_interface_up(ifnames[i], 0, 1);
+			error = uinet_interface_up(ifnames[i], 1);
 			if (0 != error) {
 				printf("Failed to bring up interface %s (%d)\n", ifnames[i], error);
 			}
@@ -967,7 +967,7 @@ int main (int argc, char **argv)
 	}
 
 	for (i = 0; i < num_ifs; i++) {
-		uinet_ifdestroy(ifnames[i]);
+		uinet_ifdestroy_byname(ifnames[i]);
 	}
 
 	return (0);

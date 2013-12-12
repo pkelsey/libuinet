@@ -23,6 +23,7 @@
  * SUCH DAMAGE.
  */
 
+#include <sys/ctype.h>
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -100,7 +101,9 @@ struct if_netmap_softc {
 	struct ifnet *ifp;
 	const struct uinet_config_if *cfg;
 	uint8_t addr[ETHER_ADDR_LEN];
+	int isvale;
 	int fd;
+	char host_ifname[IF_NAMESIZE];
 	uint16_t queue;
 
 	uint32_t hw_rx_rsvd_begin;
@@ -115,6 +118,10 @@ struct if_netmap_softc {
 
 
 static int if_netmap_setup_interface(struct if_netmap_softc *sc);
+
+
+
+static unsigned int interface_count;
 
 
 
@@ -234,6 +241,72 @@ if_netmap_bufinfo_free(struct if_netmap_bufinfo_pool *p, struct if_netmap_bufinf
 }
 
 
+static int
+if_netmap_process_configstr(struct if_netmap_softc *sc)
+{
+	char *configstr = sc->cfg->configstr;
+	int error = 0;
+	char *last_colon;
+	char *p;
+	int namelen;
+
+	if (0 == strncmp(configstr, "vale", 4)) {
+		sc->isvale = 1;
+		sc->queue = 0;
+
+		if (strlen(configstr) > (sizeof(sc->host_ifname) - 1)) {
+			error = ENAMETOOLONG;
+			goto out;
+		}
+		strcpy(sc->host_ifname, configstr);
+	} else {
+		sc->isvale = 0;
+
+		last_colon = strchr(configstr, ':');
+		if (last_colon) {
+			if (last_colon == configstr) {
+				/* no name */
+				error = EINVAL;
+				goto out;
+			}
+
+			p = last_colon + 1;
+			if ('\0' == *p) {
+				/* colon at the end */
+				error = EINVAL;
+				goto out;
+			}
+
+			while (isdigit(*p) && ('\0' != *p))
+				p++;
+			
+			if ('\0' != *p) {
+				/* non-numeric chars after colon */
+				error = EINVAL;
+				goto out;
+			}
+
+			sc->queue = strtoul(last_colon + 1, NULL, 10);
+			
+			namelen = last_colon - configstr;
+			if (namelen > (sizeof(sc->host_ifname) - 1)) {
+				error = ENAMETOOLONG;
+				goto out;
+			}
+			
+			memcpy(sc->host_ifname, configstr, namelen);
+			sc->host_ifname[namelen] = '\0';
+		} else {
+			sc->queue = 0;
+			strlcpy(sc->host_ifname, configstr, sizeof(sc->host_ifname));
+		}
+	}
+
+out:
+	return (error);
+}
+
+
 int
 if_netmap_attach(struct uinet_config_if *cfg)
 {
@@ -242,8 +315,16 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	int error = 0;
 	uint32_t pool_size;
 
+	
+	if (NULL == cfg->configstr) {
+		error = EINVAL;
+		goto fail;
+	}
 
-	printf("ifname is %s\n", cfg->spec);
+	printf("configstr is %s\n", cfg->configstr);
+
+	snprintf(cfg->name, sizeof(cfg->name), "netmap%u", interface_count);
+	interface_count++;
 
 	sc = malloc(sizeof(struct if_netmap_softc), M_DEVBUF, M_WAITOK);
 	if (NULL == sc) {
@@ -255,6 +336,11 @@ if_netmap_attach(struct uinet_config_if *cfg)
 
 	sc->cfg = cfg;
 
+	error = if_netmap_process_configstr(sc);
+	if (0 != error) {
+		goto fail;
+	}
+
 	fd = uhi_open("/dev/netmap", UHI_O_RDWR);
 	if (fd < 0) {
 		printf("/dev/netmap open failed");
@@ -265,7 +351,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	sc->fd = fd;
 
 
-	sc->nm_host_ctx = if_netmap_register_if(sc->fd, sc->cfg->name, sc->cfg->queue);
+	sc->nm_host_ctx = if_netmap_register_if(sc->fd, sc->host_ifname, sc->isvale, sc->queue);
 	if (NULL == sc->nm_host_ctx) {
 		printf("Failed to register netmap interface\n");
 		error = ENXIO;
@@ -286,10 +372,12 @@ if_netmap_attach(struct uinet_config_if *cfg)
 		goto fail;
 	}
 
-	if (0 != if_netmap_get_ifaddr(sc->cfg->name, sc->addr)) {
-		printf("failed to find interface address\n");
-		error = ENXIO;
-		goto fail;
+	if (!sc->isvale) {
+		if (0 != if_netmap_get_ifaddr(sc->host_ifname, sc->addr)) {
+			printf("failed to find interface address\n");
+			error = ENXIO;
+			goto fail;
+		}
 	}
 
 	if (0 != if_netmap_setup_interface(sc)) {
@@ -621,15 +709,13 @@ static int
 if_netmap_setup_interface(struct if_netmap_softc *sc)
 {
 	struct ifnet *ifp;
-	char basename[IF_NAMESIZE];
 
 	ifp = sc->ifp = if_alloc(IFT_ETHER);
 
 	ifp->if_init =  if_netmap_init;
 	ifp->if_softc = sc;
 
-	snprintf(basename, IF_NAMESIZE, "%s%u:", sc->cfg->basename, sc->cfg->unit);
-	if_initname(ifp, basename, sc->cfg->queue);
+	if_initname(ifp, sc->cfg->name, IF_DUNIT_NONE);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = if_netmap_ioctl;
 	ifp->if_start = if_netmap_start;
@@ -649,7 +735,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
 
 	if (kthread_add(if_netmap_send, sc, NULL, &sc->tx_thread, 0, 0, "nm_tx: %s", ifp->if_xname)) {
-		printf("Could not start transmit thread for %s\n", sc->cfg->spec);
+		printf("Could not start transmit thread for %s (%s)\n", ifp->if_xname, sc->host_ifname);
 		ether_ifdetach(ifp);
 		if_free(ifp);
 		return (1);
@@ -657,7 +743,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 
 
 	if (kthread_add(if_netmap_receive, sc, NULL, &sc->rx_thread, 0, 0, "nm_rx: %s", ifp->if_xname)) {
-		printf("Could not start receive thread for %s\n", sc->cfg->spec);
+		printf("Could not start receive thread for %s (%s)\n", ifp->if_xname, sc->host_ifname);
 		ether_ifdetach(ifp);
 		if_free(ifp);
 		return (1);
@@ -678,6 +764,8 @@ if_netmap_detach(struct uinet_config_if *cfg)
 	struct if_netmap_softc *sc = cfg->ifdata;
 
 	if (sc) {
+		/* XXX ether_ifdetach, stop threads */
+
 		if_netmap_deregister_if(sc->nm_host_ctx);
 		
 		if_netmap_bufinfo_pool_destroy(&sc->rx_bufinfo);

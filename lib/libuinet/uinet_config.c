@@ -37,13 +37,17 @@
 static TAILQ_HEAD(config_head, uinet_config_if) if_conf = TAILQ_HEAD_INITIALIZER(if_conf);
 
 
-static struct uinet_config_if *
+struct uinet_config_if *
 uinet_iffind_byname(const char *ifname)
 {
 	struct uinet_config_if *cfg;
 
 	TAILQ_FOREACH(cfg, &if_conf, link) {
-		if (0 == strcmp(ifname, cfg->spec)) {
+		if (0 == strcmp(ifname, cfg->name)) {
+			return (cfg);
+		}
+
+		if (('\0' != cfg->alias[0]) && (0 == strcmp(ifname, cfg->alias))) {
 			return (cfg);
 		}
 	}
@@ -67,29 +71,25 @@ uinet_iffind_bycdom(unsigned int cdom)
 }
 
 
-int uinet_ifcreate(const char *ifname, uinet_iftype_t type, unsigned int cdom, int cpu)
+int
+uinet_ifcreate(uinet_iftype_t type, const char *configstr, const char *alias,
+	       unsigned int cdom, int cpu, uinet_ifcookie_t *cookie)
 {
-	const char *colon, *p, *p_orig;
-	unsigned int queue;
-	unsigned int unit;
 	struct uinet_config_if *cfg = NULL;
-	int copylen;
+	int alias_len;
 	int error = 0;
 
-	
-	if (NULL == ifname) {
-		error = EINVAL;
-		goto out;
-	}
-
-	if (strlen(ifname) >= IF_NAMESIZE) {
-		error = EINVAL;
-		goto out;
-	}
-
-	if (NULL != uinet_iffind_byname(ifname)) {
-		error = EEXIST;
-		goto out;
+	if (alias) {
+		alias_len = strlen(alias);
+		if (alias_len >= IF_NAMESIZE) {
+			error = EINVAL;
+			goto out;
+		}
+		
+		if ((alias_len > 0) && (NULL != uinet_iffind_byname(alias))) {
+			error = EEXIST;
+			goto out;
+		}
 	}
 
 	/*
@@ -102,64 +102,6 @@ int uinet_ifcreate(const char *ifname, uinet_iftype_t type, unsigned int cdom, i
 		goto out;
 	}
 
-	/* parse ifname into base, unit, and queue */
-	colon = strchr(ifname, ':');
-	if (colon) {
-		if (colon == ifname) {
-			/* no base or unit */
-			error = EINVAL;
-			goto out;
-		}
-		
-		p = colon + 1;
-		if ('\0' == *p) {
-			/* colon at the end */
-			error = EINVAL;
-			goto out;
-		}
-
-		while (isdigit(*p) && ('\0' != *p))
-			p++;
-
-		if ('\0' != *p) {
-			/* non-numeric chars after colon */
-			error = EINVAL;
-			goto out;
-		}
-
-		p = colon + 1;
-		queue = strtoul(p, NULL, 10);
-		
-		p = colon - 1;
-	} else {
-		queue = 0;
-		p = ifname + strlen(ifname) - 1;
-	}
-
-	/* p now points to what should be the last digit of the unit
-	 * number.
-	 */
-
-	p_orig = p;
-	while (isdigit(*p) && p != ifname)
-		p--;
-	
-	if (p == p_orig) {
-		/* no unit number */
-		error = EINVAL;
-		goto out;
-	}
-
-	if (p == ifname) {
-		/* it's all numeric up to the colon */
-		error = EINVAL;
-		goto out;
-	}
-
-	/* p now points to last char of base name */
-
-	unit = strtoul(p + 1, NULL, 10);
-
 	cfg = malloc(sizeof(struct uinet_config_if), M_DEVBUF, M_WAITOK);
 	if (NULL == cfg) {
 		error = ENOMEM;
@@ -168,24 +110,22 @@ int uinet_ifcreate(const char *ifname, uinet_iftype_t type, unsigned int cdom, i
 
 	cfg->type = type;
 
-	/* copies guaranteed not to overflow the destinations due to above
-	 * checks against IF_NAMESIZE.
-	 */
-	strcpy(cfg->spec, ifname);
+	if (configstr) {
+		cfg->configstr = strdup(configstr, M_DEVBUF);
+	} else {
+		cfg->configstr = NULL;
+	}
 
-	copylen = p_orig - ifname + 1;
-	memcpy(cfg->name, ifname, copylen);
-	cfg->name[copylen] = '\0';
-
-	copylen = p - ifname + 1;
-	memcpy(cfg->basename, ifname, copylen);
-	cfg->basename[copylen] = '\0';
-
-	cfg->unit = unit;
-	cfg->queue = queue;
+	if (alias) {
+		/* copy guaranteed not to overflow the destinations due to above
+		 * checks against IF_NAMESIZE.
+		 */
+		strcpy(cfg->alias, alias);
+	} else {
+		cfg->alias[0] = '\0';
+	}
 	cfg->cpu = cpu;
 	cfg->cdom = cdom;
-
 	cfg->ifdata = NULL;
 
 	switch (cfg->type) {
@@ -193,42 +133,87 @@ int uinet_ifcreate(const char *ifname, uinet_iftype_t type, unsigned int cdom, i
 		error = if_netmap_attach(cfg);
 		break;
 	default:
-		printf("Error attaching interface %s: unknown interface type %d\n", cfg->spec, cfg->type);
+		printf("Error attaching interface with config %s: unknown interface type %d\n", cfg->configstr, cfg->type);
 		error = ENXIO;
 		break;
 	}
 
-	if (0 == error)
+	if (0 == error) {
 		TAILQ_INSERT_TAIL(&if_conf, cfg, link);
+		if (cookie)
+			*cookie = cfg;
+	}
 
 out:
-	if (error && cfg)
-		free(cfg, M_DEVBUF);
+	if (error) {
+		if (cookie)
+			*cookie = UINET_IFCOOKIE_INVALID;
+
+		if (cfg) {
+			if (cfg->configstr)
+				free(cfg->configstr, M_DEVBUF);
+
+			free(cfg, M_DEVBUF);
+		}
+	}
 
 	return (error);
 }
 
 
-int uinet_ifdestroy(const char *ifname)
+int
+uinet_ifdestroy(uinet_ifcookie_t cookie)
 {
-	struct uinet_config_if *cfg;
+	struct uinet_config_if *cfg = cookie;
 	int error = EINVAL;
 
-	cfg = uinet_iffind_byname(ifname);
 	if (NULL != cfg) {
 		switch (cfg->type) {
 		case UINET_IFTYPE_NETMAP:
 			error = if_netmap_detach(cfg);
 			break;
 		default:
-			printf("Error detaching interface %s: unknown interface type %d\n", cfg->spec, cfg->type);
+			printf("Error detaching interface %s: unknown interface type %d\n", cfg->name, cfg->type);
 			error = ENXIO;
 			break;
 		}
 
 		TAILQ_REMOVE(&if_conf, cfg, link);
+		
+		if (cfg->configstr)
+			free(cfg->configstr, M_DEVBUF);
+
 		free(cfg, M_DEVBUF);
 	}
 
 	return (error);
+}
+
+
+int
+uinet_ifdestroy_byname(const char *ifname)
+{
+	struct uinet_config_if *cfg;
+
+	cfg = uinet_iffind_byname(ifname);
+
+	return (uinet_ifdestroy(cfg));
+}
+
+
+const char *
+uinet_ifaliasname(uinet_ifcookie_t cookie)
+{
+	struct uinet_config_if *cfg = cookie;
+
+	return (cfg ? cfg->alias : "");
+}
+
+
+const char *
+uinet_ifgenericname(uinet_ifcookie_t cookie)
+{
+	struct uinet_config_if *cfg = cookie;
+
+	return (cfg ? cfg->name : "");
 }

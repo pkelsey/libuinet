@@ -45,15 +45,27 @@ typedef enum {
 	UINET_IFTYPE_NETMAP
 } uinet_iftype_t;
 
+
+typedef void * uinet_ifcookie_t;
+#define UINET_IFCOOKIE_INVALID	NULL
+
+
 /*
  *  Create a network interface with the given name, of the given type, in
  *  the given connection domain, and bound to the given cpu.
  *
- *  ifname	is of the form <base><unit>:<queue>, e.g. em0:1.
- *  		<base><unit> is a synonym for <base><unit>:0.
- *
  *  type	is the type of interface to create.  This determines the
- *		interface driver that will attach to the given name.
+ *		interface driver that will attach to the given configstr.
+ *
+ *  configstr	is a driver-specific configuration string.
+ *
+ *  		UINET_IFTYPE_NETMAP - vale<n>:<m> or <hostifname> or
+ *  		    <hostifname>:<qno>, where queue 0 is implied by
+ *		    a configstr of <hostifname>
+ *
+ *  alias	is any user-supplied string, or NULL.  If a string is supplied,
+ *	        it must be unique among all the other aliases and driver-assigned
+ *		names.  Passing an empty string is the same as passing NULL.
  *
  *  cdom	is the connection domain for ifname.  When looking up an
  *		inbound packet on ifname, only protocol control blocks in
@@ -62,6 +74,10 @@ typedef enum {
  *  cpu		is the cpu number on which to perform stack processing on
  *		packets received on ifname.  -1 means leave it up to the
  *		scheduler.
+ *
+ *  cookie	is a pointer to an opaque reference that, if not NULL,  will be
+ *		set to something that corresponds to the interface that is
+ *		created, or UINET_IFCOOKIE_INVALID if creation fails.
  *
  *
  *  Return values:
@@ -76,22 +92,56 @@ typedef enum {
  *
  *  UINET_EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
  */
-int uinet_ifcreate(const char *ifname, uinet_iftype_t type, unsigned int cdom, int cpu);
+int uinet_ifcreate(uinet_iftype_t type, const char *configstr, const char *alias,
+		   unsigned int cdom, int cpu, uinet_ifcookie_t *cookie);
 
 
 /*
- *  Destroy the network interface with the given name.
+ *  Destroy the network interface specified by the cookie.
  *
  *
  *  Return values:
  *
  *  0			Interface destroyed successfully
  *
- *  UINET_ENXIO		Unable to destroy the inteface
+ *  UINET_ENXIO		Unable to destroy the interface
+ *
+ *  UINET_EINVAL	Invalid cookie
+ */
+int uinet_ifdestroy(uinet_ifcookie_t cookie);
+
+
+/*
+ *  Destroy the network interface with the given name.
+ *
+ *  name	can be either the user-specified alias, or the driver-assigned
+ *		name returned by uinet_ifgenericname().
+ *
+ *  Return values:
+ *
+ *  0			Interface destroyed successfully
+ *
+ *  UINET_ENXIO		Unable to destroy the interface
  *
  *  UINET_EINVAL	No interface with the given name found
  */
-int uinet_ifdestroy(const char *ifname);
+int uinet_ifdestroy_byname(const char *ifname);
+
+
+/*
+ *  Retrieve the user-assigned alias or driver-assigned generic name for the
+ *  interface specified by cookie.
+ *
+ *
+ *  Return values:
+ *
+ *  ""			No alias was assigned or cookie was invalid.
+ *
+ *  <non-empty string>	The alias or driver-assigned name
+ *
+ */
+const char *uinet_ifaliasname(uinet_ifcookie_t cookie);
+const char *uinet_ifgenericname(uinet_ifcookie_t cookie);
 
 
 /*

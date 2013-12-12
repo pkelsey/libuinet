@@ -46,6 +46,7 @@
 
 struct if_netmap_host_context {
 	int fd;
+	int isvale;
 	const char *ifname;
 	struct nmreq req;
 	void *mem;
@@ -87,7 +88,7 @@ if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr)
 
 
 struct if_netmap_host_context *
-if_netmap_register_if(int nmfd, const char *ifname, unsigned int qno)
+if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigned int qno)
 {
 	struct if_netmap_host_context *ctx;
 
@@ -96,6 +97,7 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int qno)
 		return (NULL);
 	
 	ctx->fd = nmfd;
+	ctx->isvale = isvale;
 	ctx->ifname = ifname;
 
 	/*
@@ -107,12 +109,14 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int qno)
 	 *
 	 */
 
-	if (0 != if_netmap_set_offload(ctx, 0)) {
-		goto fail;
-	}
+	if (!ctx->isvale) {
+		if (0 != if_netmap_set_offload(ctx, 0)) {
+			goto fail;
+		}
 
-	if (0 != if_netmap_set_promisc(ctx, 1)) {
-		goto fail;
+		if (0 != if_netmap_set_promisc(ctx, 1)) {
+			goto fail;
+		}
 	}
 
 	ctx->req.nr_version = NETMAP_API;
@@ -147,7 +151,8 @@ fail:
 void
 if_netmap_deregister_if(struct if_netmap_host_context *ctx)
 {
-	if_netmap_set_promisc(ctx, 0);
+	if (!ctx->isvale)
+		if_netmap_set_promisc(ctx, 0);
 
 	munmap(ctx->mem, ctx->req.nr_memsize);
 	

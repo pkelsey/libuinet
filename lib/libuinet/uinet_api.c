@@ -42,6 +42,7 @@
 #include <netinet/in_promisc.h>
 
 #include "uinet_api.h"
+#include "uinet_config_internal.h"
 #include "uinet_host_interface.h"
 
 #include "opt_inet6.h"
@@ -109,10 +110,19 @@ uinet_inet_pton(int af, const char *src, void *dst)
 
 
 static int
-uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *canonical_name, unsigned int qno)
+uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *name)
 {
 	struct thread *td = curthread;
+	struct uinet_config_if *ifcfg;
 	int error;
+
+	ifcfg = uinet_iffind_byname(name);
+	if (NULL == ifcfg) {
+		printf("could not find interface %s\n", name);
+		return (EINVAL);
+	}
+
+	printf("found interface %s (ifname=%s alias=%s)\n", name, ifcfg->name, ifcfg->alias);
 
 	error = socreate(PF_INET, so, SOCK_DGRAM, 0, td->td_ucred, td);
 	if (0 != error) {
@@ -120,7 +130,7 @@ uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *canonica
 		return (error);
 	}
 
-	snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s:%u", canonical_name, qno);
+	snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s", ifcfg->name);
 	
 	return (0);
 }
@@ -147,8 +157,7 @@ uinet_ifconfig_end(struct socket *so)
 
 
 int
-uinet_interface_add_alias(const char *canonical_name, unsigned int qno,
-			  const char *addr, const char *braddr, const char *mask)
+uinet_interface_add_alias(const char *name, const char *addr, const char *braddr, const char *mask)
 {
 	struct socket *cfg_so;
 	struct in_aliasreq ina;
@@ -163,7 +172,7 @@ uinet_interface_add_alias(const char *canonical_name, unsigned int qno,
 	 * begin with the same size name field, and uinet_ifconfig_begin
 	 * only touches the name field.
 	 */
-	error = uinet_ifconfig_begin(&cfg_so, (struct ifreq *)&ina, canonical_name, qno);
+	error = uinet_ifconfig_begin(&cfg_so, (struct ifreq *)&ina, name);
 	if (0 != error) {
 		return (error);
 	}
@@ -196,13 +205,13 @@ out:
 
 
 int
-uinet_interface_create(const char *canonical_name, unsigned int qno)
+uinet_interface_create(const char *name)
 {
 	struct socket *cfg_so;
 	struct ifreq ifr;
 	int error;
 
-	error = uinet_ifconfig_begin(&cfg_so, &ifr, canonical_name, qno);
+	error = uinet_ifconfig_begin(&cfg_so, &ifr, name);
 	if (0 != error)
 		return (error);
 
@@ -215,13 +224,13 @@ uinet_interface_create(const char *canonical_name, unsigned int qno)
 
 
 int
-uinet_interface_up(const char *canonical_name, unsigned int qno, unsigned int promisc)
+uinet_interface_up(const char *name, unsigned int promisc)
 {
 	struct socket *cfg_so;
 	struct ifreq ifr;
 	int error;
 
-	error = uinet_ifconfig_begin(&cfg_so, &ifr, canonical_name, qno);
+	error = uinet_ifconfig_begin(&cfg_so, &ifr, name);
 	if (0 != error)
 		return (error);
 	

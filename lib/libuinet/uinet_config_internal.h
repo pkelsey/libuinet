@@ -38,18 +38,16 @@
 struct uinet_config_if {
 	TAILQ_ENTRY(uinet_config_if) link;
 	uinet_iftype_t type;
-	char spec[IF_NAMESIZE];
-	char name[IF_NAMESIZE];
-	char basename[IF_NAMESIZE];
-	unsigned int unit;
-	unsigned int queue;
+	char *configstr;
+	char name[IF_NAMESIZE];		/* assigned by driver */
+	char alias[IF_NAMESIZE];	/* assigned by user (optional) */
 	int cpu;
 	unsigned int cdom;
 	void *ifdata;
 };
 
 
-struct uinet_config_if *uinet_config_if_next(struct uinet_config_if *cur);
+struct uinet_config_if *uinet_iffind_byname(const char *ifname);
 
 
 #endif /* _UINET_CONFIG_INTERNAL_H_ */

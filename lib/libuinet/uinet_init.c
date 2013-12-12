@@ -158,9 +158,9 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 	if (loopback) {
 		int error;
 
-		uinet_interface_up("lo0", -1, 0);
+		uinet_interface_up("lo0", 0);
 
-		if (0 != (error = uinet_interface_add_alias("lo0", -1, "127.0.0.1", "0.0.0.0", "255.0.0.0"))) {
+		if (0 != (error = uinet_interface_add_alias("lo0", "127.0.0.1", "0.0.0.0", "255.0.0.0"))) {
 			printf("Loopback alias add failed %d\n", error);
 		}
 	}
