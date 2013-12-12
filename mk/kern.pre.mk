@@ -112,6 +112,7 @@ IMACROS_FILE=filtered_predefined_macros.h
 IMACROS_FILTER+= __STDC__ __STDC_HOSTED__
 IMACROS_FILTER+= __APPLE__ __MACH__
 IMACROS_FILTER+= __CYGWIN__ __CYGWIN32__
+IMACROS_FILTER+= __FreeBSD__
 IMACROS_FILTER+= __linux __linux__ __gnu__linux__ linux
 IMACROS_FILTER+= _WIN32 _WIN64
 
