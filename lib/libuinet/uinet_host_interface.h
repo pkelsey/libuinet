@@ -32,6 +32,7 @@
 #define UHI_CLOCK_MONOTONIC	4
 
 #define UHI_TS_TO_NSEC(ts) (uint64_t)((uint64_t)((ts).tv_sec) * 1000UL * 1000UL * 1000UL + (ts).tv_nsec)
+#define UHI_MAKE_TS(ts,sec,nsec) (ts).tv_sec = sec; (ts).tv_nsec = nsec
 
 
 #define UHI_O_RDONLY	0x0000

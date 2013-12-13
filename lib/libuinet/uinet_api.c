@@ -578,6 +578,20 @@ uinet_sogeterror(struct uinet_socket *so)
 }
 
 
+unsigned int
+uinet_sogetrxavail(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int avail;
+
+	SOCKBUF_LOCK(&so_internal->so_rcv);
+	avail = so_internal->so_rcv.sb_cc;
+	SOCKBUF_UNLOCK(&so_internal->so_rcv);
+
+	return avail;
+}
+
+
 int
 uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval,
 		   unsigned int *optlen)

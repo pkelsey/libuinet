@@ -285,11 +285,6 @@ HOST_SRCS = ${UINET_HOST_SRCS}
 OBJS+= $(patsubst %.c,%.o,${SRCS})
 HOST_OBJS+= $(patsubst %.c,%.o,${HOST_SRCS})
 
-PROGRAM=uinet_test
-
-LDADD+= -lpthread
-
-
 #
 # The library is built by first incrementally linking all the object
 # to resolve internal references.  Then, all symbols are made local.
@@ -305,9 +300,6 @@ libuinet.a: machine_includes uinet_api.symlist ${MHEADERS} ${MSRCS} ${HOST_OBJS}
 	rm -f $@
 	ar -cqs $@ $*.ro
 	rm -f $*.ro
-
-${PROGRAM}: machine_includes ${MHEADERS} ${MSRCS} ${OBJS}
-	${CC} ${CPPFLAGS} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
 
 ${HOST_OBJS}: %.o: %.c
 	${HOST_C}

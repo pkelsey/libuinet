@@ -23,37 +23,49 @@
  * SUCH DAMAGE.
  */
 
-#define pause user_pause
-#include <unistd.h>
-#undef pause
-
+#include <errno.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
+#include <unistd.h>
 
-#include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/systm.h>
-#include <sys/file.h>
-#include <sys/limits.h>
-#include <sys/malloc.h>
-#include <sys/kthread.h>
-#include <sys/lock.h>
-#include <sys/mutex.h>
-#include <sys/proc.h>
-#include <sys/protosw.h>
-#include <sys/socket.h>
-#include <sys/socketvar.h>
-#include <sys/sockio.h>
-#include <sys/sysctl.h>
-#include <sys/uio.h>
+#include <net/ethernet.h>
 
-#include <net/if.h>
-#include <netinet/in.h>
-#include <netinet/in_promisc.h>
+#include <arpa/inet.h>
+
+#include <sys/queue.h>
 
 #include "uinet_api.h"
-#include "uinet_config.h"
 
-extern in_addr_t inet_addr(const char *cp);
+
+#define	timespeccmp(tvp, uvp, cmp)					\
+	(((tvp)->tv_sec == (uvp)->tv_sec) ?				\
+	    ((tvp)->tv_nsec cmp (uvp)->tv_nsec) :			\
+	    ((tvp)->tv_sec cmp (uvp)->tv_sec))
+
+#define timespecadd(vvp, uvp)						\
+	do {								\
+		(vvp)->tv_sec += (uvp)->tv_sec;				\
+		(vvp)->tv_nsec += (uvp)->tv_nsec;			\
+		if ((vvp)->tv_nsec >= 1000000000) {			\
+			(vvp)->tv_sec++;				\
+			(vvp)->tv_nsec -= 1000000000;			\
+		}							\
+	} while (0)
+
+#define timespecsub(vvp, uvp)						\
+	do {								\
+		(vvp)->tv_sec -= (uvp)->tv_sec;				\
+		(vvp)->tv_nsec -= (uvp)->tv_nsec;			\
+		if ((vvp)->tv_nsec < 0) {				\
+			(vvp)->tv_sec--;				\
+			(vvp)->tv_nsec += 1000000000;			\
+		}							\
+	} while (0)
+
 
 
 /* 12 bits, 0 and 4095 are reserved */
@@ -77,10 +89,10 @@ struct server_conn {
 	TAILQ_ENTRY(server_conn) server_queue;
 	int active;
 	struct server_context *server;
-	struct socket *so;
+	struct uinet_socket *so;
 	conn_state_t conn_state;
-	struct sockaddr_in local_sin;
-	struct sockaddr_in remote_sin;
+	struct uinet_sockaddr_in local_sin;
+	struct uinet_sockaddr_in remote_sin;
 };
 
 enum whichq { Q_NONE, Q_CONN, Q_SEND };
@@ -92,21 +104,21 @@ struct client_conn {
 	unsigned long long sends;
 	unsigned long long recvs;
 	struct client_context *client;
-	struct socket *so;
+	struct uinet_socket *so;
 	int active;
 	conn_state_t conn_state;
 	conn_state_t last_conn_state;
 	unsigned int fib;
 	char *local_mac;
 	char *foreign_mac;
-	uint32_t vlan_stack[IN_L2INFO_MAX_TAGS];
+	uint32_t vlan_stack[UINET_IN_L2INFO_MAX_TAGS];
 	int vlan_stack_depth;
-	in_addr_t local_addr;
+	struct uinet_in_addr local_addr;
 	uint16_t local_port;
-	in_addr_t foreign_addr;
+	struct uinet_in_addr foreign_addr;
 	uint16_t foreign_port;
-	struct sockaddr_in local_sin;
-	struct sockaddr_in remote_sin;
+	struct uinet_sockaddr_in local_sin;
+	struct uinet_sockaddr_in remote_sin;
 	unsigned int rcv_len;
 	char connstr[80];
 };
@@ -119,7 +131,9 @@ struct client_context {
 	struct client_conn_listhead connect_queue;
 	struct client_conn_listhead send_queue;
 	struct client_conn_listhead active_queue;
-	struct mtx active_queue_lock;
+	pthread_t thread;
+	pthread_mutex_t active_queue_lock;
+	pthread_cond_t active_queue_cv;
 	unsigned int outstanding;
 	int notify;
 	int interleave;
@@ -140,7 +154,9 @@ TAILQ_HEAD(server_conn_listhead, server_conn);
 struct server_context {
 	unsigned int id;
 	struct server_conn_listhead queue;
-	struct mtx lock;
+	pthread_t thread;
+	pthread_mutex_t lock;
+	pthread_cond_t cv;
 	int notify;
 	uint8_t copybuf[2048];
 };
@@ -171,37 +187,38 @@ struct test_config {
 	unsigned int notify;
 };
 
-static int dobind(struct socket *so, in_addr_t addr, in_port_t port);
-static int doconnect(struct socket *so, in_addr_t addr, in_port_t port);
-static struct socket * create_test_socket(unsigned int test_type, unsigned int fib,
-					  const char *local_mac, const char *foreign_mac,
-					  const uint32_t *vlan_stack, int vlan_stack_depth,
-					  const char *syn_filter_name, void *upcall_arg);
+static int dobind(struct uinet_socket *so, struct uinet_in_addr *addr, in_port_t port);
+static int doconnect(struct uinet_socket *so, struct uinet_in_addr *addr, in_port_t port);
+static struct uinet_socket * create_test_socket(unsigned int test_type, unsigned int fib,
+						const char *local_mac, const char *foreign_mac,
+						const uint32_t *vlan_stack, int vlan_stack_depth,
+						const char *syn_filter_name, void *upcall_arg);
 
 
 
 
-static void
+static void *
 loopback_thread(void *arg)
 {
 	struct server_context *server = (struct server_context *)arg;
 	struct server_conn *sc;
-	struct socket *so;
-	struct iovec iov;
-	struct uio uio;
+	struct uinet_socket *so;
+	struct uinet_iovec iov;
+	struct uinet_uio uio;
 	int error;
 	ssize_t len;
 	char buf1[32], buf2[32];
 
+	uinet_initialize_thread();
 
 	while(1) {
-		mtx_lock(&server->lock);
+		pthread_mutex_lock(&server->lock);
 		while (NULL == (sc = TAILQ_FIRST(&server->queue))) {
-			mtx_sleep(&server->queue, &server->lock, 0, "wsvrlk", 0);
+			pthread_cond_wait(&server->cv, &server->lock);
 		}
 		TAILQ_REMOVE(&server->queue, sc, server_queue);
 		sc->active = 0;
-		mtx_unlock(&server->lock);
+		pthread_mutex_unlock(&server->lock);
 
 		if (CS_DONE == sc->conn_state)
 			continue;
@@ -214,12 +231,9 @@ loopback_thread(void *arg)
 		uio.uio_iovcnt = 1;
 		uio.uio_offset = 0;
 		uio.uio_resid = sizeof(server->copybuf);
-		uio.uio_segflg = UIO_SYSSPACE;
-		uio.uio_rw = UIO_READ;
-		uio.uio_td = curthread;
-		error = soreceive(so, NULL, &uio, NULL, NULL, NULL);
-		if ((0 != error) && (EAGAIN != error)) {
-			if (ECONNRESET != error) {
+		error = uinet_soreceive(so, NULL, &uio, NULL);
+		if ((0 != error) && (UINET_EAGAIN != error)) {
+			if (UINET_ECONNRESET != error) {
 				printf("loopback_thread: soreceive failed %d\n", error);
 			}
 			len = 0;
@@ -232,43 +246,43 @@ loopback_thread(void *arg)
 				uio.uio_iovcnt = 1;
 				uio.uio_offset = 0;
 				uio.uio_resid = len;
-				uio.uio_rw = UIO_WRITE;
-				error = sosend(so, NULL, &uio, NULL, NULL, 0, curthread);
+				error = uinet_sosend(so, NULL, &uio, 0);
 				if (0 != error) {
 					printf("loopback_thread: sosend failed %d\n", error);
 				}
 			}
 		}
 		
-		if ((0 == len) && (SBS_CANTRCVMORE & so->so_rcv.sb_state)) {
+		if ((0 == len) && (0 == error)) {
 			if (server->notify) {
 				printf("loopback_thread: connection to %s:%u from %s:%u closed\n",
-				       inet_ntoa_r(sc->local_sin.sin_addr, buf1), ntohs(sc->local_sin.sin_port),
-				       inet_ntoa_r(sc->remote_sin.sin_addr, buf2), ntohs(sc->remote_sin.sin_port));
+				       uinet_inet_ntoa(sc->local_sin.sin_addr, buf1, sizeof(buf1)), ntohs(sc->local_sin.sin_port),
+				       uinet_inet_ntoa(sc->remote_sin.sin_addr, buf2, sizeof(buf2)), ntohs(sc->remote_sin.sin_port));
 			}
 			sc->conn_state = CS_DONE;
 		}
 	}
 
-	mtx_destroy(&server->lock);
-	free(server, M_DEVBUF);
+	pthread_mutex_destroy(&server->lock);
+	pthread_cond_destroy(&server->cv);
+	free(server);
 }
 
 
 static int
-server_conn_rcv(struct socket *so, void *arg, int waitflag)
+server_conn_rcv(struct uinet_socket *so, void *arg, int waitflag)
 {
 	struct server_conn *sc = (struct server_conn *)arg;
 
-	mtx_lock(&sc->server->lock);
+	pthread_mutex_lock(&sc->server->lock);
 	if (0 == sc->active) {
 		sc->active = 1;
 		TAILQ_INSERT_TAIL(&sc->server->queue, sc, server_queue);
-		wakeup(&sc->server->queue);
+		pthread_cond_signal(&sc->server->cv);
 	}
-	mtx_unlock(&sc->server->lock);
+	pthread_mutex_unlock(&sc->server->lock);
 
-	return (SU_OK);
+	return (UINET_SU_OK);
 }
 
 
@@ -278,32 +292,32 @@ server_conn_rcv(struct socket *so, void *arg, int waitflag)
  * socket's inpcb.
  */
 static int
-server_conn_established(struct socket *so, void *arg, int waitflag)
+server_conn_established(struct uinet_socket *so, void *arg, int waitflag)
 {
 	struct server_conn *sc = (struct server_conn *)arg;
-	struct sockaddr_in *sin;
+	struct uinet_sockaddr_in *sin;
 	int error;
 
 	sin = NULL;
-	error = (*so->so_proto->pr_usrreqs->pru_peeraddr)(so, (struct sockaddr **)&sin);
+	error = uinet_sogetpeeraddr(so, (struct uinet_sockaddr **)&sin);
 	if (error) {
 		printf("Error getting peer address %d\n", error);
 	}
 	
 	if (sin) {
-		memcpy(&sc->remote_sin, sin, sizeof(struct sockaddr_in));
-		free(sin, M_SONAME);
+		memcpy(&sc->remote_sin, sin, sizeof(struct uinet_sockaddr_in));
+		uinet_free_sockaddr((struct uinet_sockaddr *)sin);
 	}
 
 	sin = NULL;
-	error = (*so->so_proto->pr_usrreqs->pru_sockaddr)(so, (struct sockaddr **)&sin);
+	error = uinet_sogetsockaddr(so, (struct uinet_sockaddr **)&sin);
 	if (error) {
 		printf("Error getting local address %d\n", error);
 	}
 	
 	if (sin) {
-		memcpy(&sc->local_sin, sin, sizeof(struct sockaddr_in));
-		free(sin, M_SONAME);
+		memcpy(&sc->local_sin, sin, sizeof(struct uinet_sockaddr_in));
+		uinet_free_sockaddr((struct uinet_sockaddr *)sin);
 	}
 	
 	sc->conn_state = CS_CONNECTED;
@@ -311,67 +325,36 @@ server_conn_established(struct socket *so, void *arg, int waitflag)
 	if (sc->server->notify) {
 		char buf1[32], buf2[32];
 		printf("loopback_thread: connection to %s:%u from %s:%u established\n",
-		       inet_ntoa_r(sc->local_sin.sin_addr, buf1), ntohs(sc->local_sin.sin_port),
-		       inet_ntoa_r(sc->remote_sin.sin_addr, buf2), ntohs(sc->remote_sin.sin_port));
+		       uinet_inet_ntoa(sc->local_sin.sin_addr, buf1, sizeof(buf1)), ntohs(sc->local_sin.sin_port),
+		       uinet_inet_ntoa(sc->remote_sin.sin_addr, buf2, sizeof(buf2)), ntohs(sc->remote_sin.sin_port));
 	}
 
-	SOCKBUF_LOCK(&so->so_rcv);
-	soupcall_set(so, SO_RCV, server_conn_rcv, sc);
-	SOCKBUF_UNLOCK(&so->so_rcv);
+	uinet_soupcall_set(so, UINET_SO_RCV, server_conn_rcv, sc);
 
 	server_conn_rcv(so, arg, waitflag);
 
-	return (SU_OK);
+	return (UINET_SU_OK);
 }
 
 
 static int
-server_upcall(struct socket *head, void *arg, int waitflag)
+server_upcall(struct uinet_socket *head, void *arg, int waitflag)
 {
-	struct socket *so;
-	struct sockaddr *sa;
+	struct uinet_socket *so;
+	struct uinet_sockaddr *sa;
 	struct server_conn *sc;
 	struct server_context *server = arg;
 	int error;
 
-	ACCEPT_LOCK();
-	if (TAILQ_EMPTY(&head->so_comp)) {
-		ACCEPT_UNLOCK();
-		printf("head->so_comp empty\n");
-		goto out;
-	}
 
-	so = TAILQ_FIRST(&head->so_comp);
-	KASSERT(!(so->so_qstate & SQ_INCOMP), ("server_upcall: so SQ_INCOMP"));
-	KASSERT(so->so_qstate & SQ_COMP, ("server_upcall: so not SQ_COMP"));
-
-	/*
-	 * Before changing the flags on the socket, we have to bump the
-	 * reference count.  Otherwise, if the protocol calls sofree(),
-	 * the socket will be released due to a zero refcount.
-	 */
-	SOCK_LOCK(so);			/* soref() and so_state update */
-	soref(so);			/* socket came from sonewconn() with an so_count of 0 */
-
-	TAILQ_REMOVE(&head->so_comp, so, so_list);
-	head->so_qlen--;
-	so->so_state |= (head->so_state & SS_NBIO);
-	so->so_qstate &= ~SQ_COMP;
-	so->so_head = NULL;
-
-	SOCK_UNLOCK(so);
-	ACCEPT_UNLOCK();
-
-	sa = NULL;
-	error = soaccept(so, &sa);
+	error = uinet_soaccept(head, &sa, &so);
 	if (error) {
-		soclose(so);
 		goto out;
 	}
 
-	sc = malloc(sizeof(struct server_conn), M_DEVBUF, M_WAITOK | M_ZERO);
+	sc = calloc(1, sizeof(struct server_conn));
 	if (NULL == sc) {
-		soclose(so);
+		uinet_soclose(so);
 		goto out;
 	}
 	
@@ -379,15 +362,13 @@ server_upcall(struct socket *head, void *arg, int waitflag)
 	sc->conn_state = CS_INIT;
 	sc->server = server;
 
-	SOCKBUF_LOCK(&so->so_rcv);
-	soupcall_set(so, SO_RCV, server_conn_established, sc);
-	SOCKBUF_UNLOCK(&so->so_rcv);
+	uinet_soupcall_set(so, UINET_SO_RCV, server_conn_established, sc);
 
 out:
 	if (sa)
-		free(sa, M_SONAME);
+		uinet_free_sockaddr(sa);
 
-	return (SU_OK);
+	return (UINET_SU_OK);
 }
 
 
@@ -396,8 +377,8 @@ client_issue(struct client_context *client, struct client_conn *cc)
 {
 	int error = 0;
 	int len;
-	struct iovec iov;
-	struct uio uio;
+	struct uinet_iovec iov;
+	struct uinet_uio uio;
 
 
 	switch (cc->conn_state) {
@@ -405,10 +386,8 @@ client_issue(struct client_context *client, struct client_conn *cc)
 	case CS_RETRY:
 		if (cc->so) {
 			if (client->notify) printf("%s CLOSING -> RETRYING\n", cc->connstr);
-			SOCKBUF_LOCK(&cc->so->so_rcv);
-			soupcall_clear(cc->so, SO_RCV);
-			SOCKBUF_UNLOCK(&cc->so->so_rcv);
-			soclose(cc->so);
+			uinet_soupcall_clear(cc->so, UINET_SO_RCV);
+			uinet_soclose(cc->so);
 		}
 		
 
@@ -425,10 +404,10 @@ client_issue(struct client_context *client, struct client_conn *cc)
 			printf("socket create failed\n");
 			error = EINVAL;
 		} else {
-			if ((error = dobind(cc->so, cc->local_addr, cc->local_port))) {
+			if ((error = dobind(cc->so, &cc->local_addr, cc->local_port))) {
 				printf("dobind failed\n");
 			} else {
-				if ((error = doconnect(cc->so, cc->foreign_addr, cc->foreign_port))) {
+				if ((error = doconnect(cc->so, &cc->foreign_addr, cc->foreign_port))) {
 					printf("doconnect failed\n");
 				}
 			}
@@ -462,10 +441,7 @@ client_issue(struct client_context *client, struct client_conn *cc)
 		uio.uio_iovcnt = 1;
 		uio.uio_offset = 0;
 		uio.uio_resid = iov.iov_len;
-		uio.uio_segflg = UIO_SYSSPACE;
-		uio.uio_rw = UIO_WRITE;
-		uio.uio_td = curthread;
-		if ((error = sosend(cc->so, NULL, &uio, NULL, NULL, 0, curthread))) {
+		if ((error = uinet_sosend(cc->so, NULL, &uio, 0))) {
 			printf("verify_thread: sosend failed %d\n", error);
 		}
 
@@ -491,7 +467,11 @@ static int
 handle_disconnect(struct client_context *client, struct client_conn *cc, unsigned int state_mask)
 {
 
-	if ((cc->so->so_state & SS_ISDISCONNECTED) & state_mask) {
+	int state;
+
+	state = uinet_sogetstate(cc->so);
+
+	if ((state & UINET_SS_ISDISCONNECTED) & state_mask) {
 		if (client->notify) printf("%s DISCONNECTED\n", cc->connstr);
 		cc->conn_state = CS_RETRY;
 		client->connected--;
@@ -509,7 +489,7 @@ handle_disconnect(struct client_context *client, struct client_conn *cc, unsigne
 		}
 		TAILQ_INSERT_TAIL(&client->connect_queue, cc, connsend_queue);
 		cc->qid = Q_CONN;
-	} else if ((cc->so->so_state & SS_ISDISCONNECTING) & state_mask) {
+	} else if ((state & UINET_SS_ISDISCONNECTING) & state_mask) {
 		if (client->notify) printf("%s DISCONNECTING\n", cc->connstr);
 		cc->conn_state = CS_DISCONNECTING;
 	} else {
@@ -521,14 +501,14 @@ handle_disconnect(struct client_context *client, struct client_conn *cc, unsigne
 
 
 
-static void
+static void *
 verify_thread(void *arg)
 {
 	struct client_context *client = (struct client_context *)arg;
 	struct client_conn *cc, *cctmp;
-	struct socket *so;
-	struct iovec iov;
-	struct uio uio;
+	struct uinet_socket *so;
+	struct uinet_iovec iov;
+	struct uinet_uio uio;
 	int error;
 	unsigned int pass = 0, fail = 0;
 	unsigned int max_outstanding = 1024;
@@ -540,6 +520,8 @@ verify_thread(void *arg)
 	struct timespec this_time, elapsed_time;
 	struct timespec last_print_time;
 	struct timespec last_conn_rate_limit_time;
+
+	uinet_initialize_thread();
 
 	client->outstanding = 0;
 	connects_in_last_period = 0;
@@ -593,20 +575,20 @@ verify_thread(void *arg)
 			}
 		}	
 		
-		mtx_lock(&client->active_queue_lock);
+		pthread_mutex_lock(&client->active_queue_lock);
 		while (NULL == TAILQ_FIRST(&client->active_queue))
-			mtx_sleep(&client->active_queue, &client->active_queue_lock, 0, "wcaqlk", 0);
-		mtx_unlock(&client->active_queue_lock);
+			pthread_cond_wait(&client->active_queue_cv, &client->active_queue_lock);
+		pthread_mutex_unlock(&client->active_queue_lock);
 	
 
 		while (1) {
-			mtx_lock(&client->active_queue_lock);
+			pthread_mutex_lock(&client->active_queue_lock);
 			cc = TAILQ_FIRST(&client->active_queue);
 			if (cc) {
 				TAILQ_REMOVE(&client->active_queue, cc, active_queue);
 				cc->active = 0;
 			}
-			mtx_unlock(&client->active_queue_lock);
+			pthread_mutex_unlock(&client->active_queue_lock);
 
 			if (NULL == cc) {
 				break;
@@ -618,7 +600,7 @@ verify_thread(void *arg)
 			case CS_CONNECTING:
 				client->connecting--;
 				if (0 == handle_disconnect(client, cc,
-							   SS_ISDISCONNECTING | SS_ISDISCONNECTED)) {
+							   UINET_SS_ISDISCONNECTING | UINET_SS_ISDISCONNECTED)) {
 
 					if (client->notify) printf("%s CONNECTED\n", cc->connstr);
 					cc->conn_state = CS_SEND;
@@ -631,16 +613,14 @@ verify_thread(void *arg)
 				break;
 			case CS_SEND:
 				handle_disconnect(client, cc,
-						  SS_ISDISCONNECTING | SS_ISDISCONNECTED);
+						  UINET_SS_ISDISCONNECTING | UINET_SS_ISDISCONNECTED);
 				break;
 			case CS_WAIT_REPLY:
 				if (0 == handle_disconnect(client, cc,
-							   SS_ISDISCONNECTING | SS_ISDISCONNECTED)) {
-					int ready;
+							   UINET_SS_ISDISCONNECTING | UINET_SS_ISDISCONNECTED)) {
+					unsigned int ready;
 
-					SOCKBUF_LOCK(&so->so_rcv);
-					ready = (so->so_rcv.sb_cc >= cc->rcv_len);
-					SOCKBUF_UNLOCK(&so->so_rcv);
+					ready = uinet_sogetrxavail(so);
 					
 					if (ready) {
 						cc->recvs++;
@@ -651,10 +631,7 @@ verify_thread(void *arg)
 						uio.uio_iovcnt = 1;
 						uio.uio_offset = 0;
 						uio.uio_resid = iov.iov_len;
-						uio.uio_segflg = UIO_SYSSPACE;
-						uio.uio_rw = UIO_READ;
-						uio.uio_td = curthread;
-						error = soreceive(so, NULL, &uio, NULL, NULL, NULL);
+						error = uinet_soreceive(so, NULL, &uio, NULL);
 						if (0 != error) {
 							printf("verify_thread: soreceive failed %d\n", error);
 							cc->conn_state = CS_RETRY;
@@ -684,7 +661,7 @@ verify_thread(void *arg)
 				}
 				break;
 			case CS_DISCONNECTING:
-				handle_disconnect(client, cc, SS_ISDISCONNECTED);
+				handle_disconnect(client, cc, UINET_SS_ISDISCONNECTED);
 				break;
 			default:
 				printf("connection active in unexpected state %u\n", cc->conn_state);
@@ -694,37 +671,38 @@ verify_thread(void *arg)
 		}
 	}
 
-	mtx_destroy(&client->active_queue_lock);
-	free(client, M_DEVBUF);
+	pthread_mutex_destroy(&client->active_queue_lock);
+	pthread_cond_destroy(&client->active_queue_cv);
+	free(client);
 }
 
 
 static int
-client_upcall(struct socket *so, void *arg, int waitflag)
+client_upcall(struct uinet_socket *so, void *arg, int waitflag)
 {
 	struct client_conn *cc = arg;
 	struct client_context *client = cc->client;
 
-	mtx_lock(&client->active_queue_lock);
+	pthread_mutex_lock(&client->active_queue_lock);
 	if (!cc->active) {
 		cc->active = 1;
 		TAILQ_INSERT_TAIL(&client->active_queue, cc, active_queue);
-		wakeup_one(&client->active_queue);
+		pthread_cond_signal(&client->active_queue_cv);
 	}
-	mtx_unlock(&client->active_queue_lock);
+	pthread_mutex_unlock(&client->active_queue_lock);
 
-	return (SU_OK);
+	return (UINET_SU_OK);
 }
 
 
 static int
-setopt_int(struct socket *so, int level, int opt, int val, const char *msg)
+setopt_int(struct uinet_socket *so, int level, int opt, int val, const char *msg)
 {
 	int sopt_int;
 	int error;
 
 	sopt_int = val;
-	error = so_setsockopt(so, level, opt, &sopt_int, sizeof(sopt_int));
+	error = uinet_sosetsockopt(so, level, opt, &sopt_int, sizeof(sopt_int));
 	if (0 != error) {
 		printf("Setting %s failed (%d)\n", msg ? msg : "socket option", error);
 	}
@@ -734,20 +712,20 @@ setopt_int(struct socket *so, int level, int opt, int val, const char *msg)
 
 
 static int
-dobind(struct socket *so, in_addr_t addr, in_port_t port)
+dobind(struct uinet_socket *so, struct uinet_in_addr *addr, in_port_t port)
 {
-	struct sockaddr_in sin;
-	struct thread *td = curthread;
+	struct uinet_sockaddr_in sin;
 	int error;
 
-	memset(&sin, 0, sizeof(struct sockaddr_in));
-	sin.sin_len = sizeof(struct sockaddr_in);
-	sin.sin_family = AF_INET;
-	sin.sin_addr.s_addr = addr;
+	memset(&sin, 0, sizeof(struct uinet_sockaddr_in));
+	sin.sin_len = sizeof(struct uinet_sockaddr_in);
+	sin.sin_family = UINET_AF_INET;
+	sin.sin_addr = *addr;
 	sin.sin_port = htons(port);
-	error = sobind(so, (struct sockaddr *)&sin, td);
+	error = uinet_sobind(so, (struct uinet_sockaddr *)&sin);
 	if (0 != error) {
-		printf("Bind to %s:%u failed (%d)\n", inet_ntoa(sin.sin_addr), port, error);
+		char buf[32];
+		printf("Bind to %s:%u failed (%d)\n", uinet_inet_ntoa(sin.sin_addr, buf, sizeof(buf)), port, error);
 	}
 
 	return (error);
@@ -755,82 +733,46 @@ dobind(struct socket *so, in_addr_t addr, in_port_t port)
 
 
 static int
-doconnect(struct socket *so, in_addr_t addr, in_port_t port)
+doconnect(struct uinet_socket *so, struct uinet_in_addr *addr, in_port_t port)
 {
-	struct sockaddr_in sin;
-	struct thread *td = curthread;
+	struct uinet_sockaddr_in sin;
 	int error;
 
-	memset(&sin, 0, sizeof(struct sockaddr_in));
-	sin.sin_len = sizeof(struct sockaddr_in);
-	sin.sin_family = AF_INET;
-	sin.sin_addr.s_addr = addr;
+	memset(&sin, 0, sizeof(struct uinet_sockaddr_in));
+	sin.sin_len = sizeof(struct uinet_sockaddr_in);
+	sin.sin_family = UINET_AF_INET;
+	sin.sin_addr = *addr;
 	sin.sin_port = htons(port);
-	error = soconnect(so, (struct sockaddr *)&sin, td);
+	error = uinet_soconnect(so, (struct uinet_sockaddr *)&sin);
 	if (0 != error) {
-		printf("Connect to %s:%u failed (%d)\n", inet_ntoa(sin.sin_addr), port, error);
+		char buf[32];
+		printf("Connect to %s:%u failed (%d)\n", uinet_inet_ntoa(sin.sin_addr, buf, sizeof(buf)), port, error);
 	}
 
 	return (error);
 }
 
-#if 0
-static void
-print_macaddr(uint8_t *addr)
+
+static int uinet_test_synfilter(struct uinet_socket *listener, void *arg, uinet_api_synfilter_cookie_t cookie)
 {
-	printf("%02x:%02x:%02x:%02x:%02x:%02x",
-	       addr[0],
-	       addr[1],
-	       addr[2],
-	       addr[3],
-	       addr[4],
-	       addr[5]);
-}
+	struct uinet_in_conninfo inc;
+	char buf[32];
 
+	printf("sysn filter\n");
 
-static void
-print_l2info(const char *name, struct in_l2info *l2i)
-{
-	uint32_t i;
-	struct in_l2tagstack *ts = &l2->inl2i;
+	uinet_synfilter_getconninfo(cookie, &inc);
 
-	printf("%s.local_addr = ", name); print_macaddr(l2i->inl2i_local_addr); printf("\n");
-	printf("%s.foreign_addr = ", name); print_macaddr(l2i->inl2i_foreign_addr); printf("\n");
-	printf("%s.tags = %u\n", name, ts->inl2t_cnt);
-	for (i = 0; i < ts->inl2t_cnt; i++) {
-		printf("  tag %2u = 0x%08x\n", i, ts->inl2t_tags[i]);
-	}
-}
-#endif
-
-static int uinet_test_synf_callback(struct inpcb *inp, void *inst_arg, struct syn_filter_cbarg *arg)
-{
-	if (0 == strncmp("10.", inet_ntoa(arg->inc.inc_laddr), 3)) {
+	if (0 == strncmp("10.", uinet_inet_ntoa(inc.inc_ie.ie_laddr, buf, sizeof(buf)), 3)) {
 //		printf("ACCEPT\n");
 //		printf("--------------------------------\n");
-		return (SYNF_ACCEPT);
+		return (UINET_SYNF_ACCEPT);
 	}
 
 //	printf("REJECT\n");
 //	printf("--------------------------------\n");
-	return (SYNF_REJECT);
+	return (UINET_SYNF_REJECT);
 }
 
-
-static struct syn_filter synf_uinet_test = {
-	"uinet_test",
-	uinet_test_synf_callback,
-	NULL,
-	NULL
-};
-
-static moduledata_t synf_uinet_test_mod = {
-	"uinet_test_synf",
-	syn_filter_generic_mod_event,
-	&synf_uinet_test
-};
-
-DECLARE_MODULE(synf_uinet_test, synf_uinet_test_mod, SI_SUB_DRIVERS, SI_ORDER_MIDDLE);
 
 
 static int
@@ -904,9 +846,9 @@ incr_vlan_tag_stack(uint32_t *tag_stack, int tag_stack_depth)
 
 
 static void
-incr_in_addr_t(in_addr_t *inaddr)
+incr_in_addr(struct uinet_in_addr *inaddr)
 {
-	uint8_t *addr_parts = (uint8_t *)inaddr;
+	uint8_t *addr_parts = (uint8_t *)(&inaddr->s_addr);
 	
 	// inaddr is in network byte order
 	
@@ -928,12 +870,12 @@ incr_in_addr_t(in_addr_t *inaddr)
 
 
 static void
-incr_in_addr_t_n(in_addr_t *inaddr, unsigned int n)
+incr_in_addr_n(struct uinet_in_addr *inaddr, unsigned int n)
 {
 	unsigned int i;
 	
 	for (i = 0; i < n; i++) {
-		incr_in_addr_t(inaddr);
+		incr_in_addr(inaddr);
 	}
 }
 
@@ -943,16 +885,14 @@ static int
 ip_range_str(char *buf, unsigned int bufsize, const char *ip_start, unsigned int nips,
 	     unsigned int port_start, unsigned int nports)
 {
-	in_addr_t ip;
-	struct in_addr inaddr;
+	struct uinet_in_addr ip;
 	char ip_end[16];
 	char port_end[8];
 	char port_range[12];
 
-	ip = inet_addr(ip_start);
-	incr_in_addr_t_n(&ip, nips - 1);
-	inaddr.s_addr = ip;
-	inet_ntoa_r(inaddr, ip_end);
+	uinet_inet_pton(UINET_AF_INET, ip_start, &ip);
+	incr_in_addr_n(&ip, nips - 1);
+	uinet_inet_ntoa(ip, ip_end, sizeof(ip_end));
 
 	snprintf(port_end, sizeof(port_end), "-%u", port_start + nports - 1);
 	snprintf(port_range, sizeof(port_range), "%u%s",
@@ -976,7 +916,7 @@ print_test_config(struct test_config *test)
 	unsigned int foreign_length;
 	char local_ip_range[64];
 	char foreign_ip_range[64];
-	uint32_t vlan_tag_stack[IN_L2INFO_MAX_TAGS];
+	uint32_t vlan_tag_stack[UINET_IN_L2INFO_MAX_TAGS];
 
 	printf("%2u ", test->num);
 
@@ -1058,39 +998,28 @@ print_test_config(struct test_config *test)
 }
 
 
-static struct socket *
+static struct uinet_socket *
 create_test_socket(unsigned int test_type, unsigned int fib,
 		   const char *local_mac, const char *foreign_mac,
 		   const uint32_t *vlan_stack, int vlan_stack_depth,
 		   const char *syn_filter_name, void *upcall_arg)
 {
 	int error;
-	struct socket *so;
-	struct thread *td = curthread;
-	struct in_l2info l2i;
-	struct in_l2tagstack *ts = &l2i.inl2i_tagstack;
-	struct syn_filter_optarg synf;
+	struct uinet_socket *so;
+	struct uinet_in_l2info l2i;
+	struct uinet_in_l2tagstack *ts = &l2i.inl2i_tagstack;
 	int i;
 
-	error = socreate(PF_INET, &so, SOCK_STREAM, 0, td->td_ucred, td);
+	error = uinet_socreate(UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
 	if (0 != error) {
 		printf("Promisc socket creation failed (%d)\n", error);
 		return (NULL);
 	}
 	
-	if ((error = setopt_int(so, SOL_SOCKET, SO_PROMISC, 1, "SO_PROMISC")))
-		goto err;
-	
-	if ((error = setopt_int(so, SOL_SOCKET, SO_SETFIB, fib, "SO_SETFIB")))
+	if ((error = uinet_make_socket_promiscuous(so, fib)))
 		goto err;
 
-	if ((error = setopt_int(so, SOL_SOCKET, SO_REUSEPORT, 1, "SO_REUSEPORT")))
-		goto err;
-	
-	if ((error = setopt_int(so, IPPROTO_IP, IP_BINDANY, 1, "IP_BINDANY")))
-		goto err;
-
-	if ((error = setopt_int(so, IPPROTO_TCP, TCP_NODELAY, 1, "TCP_NODELAY")))
+	if ((error = setopt_int(so, UINET_IPPROTO_TCP, UINET_TCP_NODELAY, 1, "TCP_NODELAY")))
 		goto err;
 
 	memset(&l2i, 0, sizeof(l2i));
@@ -1103,30 +1032,23 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 		if ((error = mac_aton(local_mac, l2i.inl2i_local_addr)))
 			goto err;
 
-		SOCKBUF_LOCK(&so->so_rcv);
-		soupcall_set(so, SO_RCV, client_upcall, upcall_arg);
-		SOCKBUF_UNLOCK(&so->so_rcv);
+		uinet_soupcall_set(so, UINET_SO_RCV, client_upcall, upcall_arg);
 	} else {
 		if (syn_filter_name && (*syn_filter_name != '\0')) {
-			memset(&synf, 0, sizeof(synf));
-			strlcpy(synf.sfa_name, syn_filter_name, SYNF_NAME_MAX);
-
-			if ((error = so_setsockopt(so, IPPROTO_IP, IP_SYNFILTER, &synf, sizeof(synf)))) {
-				printf("Promisc socket IP_SYNFILTER set failed (%d)\n", error);
+			if ((error = uinet_synfilter_install(so, uinet_test_synfilter, NULL))) {
+				printf("Promisc socket SYN filter install failed (%d)\n", error);
 				goto err;
 			}
 		}
 
-		so->so_state |= SS_NBIO;
+		uinet_sosetnonblocking(so, 1);
 
 		if (vlan_stack_depth < 0) {
-			l2i.inl2i_flags |= INL2I_TAG_ANY;
+			l2i.inl2i_flags |= UINET_INL2I_TAG_ANY;
 			vlan_stack_depth = 0;
 		}
 	
-		SOCKBUF_LOCK(&so->so_rcv);
-		soupcall_set(so, SO_RCV, server_upcall, upcall_arg);
-		SOCKBUF_UNLOCK(&so->so_rcv);
+		uinet_soupcall_set(so, UINET_SO_RCV, server_upcall, upcall_arg);
 	}
 
 	ts->inl2t_cnt = vlan_stack_depth;
@@ -1140,19 +1062,17 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 		else ethertype = 0x88a8;
 
 		ts->inl2t_tags[i] = htonl((ethertype << 16) | vlan_stack[i]);
+		ts->inl2t_masks[i] = htonl(0x00000fff); 
 	}
-	ts->inl2t_mask = htonl(0x00000fff); 
 
-	if ((error = so_setsockopt(so, SOL_SOCKET, SO_L2INFO, &l2i, sizeof(l2i)))) {
-		printf("Promisc socket SO_L2INFO set failed (%d)\n", error);
+	if ((error = uinet_setl2info(so, &l2i))) {
 		goto err;
 	}
-
 
 	return (so);
 
  err:
-	soclose(so);
+	uinet_soclose(so);
 	return (NULL);
 }
 
@@ -1184,23 +1104,22 @@ min_tag_stack_depth(unsigned int first_vlan, unsigned int num_vlans)
 static int
 run_test(struct test_config *test, int verbose)
 {
-	struct socket *so = NULL;
-	struct thread *td = curthread;
+	struct uinet_socket *so = NULL;
 	int error = 0;
 	unsigned int socket_count;
 	uint64_t max_vlans;
 	unsigned int num_vlans;
 	unsigned int vlan_num;
-	uint32_t vlan_tag_stack[IN_L2INFO_MAX_TAGS];
+	uint32_t vlan_tag_stack[UINET_IN_L2INFO_MAX_TAGS];
 
 	unsigned int num_local_addrs, num_local_ports;
 	unsigned int local_addr_num, local_port_num;
-	in_addr_t local_addr;
+	struct uinet_in_addr local_addr;
 	in_port_t local_port;
 
 	unsigned int num_foreign_addrs, num_foreign_ports;
 	unsigned int foreign_addr_num, foreign_port_num;
-	in_addr_t foreign_addr;
+	struct uinet_in_addr foreign_addr;
 	in_port_t foreign_port;
 	struct client_context *client = NULL;
 	struct server_context *server = NULL;
@@ -1211,24 +1130,27 @@ run_test(struct test_config *test, int verbose)
 	socket_count = 0;
 
 	if (TEST_TYPE_ACTIVE == test->type) {
-		client = malloc(sizeof(struct client_context), M_DEVBUF, M_WAITOK | M_ZERO);
+		client = calloc(1, sizeof(struct client_context));
 		TAILQ_INIT(&client->connect_queue);
 		TAILQ_INIT(&client->send_queue);
 		TAILQ_INIT(&client->active_queue);
-		mtx_init(&client->active_queue_lock, "clnqlk", NULL, MTX_DEF);
+		pthread_mutex_init(&client->active_queue_lock, NULL);
+		pthread_cond_init(&client->active_queue_cv, NULL);
 		client->id = test->num;
 		client->notify = test->notify;
 		client->interleave = 0;
 	} else {
-		server = malloc(sizeof(struct server_context), M_DEVBUF, M_WAITOK | M_ZERO);
+		server = calloc(1, sizeof(struct server_context));
 		TAILQ_INIT(&server->queue);
-		mtx_init(&server->lock, "svrqlk", NULL, MTX_DEF);
+		pthread_mutex_init(&server->lock, NULL);
+		pthread_cond_init(&server->cv, NULL);
 		server->id = test->num;
 		server->notify = test->notify;
 
-		if (kthread_add(loopback_thread, server, NULL, NULL, 0, 128*1024/PAGE_SIZE, "loopback_svr")) {
-			mtx_destroy(&server->lock);
-			free(server, M_DEVBUF);
+		if (pthread_create(&server->thread, NULL, loopback_thread, server)) {
+			pthread_mutex_destroy(&server->lock);
+			pthread_cond_destroy(&server->cv);
+			free(server);
 			goto out;
 		}
 	}
@@ -1250,14 +1172,17 @@ run_test(struct test_config *test, int verbose)
 		num_vlans = max_vlans;
 	}
 
-	num_local_addrs = inet_addr(test->local_ip_start) == INADDR_ANY ? 1 : test->num_local_ips;
-	num_local_ports = test->local_port_start == IN_PROMISC_PORT_ANY ? 1 : test->num_local_ports;
+	struct uinet_in_addr inaddr;
+
+	uinet_inet_pton(UINET_AF_INET, test->local_ip_start, &inaddr);
+	num_local_addrs = inaddr.s_addr == UINET_INADDR_ANY ? 1 : test->num_local_ips;
+	num_local_ports = test->local_port_start == UINET_IN_PROMISC_PORT_ANY ? 1 : test->num_local_ports;
 
 	vlan_number_to_tag_stack(test->vlan_start, vlan_tag_stack, test->vlan_stack_depth);
 
 	for (vlan_num = 0; vlan_num < num_vlans; vlan_num++) {
 
-		local_addr = inet_addr(test->local_ip_start);
+		uinet_inet_pton(UINET_AF_INET, test->local_ip_start, &local_addr);
 
 		for (local_addr_num = 0; local_addr_num < num_local_addrs; local_addr_num++) {
 
@@ -1268,18 +1193,18 @@ run_test(struct test_config *test, int verbose)
 					num_foreign_addrs = test->num_foreign_ips;
 					num_foreign_ports = test->num_foreign_ports;
 
-					foreign_addr = inet_addr(test->foreign_ip_start);
+					uinet_inet_pton(UINET_AF_INET, test->foreign_ip_start, &foreign_addr);
 
 					for (foreign_addr_num = 0; foreign_addr_num < num_foreign_addrs; foreign_addr_num++) {
 
 						foreign_port = test->foreign_port_start;
 						for (foreign_port_num = 0; foreign_port_num < num_foreign_ports; foreign_port_num++) {
 							struct client_conn *cc;
-							struct in_addr laddr, faddr;
+							struct uinet_in_addr laddr, faddr;
 							char buf1[16], buf2[16];
 							int size, remaining, i;
 
-							cc = malloc(sizeof(struct client_conn), M_DEVBUF, M_WAITOK | M_ZERO);
+							cc = calloc(1, sizeof(struct client_conn));
 							if (NULL == cc) {
 								error = ENOMEM;
 								goto out;
@@ -1302,12 +1227,10 @@ run_test(struct test_config *test, int verbose)
 
 							remaining = sizeof(cc->connstr);
 							
-							laddr.s_addr = cc->local_addr;
-							faddr.s_addr = cc->foreign_addr;
 							size = snprintf(cc->connstr, remaining, "%u: %s:%u -> %s:%u vlans=[ ", 
 									cc->fib,
-									inet_ntoa_r(laddr, buf1), cc->local_port,
-									inet_ntoa_r(faddr, buf2), cc->foreign_port);
+									uinet_inet_ntoa(cc->local_addr, buf1, sizeof(buf1)), cc->local_port,
+									uinet_inet_ntoa(cc->foreign_addr, buf2, sizeof(buf2)), cc->foreign_port);
 							
 							for (i = 0; i < cc->vlan_stack_depth; i++) {
 								remaining = size > remaining ? 0 : remaining - size;
@@ -1329,7 +1252,7 @@ run_test(struct test_config *test, int verbose)
 							foreign_port++;
 						}
 
-						incr_in_addr_t(&foreign_addr);
+						incr_in_addr(&foreign_addr);
 					}
 				} else {
 					so = create_test_socket(TEST_TYPE_PASSIVE, test->fib,
@@ -1341,10 +1264,10 @@ run_test(struct test_config *test, int verbose)
 
 					socket_count++;					
 
-					if ((error = dobind(so, local_addr, local_port)))
+					if ((error = dobind(so, &local_addr, local_port)))
 						goto out;
 
-					if ((error = solisten(so, SOMAXCONN, td))) {
+					if ((error = uinet_solisten(so, -1))) {
 						printf("Promisc socket listen failed (%d)\n", error);
 						goto out;
 					}
@@ -1355,7 +1278,7 @@ run_test(struct test_config *test, int verbose)
 				local_port++;
 			}
 
-			incr_in_addr_t(&local_addr);
+			incr_in_addr(&local_addr);
 		}
 
 		incr_vlan_tag_stack(vlan_tag_stack, test->vlan_stack_depth);
@@ -1364,17 +1287,18 @@ run_test(struct test_config *test, int verbose)
 	printf("created %u sockets\n", socket_count);
 
 	if (TEST_TYPE_ACTIVE == test->type) {
-		if (kthread_add(verify_thread, client, NULL, NULL, 0, 128*1024/PAGE_SIZE, "verify_cln")) {
+		if (pthread_create(&client->thread, NULL, verify_thread, client)) {
 			printf("Failed to create client thread\n");
-			mtx_destroy(&client->active_queue_lock);
-			free(client, M_DEVBUF);
+			pthread_mutex_destroy(&client->active_queue_lock);
+			pthread_cond_destroy(&client->active_queue_cv);
+			free(client);
 			goto out;
 		}
 	}
 
 out:
 	if (so) 
-		soclose(so);
+		uinet_soclose(so);
 
 	return (error);
 }
@@ -1685,28 +1609,20 @@ int main(int argc, char **argv)
 		return (0);
 	}
 
+	/*
+	 * Take care not to do to access the UINET API before this point.
+	 */
+	uinet_init(1, 5100*1024, 0);
+
 	for (i = 0; i < num_tests; i++) {
 		test = &tests[i];
 
-		uinet_config_if(test->ifname, 0, test->fib);
+		uinet_ifcreate(UINET_IFTYPE_NETMAP, test->ifname, test->ifname, test->fib, 0, NULL);
 	}
 
-
-	/*
-	 * Take care not to do to anything that requires any of the
-	 * user-kernel facilities before this point (such as referring to
-	 * curthread).
-	 */
-	uinet_init(1, 5100*1024);
-
-	printf("maxusers=%d\n", maxusers);
-	printf("maxfiles=%d\n", maxfiles);
-	printf("maxsockets=%d\n", maxsockets);
-	printf("nmbclusters=%d\n", nmbclusters);
-
 	for (i = 0; i < num_tests; i++) {
 		test = &tests[i];
-		if (uinet_interface_up(test->ifname, 0)) {
+		if (uinet_interface_up(test->ifname, 1)) {
 			printf("Failed to bring up interface %s\n", test->ifname);
 			return (1);
 		}
@@ -1720,52 +1636,8 @@ int main(int argc, char **argv)
 	}
 
 
-	unsigned int current = 0;
-	unsigned int last_read = 0;
-	unsigned int min, avg, max;
-	struct timespec last_time, this_time, elapsed;
-	unsigned int ticks_before, total_ticks;
-
-	total_ticks = 0;
-	clock_gettime(CLOCK_MONOTONIC, &last_time);
 	while (1) {
-		ticks_before = (unsigned int)ticks;
-		pause("slp", hz);
-		total_ticks += (unsigned int)ticks - ticks_before; 
-
-		current++;
-		if (current - last_read == 10) {
-			clock_gettime(CLOCK_MONOTONIC, &this_time);
-			elapsed = this_time;
-			timespecsub(&elapsed, &last_time);
-			last_time = this_time;
-
-			last_read = current;
-			tcp_tcbinfo_hashstats(&min, &avg, &max);
-			printf("TCP tcbinfo hashstats: min=%u avg=%u max=%u\n",
-			       min, avg, max);
-			
-			int values[4];
-			ssize_t len = sizeof(values[0]);
-			kernel_sysctlbyname(curthread, "debug.to_avg_depth", &values[0], &len, NULL, 0, NULL, 0);
-			kernel_sysctlbyname(curthread, "debug.to_avg_gcalls", &values[1], &len, NULL, 0, NULL, 0);
-			kernel_sysctlbyname(curthread, "debug.to_avg_lockcalls", &values[2], &len, NULL, 0, NULL, 0);
-			kernel_sysctlbyname(curthread, "debug.to_avg_mpcalls", &values[3], &len, NULL, 0, NULL, 0);
-			printf("to_avg_depth=%d.%03d ", values[0] / 1000, values[0] % 1000);
-			printf("to_avg_gcalls=%d.%03d ", values[1] / 1000, values[1] % 1000);
-			printf("to_avg_lockcalls=%d.%03d ", values[2] / 1000, values[2] % 1000);
-			printf("to_avg_mpcalls=%d.%03d\n", values[3] / 1000, values[3] % 1000);
-			
-			printf("ticks=%u\n", ticks);
-			
-			uint64_t est_hz;
-			
-			est_hz = (100 * 1000000000ULL * (uint64_t)total_ticks) / ((uint64_t)elapsed.tv_sec * 1000000000 + elapsed.tv_nsec);
-			total_ticks = 0;
-
-			printf("est. hz = %u.%02u, min_to_ticks=%d\n", (unsigned int)est_hz/100, (unsigned int)est_hz%100, min_to_ticks);
-			clock_gettime(CLOCK_MONOTONIC, &last_time);
-		}
+		sleep(1);
 	}
 
 	return (0);

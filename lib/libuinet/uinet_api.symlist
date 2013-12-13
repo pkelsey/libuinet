@@ -29,6 +29,7 @@ uinet_soconnect
 uinet_socreate
 uinet_sogetconninfo
 uinet_sogeterror
+uinet_sogetrxavail
 uinet_sogetsockopt
 uinet_sogetstate
 uinet_solisten

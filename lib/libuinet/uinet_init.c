@@ -165,5 +165,12 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 		}
 	}
 
+#if 0
+	printf("maxusers=%d\n", maxusers);
+	printf("maxfiles=%d\n", maxfiles);
+	printf("maxsockets=%d\n", maxsockets);
+	printf("nmbclusters=%d\n", nmbclusters);
+#endif
+
 	return (0);
 }
