@@ -320,6 +320,7 @@ if_netmap_txslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t 
 		
 	assert(len <= txr->nr_buf_size);
 
+	txr->slot[cur].len = len;
 	*slotno = NETMAP_RING_NEXT(txr, cur); 
 	return (NETMAP_BUF(txr, txr->slot[cur].buf_idx));
 }
