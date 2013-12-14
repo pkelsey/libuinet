@@ -328,7 +328,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 
 	sc = malloc(sizeof(struct if_netmap_softc), M_DEVBUF, M_WAITOK);
 	if (NULL == sc) {
-		printf("if_netmap_softc allocation failed");
+		printf("if_netmap_softc allocation failed\n");
 		error = ENOMEM;
 		goto fail;
 	}
@@ -343,7 +343,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 
 	fd = uhi_open("/dev/netmap", UHI_O_RDWR);
 	if (fd < 0) {
-		printf("/dev/netmap open failed");
+		printf("/dev/netmap open failed\n");
 		error = ENXIO;
 		goto fail;
 	}
@@ -453,7 +453,7 @@ if_netmap_send(void *arg)
 	
 		rv = if_netmap_txsync(sc->nm_host_ctx, NULL, NULL);
 		if (rv == -1) {
-			printf("could not sync tx descriptors before transmit");
+			printf("could not sync tx descriptors before transmit\n");
 		}
 	
 		while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
@@ -467,7 +467,7 @@ if_netmap_send(void *arg)
 				
 				rv = uhi_poll(&pfd, 1, -1);
 				if (rv == -1)
-					printf("error from poll for transmit");
+					printf("error from poll for transmit\n");
 					
 				avail = if_netmap_txavail(sc->nm_host_ctx);
 			}
@@ -491,7 +491,7 @@ if_netmap_send(void *arg)
 
 			rv = if_netmap_txsync(sc->nm_host_ctx, &avail, &cur);
 			if (rv == -1) {
-				printf("could not sync tx descriptors after transmit");
+				printf("could not sync tx descriptors after transmit\n");
 			}
 		}
 	}
@@ -619,7 +619,7 @@ if_netmap_receive(void *arg)
 
 	rv = if_netmap_rxsync(sc->nm_host_ctx, NULL, NULL, NULL);
 	if (rv == -1)
-		printf("could not sync rx descriptors before receive loop");
+		printf("could not sync rx descriptors before receive loop\n");
 
 	reserved = if_netmap_rxreserved(sc->nm_host_ctx);
 	sc->hw_rx_rsvd_begin = if_netmap_rxcur(sc->nm_host_ctx);
@@ -633,7 +633,7 @@ if_netmap_receive(void *arg)
 
 			rv = uhi_poll(&pfd, 1, -1);
 			if (rv == -1)
-				printf("error from poll for receive");
+				printf("error from poll for receive\n");
 		}
 
 		cur = if_netmap_rxcur(sc->nm_host_ctx);
@@ -699,7 +699,7 @@ if_netmap_receive(void *arg)
 
 		rv = if_netmap_rxsync(sc->nm_host_ctx, &avail, &cur, &reserved);
 		if (rv == -1)
-			printf("could not sync rx descriptors after receive");
+			printf("could not sync rx descriptors after receive\n");
 
 	}
 }
