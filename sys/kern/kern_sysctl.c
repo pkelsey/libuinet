@@ -1516,7 +1516,9 @@ sysctl_root(SYSCTL_HANDLER_ARGS)
 	if (!(oid->oid_kind & CTLFLAG_MPSAFE))
 		mtx_unlock(&Giant);
 
+#ifndef UINET
 	KFAIL_POINT_ERROR(_debug_fail_point, sysctl_running, error);
+#endif
 
 	SYSCTL_XLOCK();
 	oid->oid_running--;

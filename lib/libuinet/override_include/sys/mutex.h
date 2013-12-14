@@ -32,4 +32,4 @@
 #undef thread_unlock
 #define thread_unlock(tdp)	mtx_unlock((tdp)->td_lock);
 
-#endif	/* _UINET_SYS_PARAM_H_ */
+#endif	/* _UINET_SYS_MUTEX_H_ */

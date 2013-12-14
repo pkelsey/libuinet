@@ -5,7 +5,7 @@
 # Warning flags for compiling the kernel and components of the kernel:
 #
 
-CWARNFLAGS?=	-Wall -Wredundant-decls -Wnested-externs -Wstrict-prototypes \
+CWARNFLAGS?=	-Wall -Wnested-externs -Wstrict-prototypes \
 		-Wmissing-prototypes -Wpointer-arith -Winline -Wcast-qual \
 		-Wno-pointer-sign -Wmissing-include-dirs -fdiagnostics-show-option \
 		${CWARNEXTRA}

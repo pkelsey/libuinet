@@ -131,6 +131,7 @@ SYSINIT(placeholder, SI_SUB_DUMMY, SI_ORDER_ANY, NULL, NULL);
  * If we want to register new sysinit types, add them to newsysinit.
  */
 SET_DECLARE(sysinit_set, struct sysinit);
+SET_DECLARE(sysuninit_set, struct sysinit);
 struct sysinit **sysinit, **sysinit_end;
 struct sysinit **newsysinit, **newsysinit_end;
 
