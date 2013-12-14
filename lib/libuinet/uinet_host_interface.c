@@ -44,14 +44,18 @@
 #if defined(__FreeBSD__)
 #include <pthread_np.h>
 #endif /* __FreeBSD__ */
-#if defined(__linux__)
 #include <sched.h>
-#endif /* __linux__ */
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+#if defined(__APPLE__)
+#include <mach/clock.h>
+#include <mach/mach.h>
+#include <mach/thread_policy.h>
+#endif
 
 #if defined(__FreeBSD__)
 #include <sys/cpuset.h>
@@ -134,6 +138,24 @@ uhi_free(void *p)
 void
 uhi_clock_gettime(int id, int64_t *sec, long *nsec)
 {
+#if defined(__APPLE__)
+	clock_serv_t clock;
+	mach_timespec_t ts;
+
+	switch (id) {
+	case UHI_CLOCK_REALTIME:
+		host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &clock);
+		break;
+	case UHI_CLOCK_MONOTONIC:
+	default:
+		host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &clock);
+		break;
+	}
+	clock_get_time(clock, &ts);
+	mach_port_deallocate(mach_task_self(), clock);
+	*sec = ts.tv_sec;
+	*nsec = ts.tv_nsec;
+#else
 	struct timespec ts;
 	int host_id;
 	int rv;
@@ -153,6 +175,7 @@ uhi_clock_gettime(int id, int64_t *sec, long *nsec)
 
 	*sec = (int64_t)ts.tv_sec;
 	*nsec = (long)ts.tv_nsec;
+#endif /* __APPLE__ */
 }
 
 
@@ -260,11 +283,17 @@ uhi_poll(struct uhi_pollfd *fds, unsigned int nfds, int timeout)
 
 void uhi_thread_bind(unsigned int cpu)
 {
+#if defined(__APPLE__)
+	mach_port_t mach_thread = pthread_mach_thread_np(pthread_self());
+	thread_affinity_policy_data_t policy_data = { cpu + 1 };
+	thread_policy_set(mach_thread, THREAD_AFFINITY_POLICY, (thread_policy_t)&policy_data, 1);
+#else
 	cpuset_t cpuset;
 
 	CPU_ZERO(&cpuset);
 	CPU_SET(cpu, &cpuset);
 	pthread_setaffinity_np(pthread_self(), sizeof(cpuset_t), &cpuset);
+#endif /* __APPLE__ */
 }
 
 
@@ -362,7 +391,7 @@ uhi_thread_self(void)
 void
 uhi_thread_yield(void)
 {
-	pthread_yield();
+	sched_yield();
 }
 
 
@@ -430,8 +459,11 @@ uhi_cond_init(uhi_cond_t *c)
 	*c = pc;
 
 	pthread_condattr_init(&attr);
+
+#if !defined(__APPLE__)
 	if (0 != pthread_condattr_setclock(&attr, CLOCK_MONOTONIC))
 		printf("Warning: condition variable timed wait using CLOCK_REALTIME");
+#endif /* __APPLE__ */
 
 	return (pthread_cond_init(pc, &attr));
 }
@@ -500,7 +532,9 @@ uhi_mutex_init(uhi_mutex_t *m, int opts)
 		if (0 != pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE)) 
 			printf("Warning: mtx will not be recursive\n");
 	} else {
+#if !defined(__APPLE__)
 		if (0 != pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ADAPTIVE_NP))
+#endif /* __APPLE__ */
 			pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);
 	}
 

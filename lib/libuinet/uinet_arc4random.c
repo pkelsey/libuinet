@@ -31,9 +31,11 @@
 void	 arc4rand(void *ptr, unsigned int len, int reseed);
 
 
-#include <stdlib.h>
+#if !defined(__APPLE__)
 #include <openssl/rand.h>
-
+#else
+#include <stdlib.h>
+#endif
 
 /* 
  * Redirect to the user-space library version.
@@ -41,9 +43,17 @@ void	 arc4rand(void *ptr, unsigned int len, int reseed);
 void
 arc4rand(void *ptr, unsigned int len, int reseed)
 {
+
+#if !defined(__APPLE__)
 	(void)reseed;
 
 	/* XXX assuming that we don't have to manually seed this */
 
 	RAND_pseudo_bytes(ptr, len);
+#else
+	if (reseed)
+		arc4random_stir();
+
+	arc4random_buf(ptr, len);
+#endif
 }

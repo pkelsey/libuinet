@@ -93,7 +93,6 @@ UINET_SRCS+=			\
 	uinet_config.c		\
 	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
-	uinet_if_netmap.c	\
 	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
@@ -143,12 +142,20 @@ UINET_SRCS+=			\
 	uinet_vm_meter.c	\
 	uinet_vm_object.c
 
+ifneq (${HOST_OS},Darwin)
+UINET_SRCS+= uinet_if_netmap.c
+endif
+
+
 UINET_HOST_SRCS+=		\
 	uinet_api_errno.c	\
 	uinet_arc4random.c	\
 	uinet_host_interface.c  \
-	uinet_if_netmap_host.c	\
 	uinet_kern_shutdown.c
+
+ifneq (${HOST_OS},Darwin)
+UINET_HOST_SRCS+= uinet_if_netmap_host.c
+endif
 
 
 CRYPTO_SRCS+=			\
@@ -292,11 +299,17 @@ HOST_OBJS+= $(patsubst %.c,%.o,${HOST_SRCS})
 # externally available.
 #
 libuinet.a: machine_includes uinet_api.symlist ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS}
+ifeq (${HOST_OS},Darwin)
+	sed 's/.*/_&/' < uinet_api.symlist > uinet_api.symlist.darwin
+	${LD} -r -o $*.ro -exported_symbols_list uinet_api.symlist.darwin ${HOST_OBJS} ${OBJS}
+	rm uinet_api.symlist.darwin
+else
 	${LD} -r -o $*.ro ${HOST_OBJS} ${OBJS}
 	nm $*.ro  | grep -v ' U ' | cut -d ' ' -f 3 > $*_localize_list.tmp
 	objcopy --localize-symbols=$*_localize_list.tmp $*.ro 
 	rm $*_localize_list.tmp
 	objcopy --globalize-symbols=uinet_api.symlist $*.ro 
+endif
 	rm -f $@
 	ar -cqs $@ $*.ro
 	rm -f $*.ro
@@ -318,6 +331,7 @@ ${OBJS}: %.o: %.c ${IMACROS_FILE}
 
 .PHONY: clean
 clean:
+	rm -f libuinet.a
 	rm -f ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS} ${PROGRAM} ${IMACROS_FILE}
 	rm -rf ${MACHINE_INCLUDES_ROOT}
 

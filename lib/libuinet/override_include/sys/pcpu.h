@@ -28,6 +28,10 @@
 #define _UINET_SYS_PCPU_H_
 
 #include_next <sys/pcpu.h>
+
+#undef DPCPU_DEFINE
+#define DPCPU_DEFINE(t, n)      t DPCPU_NAME(n) __used
+
 #undef curcpu
 #undef curthread
 
