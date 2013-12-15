@@ -98,17 +98,21 @@ void uinet_dpcpu_init(void);
  * for example, 'modspace[DPCPU_MODMIN]'.  In that case, the result of
  * DPCPU_DEFADDR_NAME() will also be an array name, and the subsequent
  * definition of the defaddr var using this name will result in an array of
- * struct dpcpu_definition * instead of just a single pointer.  That's why
- * the lvalue in the assignment in DPCPU_REGISTER_DEFINITION() and the
- * dereference in _DPCPU_PTR() is *(&DPCPU_RELADDR_NAME(n)) - so it works
- * with such an array name.  It works, but it wastes space in the array name
- * case.
+ * struct dpcpu_definition * instead of just a single pointer.  It works,
+ * but it wastes space in the array name case.
  */
 #define DPCPU_DEFADDR_NAME(n) __CONCAT(dpcpu_registration_defaddr_for_, DPCPU_NAME(n))
 
-#define _DPCPU_REGISTER_DEFINITION(t, n, uniqifier)			\
-	static void dpcpu_registration_ ## uniqifier (void) __attribute__((__constructor__)); \
-	static void dpcpu_registration_ ## uniqifier (void) {		\
+/*
+ * The name 'n' may or may not be an array name.  DPCPU_DEF_GET()
+ * returns an lvalue within the allocated defaddr var with the name
+ * DPCPU_DEFADDR_NAME(n) in either case.
+ */
+#define DPCPU_DEF_GET(n) (&DPCPU_DEFADDR_NAME(n))[sizeof(struct { int n; }) > sizeof(int) ? -1 : 0]
+
+#define _DPCPU_REGISTER_DEFINITION(t, n, uniquifier)			\
+	static void dpcpu_registration_ ## uniquifier (void) __attribute__((__constructor__)); \
+	static void dpcpu_registration_ ## uniquifier (void) {		\
 		typedef struct { t DPCPU_NAME(n); } sizer;		\
 									\
 		if (dpcpu_num_definitions >= DPCPU_MAX_DEFINITIONS)	\
@@ -117,13 +121,13 @@ void uinet_dpcpu_init(void);
 		dpcpu_definitions[dpcpu_num_definitions].addr = &DPCPU_NAME(n);	\
 		dpcpu_definitions[dpcpu_num_definitions].copysize = sizeof(sizer); \
 		dpcpu_definitions[dpcpu_num_definitions].copyoffset = dpcpu_total_size; \
-		*(&DPCPU_DEFADDR_NAME(n)) = &dpcpu_definitions[dpcpu_num_definitions]; \
+		DPCPU_DEF_GET(n) = &dpcpu_definitions[dpcpu_num_definitions]; \
 		dpcpu_total_size += roundup(dpcpu_definitions[dpcpu_num_definitions].copysize, DPCPU_ALIGN); \
 		dpcpu_num_definitions++;				\
 	}
 
 /* The indirection is so macro unquifiers such as __LINE__ are expanded. */
-#define DPCPU_REGISTER_DEFINITION(t, n, uniqifier)	_DPCPU_REGISTER_DEFINITION(t, n, uniqifier)
+#define DPCPU_REGISTER_DEFINITION(t, n, uniquifier)	_DPCPU_REGISTER_DEFINITION(t, n, uniquifier)
 
 /*
  * Declaration and definition.
@@ -153,7 +157,7 @@ void uinet_dpcpu_init(void);
  */
 #undef _DPCPU_PTR
 #define	_DPCPU_PTR(b, n)					\
-	(__typeof(DPCPU_NAME(n))*)((b) + (*(&DPCPU_DEFADDR_NAME(n)))->copyoffset + DPCPU_START)
+	(__typeof(DPCPU_NAME(n))*)((b) + DPCPU_DEF_GET(n)->copyoffset + DPCPU_START)
 
 
 #undef curcpu
