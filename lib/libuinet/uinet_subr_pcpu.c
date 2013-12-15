@@ -35,13 +35,16 @@ unsigned int dpcpu_num_definitions;
 unsigned int dpcpu_total_size;
 unsigned char *dpcpu_init_area;
 
+
 void uinet_dpcpu_init(void)
 {
 	unsigned int i;
 	struct dpcpu_definition *def;
 
-	printf("uinet_dpcpu_init: %u definitions, total_size = %u\n", dpcpu_num_definitions, dpcpu_total_size);
-
+	/*
+	 * Copy all of the registered data structures to a continguous area,
+	 * as the implementation in subr_pcpu.c expects.
+	 */
 	dpcpu_init_area = malloc(dpcpu_total_size, M_DEVBUF, M_ZERO | M_WAITOK);
 	if (NULL == dpcpu_init_area)
 		panic("Could not allocate DPCPU init area\n");
