@@ -31,6 +31,7 @@
 
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/malloc.h>
 #include <sys/pcpu.h>
 #include <sys/smp.h>
 #include <sys/systm.h>
@@ -51,9 +52,25 @@ static void
 mp_start(void *dummy)
 {
 	int i;
+	void *dpcpu;
 	
+	uinet_dpcpu_init();
+
+        pcpup = malloc(sizeof(struct pcpu) * mp_ncpus, M_DEVBUF, M_ZERO);
+	if (NULL == pcpup)
+		panic("Failed to allocate PCPU space for %d cpus\n", mp_ncpus);
+
 	for (i = 0; i < mp_ncpus; i++) {
 		CPU_SET(i, &all_cpus);
+
+		pcpu_init(pcpup, i, sizeof(struct pcpu));
+		pcpup++;
+
+		dpcpu = malloc(DPCPU_SIZE, M_DEVBUF, M_WAITOK);
+		if (NULL == dpcpu)
+			panic("Failed to allocate DPCPU area for cpu %d\n", i);
+
+		dpcpu_init(dpcpu, i);
 	}
 
 	printf("UINET multiprocessor subsystem configured with %d CPUs\n", mp_ncpus);

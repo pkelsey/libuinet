@@ -29,8 +29,132 @@
 
 #include_next <sys/pcpu.h>
 
+/*
+ * Normally, the way the DPCPU (dynamic per-CPU) data facility works is that
+ * DPCPU_DECLARE() is used to allocate an instance of a (possibly
+ * statically-initialized) data structure in a particular linker section
+ * (aka, 'the linker set').  At runtime, the total size of that linker set
+ * is known, based on the linker-generated symbols at the start and end
+ * addresses of the section.  When each CPU initializes, it allocates memory
+ * in that amount (technically, rounded up to the next PAGE_SIZE),
+ * initializes it by copying the contents of the linker section described
+ * above into it, and attaches it to the PCPU (per-CPU) data structure for
+ * that CPU.  A given instance of a dynamic per-cpu data structure is then
+ * accessed via a pointer, whose address is computed by taking the offset
+ * between the symbol created by DPCPU_DECLARE() and the start of the linker
+ * section and adding that offset to the address of the per-CPU memory area
+ * allocated at CPU-initialization time.
+ *
+ * We reimplement this in UINET because we wish to not use linker sets, as
+ * they represent an obstacle to portability (for example, to systems using
+ * Mach-O, which restricts section names to 16 characters).  In this
+ * alternate implementation, the data structures allocated via
+ * DPCPU_DECLARE() are not placed in any special section.  Instead,
+ * automatically generated constructor functions are used to store context
+ * for each data structure, including its address, its size, and an assigned
+ * offset within the dynamic per-CPU memory areas, as well as track the
+ * total size of all of the so-declared data structures.
+ *
+ * During startup, this array and summary information created by the
+ * constructors during the runtime environment initialization is used to
+ * synthesize the equivalent to a linker set in memory.  With this, and the
+ * DPCPU_*() macro implementations adjusted where necessary to use this
+ * information, the entire existing implementation in subr_pcpu.c can be
+ * used without modification.
+ */
+
+
+/*
+ * Convenience defines.
+ */
+#undef DPCPU_START
+#undef DPCPU_STOP
+#undef DPCPU_BYTES
+#undef DPCPU_SIZE
+#define	DPCPU_START		((uintptr_t)dpcpu_init_area)
+#define	DPCPU_STOP		((uintptr_t)dpcpu_init_area + dpcpu_total_size)
+#define	DPCPU_BYTES		(DPCPU_STOP - DPCPU_START)
+#define	DPCPU_SIZE		roundup2(DPCPU_BYTES, PAGE_SIZE)
+
+
+struct dpcpu_definition {
+	void *addr;
+	size_t copysize;
+	uintptr_t copyoffset;
+};
+
+#define DPCPU_MAX_DEFINITIONS	64
+extern struct dpcpu_definition dpcpu_definitions[DPCPU_MAX_DEFINITIONS];
+extern unsigned int dpcpu_num_definitions;
+extern unsigned int dpcpu_total_size;
+extern unsigned char *dpcpu_init_area;
+
+void uinet_dpcpu_init(void);
+
+#define DPCPU_ALIGN	(ALIGNBYTES + 1)
+
+/*
+ * This is a bit of a hack when you consider that 'n' can be an array name,
+ * for example, 'modspace[DPCPU_MODMIN]'.  In that case, the result of
+ * DPCPU_DEFADDR_NAME() will also be an array name, and the subsequent
+ * definition of the defaddr var using this name will result in an array of
+ * struct dpcpu_definition * instead of just a single pointer.  That's why
+ * the lvalue in the assignment in DPCPU_REGISTER_DEFINITION() and the
+ * dereference in _DPCPU_PTR() is *(&DPCPU_RELADDR_NAME(n)) - so it works
+ * with such an array name.  It works, but it wastes space in the array name
+ * case.
+ */
+#define DPCPU_DEFADDR_NAME(n) __CONCAT(dpcpu_registration_defaddr_for_, DPCPU_NAME(n))
+
+#define _DPCPU_REGISTER_DEFINITION(t, n, uniqifier)			\
+	static void dpcpu_registration_ ## uniqifier (void) __attribute__((__constructor__)); \
+	static void dpcpu_registration_ ## uniqifier (void) {		\
+		typedef struct { t DPCPU_NAME(n); } sizer;		\
+									\
+		if (dpcpu_num_definitions >= DPCPU_MAX_DEFINITIONS)	\
+			panic("Too many DPCPU definitions\n");		\
+									\
+		dpcpu_definitions[dpcpu_num_definitions].addr = &DPCPU_NAME(n);	\
+		dpcpu_definitions[dpcpu_num_definitions].copysize = sizeof(sizer); \
+		dpcpu_definitions[dpcpu_num_definitions].copyoffset = dpcpu_total_size; \
+		*(&DPCPU_DEFADDR_NAME(n)) = &dpcpu_definitions[dpcpu_num_definitions]; \
+		dpcpu_total_size += roundup(dpcpu_definitions[dpcpu_num_definitions].copysize, DPCPU_ALIGN); \
+		dpcpu_num_definitions++;				\
+	}
+
+/* The indirection is so macro unquifiers such as __LINE__ are expanded. */
+#define DPCPU_REGISTER_DEFINITION(t, n, uniqifier)	_DPCPU_REGISTER_DEFINITION(t, n, uniqifier)
+
+/*
+ * Declaration and definition.
+ */
+#undef DPCPU_DECLARE
 #undef DPCPU_DEFINE
-#define DPCPU_DEFINE(t, n)      t DPCPU_NAME(n) __used
+#define	DPCPU_DECLARE(t, n)						\
+	extern t DPCPU_NAME(n);						\
+	extern struct dpcpu_definition *DPCPU_DEFADDR_NAME(n)
+
+/*
+ * The use of __LINE__ below as a uniquifier can of course fail to provide
+ * the required uniqueness, but in practice this has worked well enough.
+ */
+#define	DPCPU_DEFINE(t, n)						\
+	t DPCPU_NAME(n);						\
+	struct dpcpu_definition *DPCPU_DEFADDR_NAME(n);			\
+	DPCPU_REGISTER_DEFINITION(t, n, __LINE__)
+
+/*
+ * Accessors with a given base.
+ */
+
+/*
+ * DPCPU_START is added in the address computation below because of the way
+ * the base (pcpup->dynamic) is computed (see dpcpu_init() in subr_pcpu.c).
+ */
+#undef _DPCPU_PTR
+#define	_DPCPU_PTR(b, n)					\
+	(__typeof(DPCPU_NAME(n))*)((b) + (*(&DPCPU_DEFADDR_NAME(n)))->copyoffset + DPCPU_START)
+
 
 #undef curcpu
 #undef curthread

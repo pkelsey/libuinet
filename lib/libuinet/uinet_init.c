@@ -112,10 +112,6 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 
         /* vm_init bits */
 	
-        pcpup = malloc(sizeof(struct pcpu), M_DEVBUF, M_ZERO);
-        pcpu_init(pcpup, 0, sizeof(struct pcpu));
-
-	
 	/* first get size required, then alloc memory, then give that memory to the second call */
 	v = 0;
         v = kern_timeout_callwheel_alloc(v);
