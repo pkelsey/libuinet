@@ -101,6 +101,10 @@ struct pcpu *uinet_pcpu_get(void);
  * definition of the defaddr var using this name will result in an array of
  * struct dpcpu_definition * instead of just a single pointer.  It works,
  * but it wastes space in the array name case.
+ *
+ * XXX This hackishness could all be avoided if the upstream sources are
+ * modified to handle arrays through separate DCPU_DECLARE_ARRAY() and
+ * DCPU_DEFINE_ARRAY() macros.
  */
 #define DPCPU_DEFADDR_NAME(n) __CONCAT(dpcpu_registration_defaddr_for_, DPCPU_NAME(n))
 
@@ -108,6 +112,10 @@ struct pcpu *uinet_pcpu_get(void);
  * The name 'n' may or may not be an array name.  DPCPU_DEF_GET()
  * returns an lvalue within the allocated defaddr var with the name
  * DPCPU_DEFADDR_NAME(n) in either case.
+ *
+ * XXX This hackishness could all be avoided if the upstream sources are
+ * modified to handle arrays through separate DCPU_DECLARE_ARRAY() and
+ * DCPU_DEFINE_ARRAY() macros.
  */
 #define DPCPU_DEF_GET(n) (&DPCPU_DEFADDR_NAME(n))[sizeof(struct { int n; }) > sizeof(int) ? -1 : 0]
 
