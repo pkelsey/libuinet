@@ -33,10 +33,17 @@
 #include <vm/uma_int.h>
 
 
+/*
+ * XXX this should really be handled by SYSINIT I think.  Although it works
+ * out with the current port, calling mtx_init() before mutex_init() is
+ * called is technically wrong.
+ */
 static void thread_bucket_lock_init(void) __attribute__((constructor));
+static void uma_page_slab_hash_lock_init(void) __attribute__((constructor));
 
 
 struct mtx bucket_lock;
+struct mtx page_slab_hash_lock;
 int uma_page_mask;
 struct uma_page_head *uma_page_slab_hash;
 
@@ -59,4 +66,25 @@ thread_bucket_unlock(void)
 {
 
         mtx_unlock(&bucket_lock);
+}
+
+
+static void
+uma_page_slab_hash_lock_init(void)
+{
+	mtx_init(&page_slab_hash_lock, "uma page slab hash lock", NULL, MTX_DEF);
+}
+
+void
+uma_page_slab_hash_lock(void)
+{
+
+        mtx_lock(&page_slab_hash_lock);
+}
+
+void
+uma_page_slab_hash_unlock(void)
+{
+
+        mtx_unlock(&page_slab_hash_lock);
 }

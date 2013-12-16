@@ -35,15 +35,16 @@
 #undef	vsetslab
 #undef	vsetobj
 
-#define vsetobj(a, b)
+#define vsetobj(a, b)	panic("vsetobj() not implemented\n")
 
 #undef UMA_MD_SMALL_ALLOC
 #define NO_OBJ_ALLOC
 
-#include <sys/_pthreadtypes.h>
 
 void thread_bucket_lock(void);
 void thread_bucket_unlock(void);
+void uma_page_slab_hash_lock(void);
+void uma_page_slab_hash_unlock(void);
 
 #define critical_enter()        thread_bucket_lock()
 #define critical_exit()         thread_bucket_unlock()
@@ -51,11 +52,11 @@ void thread_bucket_unlock(void);
 extern int uma_page_mask;
 
 
-#define UMA_PAGE_HASH(va) (((va) >> PAGE_SHIFT) & uma_page_mask)
+#define UMA_PAGE_HASH(pgno) ((pgno) & uma_page_mask)
 
 typedef struct uma_page {
         LIST_ENTRY(uma_page)    list_entry;
-        vm_offset_t             up_va;
+	unsigned long		up_pageno;
         uma_slab_t              up_slab;
 } *uma_page_t;
 
@@ -67,12 +68,20 @@ vtoslab(vm_offset_t va)
 {       
         struct uma_page_head *hash_list;
         uma_page_t up;
+	uma_slab_t slab = NULL;
+	unsigned long pageno = atop(va);
 
-        hash_list = &uma_page_slab_hash[UMA_PAGE_HASH(va)];
-        LIST_FOREACH(up, hash_list, list_entry)
-                if (up->up_va == va)
-                        return (up->up_slab);
-        return (NULL);
+        hash_list = &uma_page_slab_hash[UMA_PAGE_HASH(pageno)];
+
+ 	uma_page_slab_hash_lock();
+	LIST_FOREACH(up, hash_list, list_entry)
+	    if (up->up_pageno == pageno) {
+		    slab = up->up_slab;
+		    break;
+	    }
+	uma_page_slab_hash_unlock();
+	
+        return (slab);
 }
 
 static __inline void
@@ -80,20 +89,26 @@ vsetslab(vm_offset_t va, uma_slab_t slab)
 {
         struct uma_page_head *hash_list;
         uma_page_t up;
-        hash_list = &uma_page_slab_hash[UMA_PAGE_HASH(va)];
-        LIST_FOREACH(up, hash_list, list_entry)
-                if (up->up_va == va)
+	unsigned long pageno = atop(va);
+	
+        hash_list = &uma_page_slab_hash[UMA_PAGE_HASH(pageno)];
+
+ 	uma_page_slab_hash_lock();
+	
+	LIST_FOREACH(up, hash_list, list_entry)
+                if (up->up_pageno == pageno)
                         break;
 
         if (up != NULL) {
                 up->up_slab = slab;
-                return;
-        }
+        } else {
+		up = malloc(sizeof(*up), M_DEVBUF, M_WAITOK);
+		up->up_pageno = pageno;
+		up->up_slab = slab;
+		LIST_INSERT_HEAD(hash_list, up, list_entry);
+	}
 
-        up = malloc(sizeof(*up), M_DEVBUF, M_WAITOK);
-        up->up_va = va;
-        up->up_slab = slab;
-        LIST_INSERT_HEAD(hash_list, up, list_entry);
+	uma_page_slab_hash_unlock();
 }
 
 #endif	/* _UINET_VM_UMA_INT_H_ */
