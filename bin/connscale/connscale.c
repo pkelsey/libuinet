@@ -329,7 +329,7 @@ server_conn_established(struct uinet_socket *so, void *arg, int waitflag)
 		       uinet_inet_ntoa(sc->remote_sin.sin_addr, buf2, sizeof(buf2)), ntohs(sc->remote_sin.sin_port));
 	}
 
-	uinet_soupcall_set(so, UINET_SO_RCV, server_conn_rcv, sc);
+	uinet_soupcall_set_locked(so, UINET_SO_RCV, server_conn_rcv, sc);
 
 	server_conn_rcv(so, arg, waitflag);
 
@@ -362,7 +362,7 @@ server_upcall(struct uinet_socket *head, void *arg, int waitflag)
 	sc->conn_state = CS_INIT;
 	sc->server = server;
 
-	uinet_soupcall_set(so, UINET_SO_RCV, server_conn_established, sc);
+	uinet_soupcall_set_locked(so, UINET_SO_RCV, server_conn_established, sc);
 
 out:
 	if (sa)
@@ -408,13 +408,15 @@ client_issue(struct client_context *client, struct client_conn *cc)
 				printf("dobind failed\n");
 			} else {
 				if ((error = doconnect(cc->so, &cc->foreign_addr, cc->foreign_port))) {
-					printf("doconnect failed\n");
+					if (UINET_EINPROGRESS != error)
+						printf("doconnect failed\n");
 				}
 			}
 		}
 
-		if (!error) {
+		if (!error || (UINET_EINPROGRESS == error)) {
 			client->connecting++;
+			client->outstanding++;
 			cc->conn_state = CS_CONNECTING;
 		} else {
 			cc->conn_state = CS_RETRY;
@@ -744,7 +746,7 @@ doconnect(struct uinet_socket *so, struct uinet_in_addr *addr, in_port_t port)
 	sin.sin_addr = *addr;
 	sin.sin_port = htons(port);
 	error = uinet_soconnect(so, (struct uinet_sockaddr *)&sin);
-	if (0 != error) {
+	if (error && (UINET_EINPROGRESS != error)) {
 		char buf[32];
 		printf("Connect to %s:%u failed (%d)\n", uinet_inet_ntoa(sin.sin_addr, buf, sizeof(buf)), port, error);
 	}
@@ -1025,6 +1027,8 @@ create_test_socket(unsigned int test_type, unsigned int fib,
 	memset(&l2i, 0, sizeof(l2i));
 		
 	if (TEST_TYPE_ACTIVE == test_type) {
+
+		uinet_sosetnonblocking(so, 1);
 
 		if ((error = mac_aton(foreign_mac, l2i.inl2i_foreign_addr)))
 			goto err;
