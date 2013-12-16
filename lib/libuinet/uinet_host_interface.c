@@ -285,14 +285,67 @@ void uhi_thread_bind(unsigned int cpu)
 {
 #if defined(__APPLE__)
 	mach_port_t mach_thread = pthread_mach_thread_np(pthread_self());
-	thread_affinity_policy_data_t policy_data = { cpu + 1 };
-	thread_policy_set(mach_thread, THREAD_AFFINITY_POLICY, (thread_policy_t)&policy_data, 1);
+	thread_affinity_policy_data_t policy_data = { cpu + 1 };   /* cpu + 1 to avoid using THREAD_AFFINITY_TAG_NULL */
+	thread_policy_set(mach_thread, THREAD_AFFINITY_POLICY, (thread_policy_t)&policy_data, THREAD_AFFINITY_POLICY_COUNT);
 #else
 	cpuset_t cpuset;
 
 	CPU_ZERO(&cpuset);
 	CPU_SET(cpu, &cpuset);
 	pthread_setaffinity_np(pthread_self(), sizeof(cpuset_t), &cpuset);
+#endif /* __APPLE__ */
+}
+
+
+int uhi_thread_bound_cpu(unsigned int ncpus)
+{
+#if defined(__APPLE__)
+	mach_port_t mach_thread = pthread_mach_thread_np(pthread_self());
+	thread_affinity_policy_data_t policy_data;
+	mach_msg_type_number_t count = THREAD_AFFINITY_POLICY_COUNT;
+	boolean_t get_default = FALSE;
+	int bound_cpu;
+	thread_policy_get(mach_thread, THREAD_AFFINITY_POLICY, (thread_policy_t)&policy_data, &count, &get_default);
+
+	bound_cpu = (int)policy_data.affinity_tag - 1;
+	
+	/* 
+	 * Thread affinity tags are arbitrary values.  We guard against this
+	 * routine being invoked in a thread whose tag has been adjusted by
+	 * the application as best we can.  We can't detect this happening
+	 * if the application is using a tag that is also a valid CPU number
+	 * of course, but we can detect if it's out of bounds and at least
+	 * treat that case as an unknown binding.
+	 */
+	if (bound_cpu >= ncpus)
+		bound_cpu = -1;
+
+	return (bound_cpu);
+#else
+	cpuset_t cpuset;
+	int bound_cpu;
+	int i;
+
+	pthread_getaffinity_np(pthread_self(), sizeof(cpuset_t), &cpuset);
+
+	/*
+	 * If the cpuset contains only one CPU, then that's the answer.  For
+	 * all other cpuset contents, we treat the binding as unknown.
+	 */
+	bound_cpu = -1;
+	for (i = 0; i < ncpus; i++) {
+		if (CPU_ISSET(i, &cpuset)) {
+			if (-1 == bound_cpu) {
+				bound_cpu = i;
+			} else {
+				bound_cpu = -1;
+				break;
+			}
+				
+		}
+	}
+
+	return (bound_cpu);
 #endif /* __APPLE__ */
 }
 

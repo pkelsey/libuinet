@@ -27,6 +27,7 @@
 #include <sys/param.h>
 #include <sys/malloc.h>
 #include <sys/pcpu.h>
+#include <sys/smp.h>
 #include <sys/systm.h>
 
 
@@ -36,7 +37,8 @@ unsigned int dpcpu_total_size;
 unsigned char *dpcpu_init_area;
 
 
-void uinet_dpcpu_init(void)
+void
+uinet_dpcpu_init(void)
 {
 	unsigned int i;
 	struct dpcpu_definition *def;
@@ -53,4 +55,20 @@ void uinet_dpcpu_init(void)
 		def = &dpcpu_definitions[i];
 		memcpy(&dpcpu_init_area[def->copyoffset], def->addr, def->copysize);
 	}
+}
+
+
+struct pcpu *
+uinet_pcpu_get(void)
+{
+	int bound_cpu;
+
+	/*
+	 * If the CPU binding is unknown, use PCPU data for CPU 0.
+	 */
+	bound_cpu = uhi_thread_bound_cpu(mp_ncpus);
+	if (-1 == bound_cpu)
+		return (&pcpup[0]);
+	else
+		return (&pcpup[bound_cpu]);
 }

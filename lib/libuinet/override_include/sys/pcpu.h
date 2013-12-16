@@ -90,6 +90,7 @@ extern unsigned int dpcpu_total_size;
 extern unsigned char *dpcpu_init_area;
 
 void uinet_dpcpu_init(void);
+struct pcpu *uinet_pcpu_get(void);
 
 #define DPCPU_ALIGN	(ALIGNBYTES + 1)
 
@@ -160,14 +161,9 @@ void uinet_dpcpu_init(void);
 	(__typeof(DPCPU_NAME(n))*)((b) + DPCPU_DEF_GET(n)->copyoffset + DPCPU_START)
 
 
-#undef curcpu
-#undef curthread
-
-/* XXX for where this is used, is a constant 0 sensible? */
-#define	curcpu	0
-
 #include "uinet_host_interface.h"
 
+#undef curthread
 #define curthread ((struct thread *)uhi_thread_get_thread_specific_data())
 
 

@@ -114,6 +114,7 @@ int   uhi_munmap(void *addr, uint64_t len);
 int   uhi_poll(struct uhi_pollfd *fds, unsigned int nfds, int timeout);
 
 void  uhi_thread_bind(unsigned int cpu);
+int   uhi_thread_bound_cpu(unsigned int ncpus);
 int   uhi_thread_create(uhi_thread_t *new_thread, struct uhi_thread_start_args *start_args, unsigned int stack_bytes);
 void  uhi_thread_exit(void) __attribute__((__noreturn__));
 void *uhi_thread_get_thread_specific_data(void);

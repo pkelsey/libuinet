@@ -38,10 +38,10 @@
 
 extern struct pcpu *pcpup;
 
-#define	PCPU_GET(member)	(pcpup->pc_ ## member)
-#define	PCPU_ADD(member, val)	(pcpup->pc_ ## member += (val))
+#define	PCPU_GET(member)	(uinet_pcpu_get()->pc_ ## member)
+#define	PCPU_ADD(member, val)	(PCPU_GET(member) += (val))
 #define	PCPU_INC(member)	PCPU_ADD(member, 1)
-#define	PCPU_PTR(member)	(&pcpup->pc_ ## member)
-#define	PCPU_SET(member, val)	(pcpup->pc_ ## member = (val))
+#define	PCPU_PTR(member)	(&PCPU_GET(member))
+#define	PCPU_SET(member, val)	(PCPU_GET(member) = (val))
 
 #endif	/* _UINET_MACHINE_PCPU_H_ */
