@@ -262,6 +262,7 @@ if_netmap_rxslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t 
 	uint32_t cur = *slotno;
 
 	*slotno = NETMAP_RING_NEXT(rxr, cur); 
+	*len = rxr->slot[cur].len;
 	*index = rxr->slot[cur].buf_idx;
 	return (NETMAP_BUF(rxr, rxr->slot[cur].buf_idx));
 }
