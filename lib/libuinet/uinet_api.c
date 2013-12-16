@@ -813,8 +813,17 @@ uinet_soupcall_set(struct uinet_socket *so, int which,
 	}
 
 	SOCKBUF_LOCK(sb);
-	soupcall_set(so_internal, which, (int (*)(struct socket *, void *, int))func, arg);
+	uinet_soupcall_set_locked(so, which, func, arg);
 	SOCKBUF_UNLOCK(sb);
+}
+
+
+void
+uinet_soupcall_set_locked(struct uinet_socket *so, int which,
+			  int (*func)(struct uinet_socket *, void *, int), void *arg)
+{
+	struct socket *so_internal = (struct socket *)so;
+	soupcall_set(so_internal, which, (int (*)(struct socket *, void *, int))func, arg);
 }
 
 
@@ -836,9 +845,17 @@ uinet_soupcall_clear(struct uinet_socket *so, int which)
 	}
 
 	SOCKBUF_LOCK(sb);
-	soupcall_clear(so_internal, which);
+	uinet_soupcall_clear_locked(so, which);
 	SOCKBUF_UNLOCK(sb);
 
+}
+
+
+void
+uinet_soupcall_clear_locked(struct uinet_socket *so, int which)
+{
+	struct socket *so_internal = (struct socket *)so;
+	soupcall_clear(so_internal, which);
 }
 
 

@@ -43,7 +43,9 @@ uinet_sogetpeeraddr
 uinet_sogetsockaddr
 uinet_soupcall_lock
 uinet_soupcall_clear
+uinet_soupcall_clear_locked
 uinet_soupcall_set
+uinet_soupcall_set_locked
 uinet_soupcall_unlock
 uinet_synfilter_deferral_alloc
 uinet_synfilter_deferral_deliver
