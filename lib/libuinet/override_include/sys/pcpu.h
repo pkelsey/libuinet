@@ -117,7 +117,7 @@ struct pcpu *uinet_pcpu_get(void);
  * modified to handle arrays through separate DCPU_DECLARE_ARRAY() and
  * DCPU_DEFINE_ARRAY() macros.
  */
-#define DPCPU_DEF_GET(n) (&DPCPU_DEFADDR_NAME(n))[sizeof(struct { int n; }) > sizeof(int) ? -1 : 0]
+#define DPCPU_DEF_GET(n) (&DPCPU_DEFADDR_NAME(n))[sizeof(struct { int n; }) > sizeof(int) ? -(sizeof(struct { int n; })/sizeof(int)) : 0]
 
 #define _DPCPU_REGISTER_DEFINITION(t, n, uniquifier)			\
 	static void dpcpu_registration_ ## uniquifier (void) __attribute__((__constructor__)); \
