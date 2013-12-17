@@ -36,8 +36,15 @@
  */
 
 #include <sys/param.h>
+#include <sys/kernel.h>
 #include <sys/pcpu.h>
 
+static void configure_final(void *dummy);
+
+SYSINIT(configure3, SI_SUB_CONFIGURE, SI_ORDER_ANY, configure_final, NULL);
+
+
+int cold = 1;
 
 struct pcpu *pcpup;
 
@@ -48,3 +55,8 @@ cpu_pcpu_init(struct pcpu *pcpu, int cpuid, size_t size)
 }
 
 
+static void
+configure_final(void *dummy)
+{
+	cold = 0;
+}
