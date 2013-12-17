@@ -431,7 +431,7 @@ client_issue(struct client_context *client, struct client_conn *cc)
 
 		cc->sends++;
 
-		len = snprintf(client->wirebuf, sizeof(client->wirebuf), "%s %llu", cc->connstr, cc->sends);
+		len = snprintf((char *)client->wirebuf, sizeof(client->wirebuf), "%s %llu", cc->connstr, cc->sends);
 		cc->rcv_len = len >= sizeof(client->wirebuf) - 1 ? sizeof(client->wirebuf) : len + 1;
 
 		if (client->notify > 1) printf("%s sending %u bytes\n", cc->connstr, cc->rcv_len);
@@ -638,7 +638,7 @@ verify_thread(void *arg)
 							printf("verify_thread: soreceive failed %d\n", error);
 							cc->conn_state = CS_RETRY;
 						} else {
-							if (0 != strncmp(cc->connstr, client->wirebuf, strlen(cc->connstr))) {
+							if (0 != strncmp(cc->connstr, (char *)client->wirebuf, strlen(cc->connstr))) {
 								printf("verification failed\n");
 								cc->conn_state = CS_RETRY;
 								fail++;
