@@ -54,7 +54,7 @@ INCLUDES+= -I$S/contrib/altq
 INCLUDES+= -I$S/contrib/pf
 
 CFLAGS=	${COPTFLAGS} ${C_DIALECT} ${DEBUG} ${CWARNFLAGS}
-KERNEL_CFLAGS= -D__FreeBSD__ -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h
+KERNEL_CFLAGS= -D__FreeBSD__ -D_KERNEL -DHAVE_KERNEL_OPTION_HEADERS -include opt_global.h -fno-builtin
 ifneq (${COMPILER_TYPE},clang)
 CFLAGS+= -fno-common -finline-limit=${INLINE_LIMIT}
 ifneq (${MACHINE_CPUARCH},mips)
