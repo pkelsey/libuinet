@@ -64,7 +64,7 @@ struct uinet_in6_addr {
 	} __u6_addr;			/* 128-bit IP6 address */
 };
 
-#define s6_addr   __u6_addr.__u6_addr8
+#define uinet_s6_addr   __u6_addr.__u6_addr8
 
 struct uinet_sockaddr_in {
 	uint8_t	sin_len;
