@@ -24,18 +24,21 @@
  */
 
 
-/*
- * Reproduced from sys/libkern.h, which is not included directly in order to
- * avoid massive definition conflict between it and std*.h below.
- */
-void	 arc4rand(void *ptr, unsigned int len, int reseed);
-
-
 #if !defined(__APPLE__)
 #include <openssl/rand.h>
 #else
 #include <stdlib.h>
 #endif
+
+#include <stdint.h>
+
+/*
+ * Reproduced from sys/libkern.h, which is not included directly in order to
+ * avoid massive definition conflict between it and std*.h below.
+ */
+void	 arc4rand(void *ptr, unsigned int len, int reseed);
+uint32_t arc4random(void);
+
 
 /* 
  * Redirect to the user-space library version.
@@ -57,3 +60,14 @@ arc4rand(void *ptr, unsigned int len, int reseed)
 	arc4random_buf(ptr, len);
 #endif
 }
+
+
+uint32_t
+arc4random(void)
+{
+        uint32_t ret;
+
+        arc4rand(&ret, sizeof ret, 0);
+        return ret;
+}
+
