@@ -212,7 +212,8 @@ KERN_MSRCS+=		\
 
 LIBKERN_SRCS+=		\
 	bcd.c		\
-	inet_ntoa.c
+	inet_ntoa.c	\
+	strlcpy.c
 
 
 MACHINE_SRCS+=		\
