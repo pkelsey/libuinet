@@ -34,6 +34,10 @@ CWARNEXTRA?=	-Wno-error-tautological-compare -Wno-error-empty-body \
 		-Wno-builtin-requires-header
 endif
 
+ifeq (${COMPILER_TYPE},gcc)
+CWARNEXTRA?=	-Wno-unused-but-set-variable
+endif
+
 #
 # On i386, do not align the stack to 16-byte boundaries.  Otherwise GCC 2.95
 # and above adds code to the entry and exit point of every function to align the
