@@ -90,7 +90,7 @@ struct	intr_entropy {
 void
 critical_enter(void)
 {
-/* grab hashed lock */
+/* XXX grab per-cpu mutex */
 }
 
 void
