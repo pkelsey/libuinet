@@ -31,9 +31,11 @@
 extern "C" {
 #endif
 
+
 #include "uinet_api_errno.h"
 #include "uinet_api_types.h"
 #include "uinet_config.h"
+#include "uinet_queue.h"
 
 void  uinet_finalize_thread(void);
 int   uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
@@ -49,20 +51,43 @@ int   uinet_l2tagstack_cmp(const struct uinet_in_l2tagstack *ts1, const struct u
 uint32_t uinet_l2tagstack_hash(const struct uinet_in_l2tagstack *ts);
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
 int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
+uinet_pool_t uinet_pool_create(char *name, int size, uinet_pool_ctor ctor, uinet_pool_dtor dtor,
+			       uinet_pool_init init, uinet_pool_fini fini, int align, uint16_t flags);
+void *uinet_pool_alloc_arg(uinet_pool_t pool, void *arg, int flags);
+static inline void *uinet_pool_alloc(uinet_pool_t pool, int flags);
+static inline void *
+uinet_pool_alloc(uinet_pool_t pool, int flags)
+{
+	return uinet_pool_alloc_arg(pool, NULL, flags);
+}
+void  uinet_pool_free_arg(uinet_pool_t pool, void *item, void *arg);
+static inline void  uinet_pool_free(uinet_pool_t pool, void *item);
+static inline void
+uinet_pool_free(uinet_pool_t pool, void *item)
+{
+	uinet_pool_free_arg(pool, item, NULL);
+}
+void  uinet_pool_destroy(uinet_pool_t pool);
+int   uinet_pool_set_max(uinet_pool_t pool, int nitems);
+int   uinet_pool_get_max(uinet_pool_t pool);
+int   uinet_pool_get_cur(uinet_pool_t pool);
 int   uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
 int   uinet_setl2info2(struct uinet_socket *so, uint8_t *local_addr, uint8_t *foreign_addr,
 		       uint16_t flags, struct uinet_in_l2tagstack *tagstack);
 int   uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struct uinet_socket **aso);
+int   uinet_soallocuserctx(struct uinet_socket *so);
 int   uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam);
 int   uinet_soclose(struct uinet_socket *so);
 int   uinet_soconnect(struct uinet_socket *so, struct uinet_sockaddr *nam);
 int   uinet_socreate(int dom, struct uinet_socket **aso, int type, int proto);
 void  uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc);
 int   uinet_sogeterror(struct uinet_socket *so);
-unsigned int uinet_sogetrxavail(struct uinet_socket *so);
 int   uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int *optlen);
 int   uinet_sogetstate(struct uinet_socket *so);
+void *uinet_sogetuserctx(struct uinet_socket *so, int key);
 int   uinet_solisten(struct uinet_socket *so, int backlog);
+	int   uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall);
+int   uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall);
 int   uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uinet_uio *uio, int *flagsp);
 void  uinet_sosetnonblocking(struct uinet_socket *so, unsigned int nonblocking);
 int   uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int optlen);
@@ -70,6 +95,7 @@ void  uinet_sosetupcallprep(struct uinet_socket *so,
 			    void (*soup_accept)(struct uinet_socket *, void *), void *soup_accept_arg,
 			    void (*soup_receive)(struct uinet_socket *, void *, int64_t, int64_t), void *soup_receive_arg,
 			    void (*soup_send)(struct uinet_socket *, void *, int64_t), void *soup_send_arg);
+void  uinet_sosetuserctx(struct uinet_socket *so, int key, void *ctx);
 int   uinet_sosend(struct uinet_socket *so, struct uinet_sockaddr *addr, struct uinet_uio *uio, int flags);
 int   uinet_soshutdown(struct uinet_socket *so, int how);
 int   uinet_sogetpeeraddr(struct uinet_socket *so, struct uinet_sockaddr **sa);
@@ -86,6 +112,8 @@ void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uine
 int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);
 uinet_synf_deferral_t uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie);
 int   uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_deferral_t deferral, int decision);
+void  uinet_synfilter_deferral_free(uinet_synf_deferral_t deferral);
+uinet_api_synfilter_cookie_t uinet_synfilter_deferral_get_cookie(uinet_synf_deferral_t deferral);
 
 #ifdef __cplusplus
 }

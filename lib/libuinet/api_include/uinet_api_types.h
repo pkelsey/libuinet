@@ -75,7 +75,7 @@ struct uinet_sockaddr_in {
 };
 
 struct uinet_in_addr_4in6 {
-	u_int32_t		ia46_pad32[3];
+	uint32_t		ia46_pad32[3];
 	struct	uinet_in_addr	ia46_addr4;
 };
 
@@ -84,8 +84,8 @@ struct uinet_in_addr_4in6 {
  * some extra padding to accomplish this.
  */
 struct uinet_in_endpoints {
-	u_int16_t	ie_fport;		/* foreign port */
-	u_int16_t	ie_lport;		/* local port */
+	uint16_t	ie_fport;		/* foreign port */
+	uint16_t	ie_lport;		/* local port */
 	/* protocol dependent part, local and foreign addr */
 	union {
 		/* foreign host table entry */
@@ -104,9 +104,9 @@ struct uinet_in_endpoints {
 #define	ie6_laddr	ie_dependladdr.ie6_local
 
 struct uinet_in_conninfo {
-	u_int8_t	inc_flags;
-	u_int8_t	inc_len;
-	u_int16_t	inc_fibnum;	/* XXX was pad, 16 bits is plenty */
+	uint8_t	inc_flags;
+	uint8_t	inc_len;
+	uint16_t	inc_fibnum;	/* XXX was pad, 16 bits is plenty */
 	/* protocol dependent part */
 	struct	uinet_in_endpoints inc_ie;
 };
@@ -254,10 +254,42 @@ struct uinet_in_l2info {
 };
 
 
-#define UINET_SYNF_ACCEPT	0	/* Process SYN normally */
-#define UINET_SYNF_REJECT	1	/* Discard SYN */
-#define UINET_SYNF_DEFER	2	/* Decision will be returned later via setsockopt() */
+#define UINET_SYNF_ACCEPT		0	/* Process SYN normally */
+#define UINET_SYNF_REJECT_RST		1	/* Discard SYN, send RST */
+#define UINET_SYNF_REJECT_SILENT	2	/* Discard SYN silently*/
+#define UINET_SYNF_DEFER		3	/* Decision will be returned later via setsockopt() */
 
 typedef void * uinet_synf_deferral_t;
+
+
+
+
+struct uinet_pool;
+
+typedef struct uinet_pool * uinet_pool_t;
+
+typedef int (*uinet_pool_ctor)(void *mem, int size, void *arg, int flags);
+typedef void (*uinet_pool_dtor)(void *mem, int size, void *arg);
+typedef int (*uinet_pool_init)(void *mem, int size, int flags);
+typedef void (*uinet_pool_fini)(void *mem, int size);
+
+/*
+ * Definitions for uinet_pool_create flags
+ */
+#define UINET_POOL_ZINIT	0x0002	/* Initialize with zeros */
+#define UINET_POOL_NOFREE	0x0020	/* Do not free slabs of this type! */
+#define	UINET_POOL_MAXBUCKET	0x0800	/* Use largest buckets */
+
+/* Definitions for align */
+#define UINET_POOL_ALIGN_PTR	(sizeof(void *) - 1)	/* Alignment fit for ptr */
+#define UINET_POOL_ALIGN_LONG	(sizeof(long) - 1)	/* "" long */
+#define UINET_POOL_ALIGN_INT	(sizeof(int) - 1)	/* "" int */
+#define UINET_POOL_ALIGN_SHORT	(sizeof(short) - 1)	/* "" short */
+#define UINET_POOL_ALIGN_CHAR	(sizeof(char) - 1)	/* "" char */
+#define UINET_POOL_ALIGN_CACHE	(0 - 1)			/* Cache line size align */
+
+#define	UINET_POOL_ALLOC_NOWAIT	0x0001		/* do not block */
+#define	UINET_POOL_ALLOC_WAITOK	0x0002		/* ok to block */
+#define	UINET_POOL_ALLOC_ZERO	0x0100		/* bzero the allocation */
 
 #endif /* _UINET_API_TYPES_H_ */

@@ -24,9 +24,9 @@
  */
 
 
-
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/limits.h>
 #include <sys/malloc.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
@@ -578,20 +578,6 @@ uinet_sogeterror(struct uinet_socket *so)
 }
 
 
-unsigned int
-uinet_sogetrxavail(struct uinet_socket *so)
-{
-	struct socket *so_internal = (struct socket *)so;
-	unsigned int avail;
-
-	SOCKBUF_LOCK(&so_internal->so_rcv);
-	avail = so_internal->so_rcv.sb_cc;
-	SOCKBUF_UNLOCK(&so_internal->so_rcv);
-
-	return avail;
-}
-
-
 int
 uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval,
 		   unsigned int *optlen)
@@ -619,6 +605,109 @@ int
 uinet_solisten(struct uinet_socket *so, int backlog)
 {
 	return solisten((struct socket *)so, backlog, curthread);
+}
+
+
+int
+uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int avail; 
+	int canread;
+
+	if (so_internal->so_options & SO_ACCEPTCONN) {
+		if (so_internal->so_error)
+			canread = -1;
+		else {
+			ACCEPT_LOCK();
+			canread = so_internal->so_qlen;
+			ACCEPT_UNLOCK();
+		}
+	} else {
+		if (!in_upcall)
+			SOCKBUF_LOCK(&so_internal->so_rcv);
+
+		avail = so_internal->so_rcv.sb_cc;
+		if (avail || (!so_internal->so_error && !(so_internal->so_rcv.sb_state & SBS_CANTRCVMORE))) {
+			if (avail > INT_MAX)
+				canread = INT_MAX;
+			else
+				canread = avail;
+		} else
+			canread = -1;
+
+		if (!in_upcall)
+			SOCKBUF_UNLOCK(&so_internal->so_rcv);
+	}
+
+	return canread;
+}
+
+
+int
+uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int space;
+	int canwrite;
+
+	if (so_internal->so_options & SO_ACCEPTCONN) {
+		canwrite = 0;
+	} else {
+		if (!in_upcall)
+			SOCKBUF_LOCK(&so_internal->so_snd);
+
+		if ((so_internal->so_snd.sb_state & SBS_CANTSENDMORE) ||
+		    so_internal->so_error ||
+		    (so_internal->so_state & SS_ISDISCONNECTED)) {
+			canwrite = -1;
+		} else if ((so_internal->so_state & SS_ISCONNECTED) == 0) {
+			canwrite = 0;
+		} else {
+			space = sbspace(&so_internal->so_snd);
+			if (space > INT_MAX)
+				canwrite = INT_MAX;
+			else
+				canwrite = space;
+		}
+
+		if (!in_upcall)
+			SOCKBUF_UNLOCK(&so_internal->so_snd);
+	}
+
+	return canwrite;
+}
+
+
+int
+uinet_soallocuserctx(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+
+	return souserctx_alloc(so_internal);
+}
+
+
+void *
+uinet_sogetuserctx(struct uinet_socket *so, int key)
+{
+	struct socket *so_internal = (struct socket *)so;
+
+	if ((key >= 0) && (key < SOMAXUSERCTX))
+		return (so_internal->so_user_ctx[key]);
+	else
+		return (NULL);
+		
+}
+
+
+void
+uinet_sosetuserctx(struct uinet_socket *so, int key, void *ctx)
+{
+	struct socket *so_internal = (struct socket *)so;
+
+	if ((key >= 0) && (key < SOMAXUSERCTX))
+		so_internal->so_user_ctx[key] = ctx;
 }
 
 
@@ -910,6 +999,20 @@ uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cook
 	*result = *cbarg;
 
 	return result;
+}
+
+
+void
+uinet_synfilter_deferral_free(uinet_synf_deferral_t deferral)
+{
+	free(deferral, M_DEVBUF);
+}
+
+
+uinet_api_synfilter_cookie_t
+uinet_synfilter_deferral_get_cookie(uinet_synf_deferral_t deferral)
+{
+	return ((uinet_api_synfilter_cookie_t)deferral);
 }
 
 
