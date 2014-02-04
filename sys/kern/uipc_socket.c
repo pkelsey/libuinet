@@ -3636,6 +3636,21 @@ soupcall_clear(struct socket *so, int which)
 	sb->sb_flags &= ~SB_UPCALL;
 }
 
+int
+souserctx_alloc(struct socket *so)
+{
+	int result;
+
+	SOCK_LOCK(so);
+	if (SOMAXUSERCTX == so->so_user_ctx_count)
+		result = -1;
+	else
+		result = so->so_user_ctx_count++;
+	SOCK_UNLOCK(so);
+
+	return (result);
+}
+
 /*
  * Create an external-format (``xsocket'') structure using the information in
  * the kernel-format socket structure pointed to by so.  This is done to

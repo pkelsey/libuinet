@@ -138,6 +138,9 @@ struct socket {
 	} so_upcallprep;		/* (a) initialized once immediately after socket creation */ 
 
 	struct in_l2info *so_l2info;	/* (b) PROMISCUOUS_INET L2 info */
+	unsigned int so_user_ctx_count; /* (b) number of user contexts in use, lock needed to increment */
+#define SOMAXUSERCTX 1
+	void *so_user_ctx[SOMAXUSERCTX]; /* (a) each pointer managed by user */
 };
 
 /*
@@ -380,6 +383,7 @@ void	sotoxsocket(struct socket *so, struct xsocket *xso);
 void	soupcall_clear(struct socket *so, int which);
 void	soupcall_set(struct socket *so, int which,
 	    int (*func)(struct socket *, void *, int), void *arg);
+int	souserctx_alloc(struct socket *so);
 void	sowakeup(struct socket *so, struct sockbuf *sb);
 int	selsocket(struct socket *so, int events, struct timeval *tv,
 	    struct thread *td);
