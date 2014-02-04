@@ -129,9 +129,10 @@ struct syn_filter {
 	 * This callback passes judgment on every original SYN heard by a
 	 * listening promiscuous socket.  Runs with INP_RLOCK(inp) held.
 	 */
-#define SYNF_ACCEPT	0	/* Process SYN normally */
-#define SYNF_REJECT	1	/* Discard SYN */
-#define SYNF_DEFER	2	/* Decision will be returned later via setsockopt() */
+#define SYNF_ACCEPT		0	/* Process SYN normally */
+#define SYNF_REJECT_RST		1	/* Discard SYN, send RST */
+#define SYNF_REJECT_SILENT	2	/* Discard SYN silently */
+#define SYNF_DEFER		3	/* Decision will be returned later via setsockopt() */
 	int	(*synf_callback)(struct inpcb *inp, void *inst_arg,
 				 struct syn_filter_cbarg *arg);
 

@@ -48,6 +48,9 @@
 #include <netinet/in_pcb.h>
 #include <netinet/in_promisc.h>
 #include <netinet/in_var.h>
+#include <netinet/ip.h>
+#include <netinet/ip_icmp.h>	/* required for icmp_var.h */
+#include <netinet/icmp_var.h>	/* for ICMP_BANDLIM */
 #include <netinet/tcp_syncache.h>
 
 
@@ -324,7 +327,7 @@ static int
 syn_filter_null_callback(struct inpcb *inp, void *inst_arg,
 			 struct syn_filter_cbarg *arg)
 {
-	return (SYNF_REJECT);
+	return (SYNF_REJECT_SILENT);
 }
 
 
@@ -654,15 +657,38 @@ syn_filter_setopt(struct socket *so, struct sockopt *sopt)
 			return (error);
 		}
 
-		if (SYNF_REJECT == cbarg.decision) {
+		switch (cbarg.decision) {
+		case SYNF_REJECT_SILENT:
 			m_freem(cbarg.m);
-		} else if (SYNF_ACCEPT == cbarg.decision) {
+			break;
+		case SYNF_REJECT_RST:
+			INP_WLOCK(inp);
+			/* The following is what tcp_dropwithreset() does
+			 * when only TH_SYN is set and none of the addresses
+			 * are broadcast or multicast, which is the case
+			 * with anything that makes it to syncache_add(),
+			 * which is on the only path to here.
+			 */
+			if (badport_bandlim(BANDLIM_RST_CLOSEDPORT) < 0)
+				m_freem(cbarg.m);
+			else {
+				/* tcp_respond consumes the mbuf chain. */
+				tcp_respond(sototcpcb(so), mtod(cbarg.m, void *), &cbarg.th, cbarg.m, cbarg.th.th_seq+1,
+					    (tcp_seq)0, TH_RST|TH_ACK);
+			}
+
+			INP_WUNLOCK(inp);
+			break;
+		case SYNF_ACCEPT:
+			INP_INFO_WLOCK(&V_tcbinfo);
 			INP_WLOCK(inp);
 			syncache_add(&cbarg.inc, &cbarg.to, &cbarg.th, inp, &so, cbarg.m);
 		
 			/* syncache_add performs the INP_WUNLOCK(inp) */
-		} else {
+			break;
+		default:
 			error = EINVAL;
+			break;
 		}
 
 		break;
