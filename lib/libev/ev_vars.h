@@ -199,5 +199,16 @@ VAR (acquire_cb, void (*acquire_cb)(EV_P) EV_THROW)
 VAR (invoke_cb , void (*invoke_cb) (EV_P))
 #endif
 
+#if EV_UINET_ENABLE || EV_GENWRAP
+#if EV_WALK_ENABLE || EV_GENWRAP
+VARx(UINET_LIST_HEAD(, ev_uinet), uinet_walk_head)
+#endif
+VARx(pthread_mutex_t, uinet_pend_lock)
+VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_pend_head)
+VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_prev_pend_head)
+VARx(ev_async, uinet_async_w)
+VARx(ev_prepare, uinet_prepare_w)
+#endif
+
 #undef VARx
 

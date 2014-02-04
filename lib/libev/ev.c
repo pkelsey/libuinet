@@ -45,14 +45,26 @@
 #  include "config.h"
 # endif
 
-#if HAVE_FLOOR
-# ifndef EV_USE_FLOOR
-#  define EV_USE_FLOOR 1
+# if HAVE_FLOOR
+#  ifndef EV_USE_FLOOR
+#   define EV_USE_FLOOR 1
+#  endif
 # endif
-#endif
 
+# ifdef HAVE_UINET_API_H
+#  ifndef EV_UINET_ENABLE
+#   define EV_UINET_ENABLE EV_FEATURE_WATCHERS
+#  endif
+# elif !defined EV_UINET_ENABLE
+#  define EV_UINET_ENABLE 0
+# endif
+
+/* EV_USE_CLOCK_SYSCALL will not be set to 1 if EV_UINET_ENABLE is true
+ * because libuinet requires libpthread, which removes the justification
+ * (see below) for using the slow syscall.
+ */
 # if HAVE_CLOCK_SYSCALL
-#  ifndef EV_USE_CLOCK_SYSCALL
+#  if !defined EV_USE_CLOCK_SYSCALL && !EV_UINET_ENABLE
 #   define EV_USE_CLOCK_SYSCALL 1
 #   ifndef EV_USE_REALTIME
 #    define EV_USE_REALTIME  0
@@ -161,7 +173,7 @@
 #  undef EV_USE_EVENTFD
 #  define EV_USE_EVENTFD 0
 # endif
- 
+
 #endif
 
 #include <stdlib.h>
@@ -2380,6 +2392,170 @@ childcb (EV_P_ ev_signal *sw, int revents)
 
 /*****************************************************************************/
 
+#if EV_UINET_ENABLE
+enum {
+  EV_UINET_PENDING   = 0x100 /* needs to be a bit that does not overlap EV_READ or EV_WRITE */
+};
+
+typedef struct ev_uinet_ctx
+{
+  struct uinet_socket *so;
+#if EV_MULTIPLICITY
+  struct ev_loop *loop;
+#endif
+  int pend_flags; /* locked by uinet_pend_lock */
+  unsigned short num_readers;
+  unsigned short num_writers;
+  WL head; /* list of watchers watching this socket */
+  UINET_LIST_ENTRY (ev_uinet_ctx) pend_list; /* entry on list of pending sockets */
+} ev_uinet_ctx;
+
+void inline_size
+uinet_socket_events (ev_uinet_ctx *soctx, int events)
+{
+  int new_pend_flags;
+  
+#if EV_MULTIPLICITY
+  EV_P = soctx->loop;
+#endif
+
+  new_pend_flags = events;
+
+  pthread_mutex_lock (&uinet_pend_lock);
+
+  if (!(soctx->pend_flags & EV_UINET_PENDING))
+    {
+      new_pend_flags |= EV_UINET_PENDING;
+      UINET_LIST_INSERT_HEAD (&uinet_pend_head, soctx, pend_list);
+      ev_async_send (EV_A_ &uinet_async_w);
+    }
+
+  soctx->pend_flags |= new_pend_flags;
+
+  pthread_mutex_unlock (&uinet_pend_lock);
+}
+
+static int noinline
+uinet_read_watcher_upcall (struct uinet_socket *so, void *arg, int wait_ok)
+{
+  ev_uinet_ctx *soctx = arg;
+
+  /* Filter out upcalls that don't represent a change in readability. */
+  if (uinet_soreadable (so, 1))
+    uinet_socket_events (soctx, EV_READ);
+
+  return UINET_SU_OK;
+}
+
+static int noinline
+uinet_write_watcher_upcall (struct uinet_socket *so, void *arg, int wait_ok)
+{
+  ev_uinet_ctx *soctx = arg;
+
+  /* Filter out upcalls that don't represent a change in writability. */
+  if (uinet_sowritable (so, 1))
+    uinet_socket_events (soctx, EV_WRITE);
+
+  return UINET_SU_OK;
+}
+
+static void
+uinet_reenable_upcalls (EV_P_ ev_prepare *w_prepare, int revents)
+{
+  ev_uinet_ctx *soctx;
+  ev_uinet_ctx *soctx_tmp;
+  struct uinet_socket *so;
+  int current_events;
+
+  /* All sockets on the prev_pend list have their upcalls disabled, so no
+   * need for locking here.  The SAFE variant of LIST_FOREACH is used as an
+   * upcall, subsequent to being enabled, or the call to
+   * uinet_socket_events(soctx,...) can insert that soctx in the pend list.
+   */
+  UINET_LIST_FOREACH_SAFE (soctx, &uinet_prev_pend_head, pend_list, soctx_tmp)
+    {
+      so = soctx->so;
+      current_events = 0;
+
+      if (soctx->num_readers > 0)
+	{
+	  uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
+	  
+	  if (uinet_soreadable (so, 0))
+	    current_events |= EV_READ;
+	}
+
+      if (soctx->num_writers > 0)
+	{
+	  uinet_soupcall_set (so, UINET_SO_SND, uinet_write_watcher_upcall, soctx);
+	  
+	  if (uinet_sowritable (so, 0))
+	    current_events |= EV_WRITE;
+	}
+
+      if (current_events)
+	uinet_socket_events (soctx, current_events);
+    }
+
+  UINET_LIST_INIT (&uinet_prev_pend_head);
+}
+
+static void
+uinet_process_pending_list (EV_P_ ev_async *w_async, int revents)
+{
+  ev_uinet_ctx *soctx;
+  ev_uinet *w;
+
+  assert(("libev: uinet_prev_pend list not empty", UINET_LIST_EMPTY (&uinet_prev_pend_head)));
+
+  pthread_mutex_lock (&uinet_pend_lock);
+  UINET_LIST_SWAP (&uinet_pend_head, &uinet_prev_pend_head, ev_uinet_ctx, pend_list);
+  pthread_mutex_unlock (&uinet_pend_lock);
+
+  /* Any sockets that were not pending during the above list swap and that
+   * now experience uinet_socket_events() via an upcall will wind up on the
+   * pending list.  Sockets that are now on the prev_pend list are only
+   * subject to having their pend_flags modified via upcalls (all other
+   * members are guaranteed stable), so no lock is necessary safely traverse
+   * the prev_pend list.
+   */
+
+  UINET_LIST_FOREACH (soctx, &uinet_prev_pend_head, pend_list)
+    {
+      /* Inhibit upcalls for all sockets that will have watchers invoked
+       * during this loop iteration so that the pending event status of
+       * these sockets does not change before those watchers complete their
+       * execution. Otherwise, there would be a race between the upcalls
+       * marking a socket as readable/writable and watchers clearing the
+       * readability/writability of the socket via their internal
+       * actions.
+       */
+      if (soctx->num_readers > 0)
+	uinet_soupcall_clear (soctx->so, UINET_SO_RCV); 
+
+      if (soctx->num_writers > 0)
+	uinet_soupcall_clear (soctx->so, UINET_SO_SND); 
+
+      /* As the upcalls for this socket are now disabled, we can safely
+       * access soctx->pend_flags without a lock.
+       */
+      w = (ev_uinet *)soctx->head;
+      while (w)
+	{
+	  revents = w->events & soctx->pend_flags;
+	  if (revents)
+	    ev_feed_event (EV_A_ w, revents);
+
+	  w = (ev_uinet *)w->next;
+	}
+
+      soctx->pend_flags = EV_NONE;
+    }
+}
+#endif
+
+/*****************************************************************************/
+
 #if EV_USE_IOCP
 # include "ev_iocp.c"
 #endif
@@ -2433,7 +2609,7 @@ ev_supported_backends (void) EV_THROW
   if (EV_USE_EPOLL ) flags |= EVBACKEND_EPOLL;
   if (EV_USE_POLL  ) flags |= EVBACKEND_POLL;
   if (EV_USE_SELECT) flags |= EVBACKEND_SELECT;
-  
+
   return flags;
 }
 
@@ -2623,6 +2799,23 @@ loop_init (EV_P_ unsigned int flags) EV_THROW
       ev_set_priority (&pipe_w, EV_MAXPRI);
 #endif
     }
+
+#if EV_UINET_ENABLE
+  pthread_mutex_init (&uinet_pend_lock, NULL);
+#if EV_WALK_ENABLE
+  UINET_LIST_INIT (&uinet_walk_head);
+#endif
+  UINET_LIST_INIT (&uinet_pend_head);
+  UINET_LIST_INIT (&uinet_prev_pend_head);
+
+  ev_init (&uinet_async_w, uinet_process_pending_list);
+  ev_async_start (EV_A_ &uinet_async_w);
+  ev_unref (EV_A); /* this async watcher should not keep loop alive */
+
+  ev_init (&uinet_prepare_w, uinet_reenable_upcalls);
+  ev_prepare_start (EV_A_ &uinet_prepare_w);
+  ev_unref (EV_A); /* this prepare watcher should not keep loop alive */
+#endif
 }
 
 /* free up a loop structure */
@@ -2662,6 +2855,22 @@ ev_loop_destroy (EV_P)
       if (evpipe [0] >= 0) EV_WIN32_CLOSE_FD (evpipe [0]);
       if (evpipe [1] >= 0) EV_WIN32_CLOSE_FD (evpipe [1]);
     }
+
+#if EV_UINET_ENABLE
+  if (ev_is_active (&uinet_async_w))
+    {
+      /*ev_ref (EV_A);*/
+      /*ev_async_stop (EV_A_ &uinet_async_w);*/
+    }
+
+  if (ev_is_active (&uinet_prepare_w))
+    {
+      /*ev_ref (EV_A);*/
+      /*ev_prepare_stop (EV_A_ &uinet_prepare_w);*/
+    }
+
+  pthread_mutex_destroy (&uinet_pend_lock);
+#endif
 
 #if EV_USE_SIGNALFD
   if (ev_is_active (&sigfd_w))
@@ -4613,6 +4822,163 @@ ev_async_send (EV_P_ ev_async *w) EV_THROW
 }
 #endif
 
+#if EV_UINET_ENABLE
+void *
+ev_uinet_attach (struct uinet_socket *so)
+{
+  ev_uinet_ctx *ctx;
+  int sokey;
+  
+  ctx = ev_malloc (sizeof(ev_uinet_ctx));
+  if (NULL != ctx)
+    {
+      sokey = uinet_soallocuserctx (so);
+      if (-1 == sokey)
+	{
+	  free (ctx);
+	  ctx = NULL;
+	}
+      else
+	{
+	  memset (ctx, 0, sizeof(*ctx));
+	  ctx->so = so;
+	  uinet_sosetuserctx (so, sokey, ctx);
+	}
+    }
+
+  return (ctx);
+}
+
+void
+ev_uinet_detach (void *ctx)
+{
+  ev_free (ctx);
+}
+
+void
+ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
+{
+  ev_uinet_ctx *soctx = w->ctx;
+  struct uinet_socket *so = soctx->so;
+  int initial_events;
+
+  if (expect_false (ev_is_active (w)))
+    return;
+
+  assert (("libev: ev_uinet_start called with NULL socket", NULL != so));
+  assert (("libev: ev_uinet_start called with illegal event mask", !(w->events & ~(EV_READ | EV_WRITE))));
+  assert (("libev: ev_uinet_start called with empty event mask", w->events & (EV_READ | EV_WRITE)));
+
+  EV_FREQUENT_CHECK;
+
+  ev_start (EV_A_ (W)w, 1);
+
+  w->so = so;
+
+#if EV_WALK_ENABLE
+  UINET_LIST_INSERT_HEAD (&uinet_walk_head, w, walk_list);
+#endif
+
+  wlist_add (&soctx->head, (WL)w);
+
+  initial_events = 0;
+
+  if (w->events & EV_READ)
+    {
+      if (0 == soctx->num_readers)
+	{
+	  /* Setting the loop in soctx here allows migrating a socket to
+	   * another loop when all watchers for that socket are stopped.
+	   */
+#if EV_MULTIPLICITY
+	  soctx->loop = EV_A;
+#endif
+	  uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
+	}
+
+      soctx->num_readers++;
+
+      if (uinet_soreadable (so, 0))
+	initial_events |= EV_READ;
+    }
+
+  if (w->events & EV_WRITE)
+    {
+      if (0 == soctx->num_writers)
+	{
+	  /* Setting the loop in soctx here allows migrating a socket to
+	   * another loop when all watchers for that socket are stopped.
+	   */
+#if EV_MULTIPLICITY
+	  soctx->loop = EV_A;
+#endif
+	  uinet_soupcall_set (so, UINET_SO_SND, uinet_write_watcher_upcall, soctx);
+	}
+
+      soctx->num_writers++;
+      
+      if (uinet_sowritable (so, 0))
+	initial_events |= EV_WRITE;
+    }
+
+  /* It is important to set the upcalls before reporting the initial events
+   * in order to avoid missing events due to the race inherent in executing
+   * those two actions the other way.
+   */
+  if (initial_events)
+	  uinet_socket_events (soctx, initial_events);
+
+  EV_FREQUENT_CHECK;
+}
+
+void noinline
+ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
+{
+  ev_uinet_ctx *soctx = w->ctx;
+  struct uinet_socket *so = soctx->so;
+
+  clear_pending (EV_A_ (W)w);
+  if (expect_false (!ev_is_active (w)))
+    return;
+
+  EV_FREQUENT_CHECK;
+
+  if (w->events & EV_READ)
+    {
+      soctx->num_readers--;
+      if (0 == soctx->num_readers)
+	uinet_soupcall_clear (so, UINET_SO_RCV);
+    }
+
+  if (w->events & EV_WRITE)
+    {
+      soctx->num_writers--;
+      if (0 == soctx->num_writers)
+	uinet_soupcall_clear (so, UINET_SO_SND);
+    }
+
+  wlist_del (&soctx->head, (WL)w);
+
+  /* If there are now no more watchers for this socket and it is on the
+   * pending list, remove it from the pending list. No lock is required for
+   * accessing soctx->pend_flags because it will only be checked when there
+   * are no watchers, and thus no upcalls installed.
+   */
+  if ((NULL == soctx->head) && (soctx->pend_flags & EV_UINET_PENDING)) {
+    soctx->pend_flags = EV_NONE;
+    UINET_LIST_REMOVE (soctx, pend_list);
+  }
+
+#if EV_WALK_ENABLE
+  UINET_LIST_REMOVE (w, walk_list);
+#endif
+
+  ev_stop (EV_A_ (W)w);
+
+  EV_FREQUENT_CHECK;
+}
+#endif
+
 /*****************************************************************************/
 
 struct ev_once
@@ -4791,6 +5157,16 @@ ev_walk (EV_P_ int types, void (*cb)(EV_P_ int type, void *w)) EV_THROW
           cb (EV_A_ EV_CHILD, wl);
           wl = wn;
         }
+#endif
+
+#if EV_USE_UINET
+  if (types & EV_UINET)
+    for (wl = uinet_walk_head; wl; )
+      {
+          wn = wl->next;
+          cb (EV_A_ EV_UINET, wl);
+          wl = wn;
+      }
 #endif
 /* EV_STAT     0x00001000 /* stat data changed */
 /* EV_EMBED    0x00010000 /* embedded event loop needs sweep */

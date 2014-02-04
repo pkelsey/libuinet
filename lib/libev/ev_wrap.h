@@ -91,6 +91,12 @@
 #define timercnt ((loop)->timercnt)
 #define timermax ((loop)->timermax)
 #define timers ((loop)->timers)
+#define uinet_async_w ((loop)->uinet_async_w)
+#define uinet_pend_head ((loop)->uinet_pend_head)
+#define uinet_pend_lock ((loop)->uinet_pend_lock)
+#define uinet_prepare_w ((loop)->uinet_prepare_w)
+#define uinet_prev_pend_head ((loop)->uinet_prev_pend_head)
+#define uinet_walk_head ((loop)->uinet_walk_head)
 #define userdata ((loop)->userdata)
 #define vec_eo ((loop)->vec_eo)
 #define vec_max ((loop)->vec_max)
@@ -190,6 +196,12 @@
 #undef timercnt
 #undef timermax
 #undef timers
+#undef uinet_async_w
+#undef uinet_pend_head
+#undef uinet_pend_lock
+#undef uinet_prepare_w
+#undef uinet_prev_pend_head
+#undef uinet_walk_head
 #undef userdata
 #undef vec_eo
 #undef vec_max

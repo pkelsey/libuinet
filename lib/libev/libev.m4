@@ -40,3 +40,21 @@ if test -z "$LIBEV_M4_AVOID_LIBM"; then
 fi
 AC_SEARCH_LIBS(floor, $LIBM, [AC_DEFINE(HAVE_FLOOR, 1, Define to 1 if the floor function is available)])
 
+AC_ARG_WITH([uinet],
+   AS_HELP_STRING([--with-uinet@<:@=PATH@:>@], [enable watchers for libuinet sockets (subject to EV_FEATURES), search for libuinet headers in PATH]),
+   [WITH_UINET=$withval],[WITH_UINET=no])
+
+UINET_CFLAGS=""
+
+AS_IF([test "$WITH_UINET" != "no"], [
+   if test "$WITH_UINET" != ""; then
+      UINET_CFLAGS="-I$WITH_UINET"
+   fi
+
+   orig_CPPFLAGS="$CPPFLAGS"
+   CPPFLAGS="$CPPFLAGS $UINET_CFLAGS"
+   AC_CHECK_HEADERS([uinet_api.h], [], [AC_MSG_ERROR([libuinet headers not found])])
+   CPPFLAGS="$orig_CPPFLAGS"
+])
+
+AC_SUBST([UINET_CFLAGS])

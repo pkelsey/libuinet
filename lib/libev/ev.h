@@ -133,6 +133,10 @@ EV_CPP(extern "C" {)
 # define EV_EMBED_ENABLE EV_FEATURE_WATCHERS
 #endif
 
+#ifndef EV_UINET_ENABLE
+# define EV_UINET_ENABLE 0
+#endif
+
 #ifndef EV_WALK_ENABLE
 # define EV_WALK_ENABLE 0 /* not yet */
 #endif
@@ -142,6 +146,16 @@ EV_CPP(extern "C" {)
 #if EV_CHILD_ENABLE && !EV_SIGNAL_ENABLE
 # undef EV_SIGNAL_ENABLE
 # define EV_SIGNAL_ENABLE 1
+#endif
+
+#if EV_UINET_ENABLE && !EV_ASYNC_ENABLE
+# undef EV_ASYNC_ENABLE
+# define EV_ASYNC_ENABLE 1
+#endif
+
+#if EV_UINET_ENABLE && !EV_PREPARE_ENABLE
+# undef EV_PREPARE_ENABLE
+# define EV_PREPARE_ENABLE 1
 #endif
 
 /*****************************************************************************/
@@ -159,6 +173,11 @@ typedef double ev_tstamp;
 #  include <sys/types.h>
 # endif
 # include <sys/stat.h>
+#endif
+
+#if EV_UINET_ENABLE
+# include <inttypes.h>
+# include <uinet_api.h>
 #endif
 
 /* support multiple event loops? */
@@ -211,8 +230,8 @@ struct ev_loop;
 enum {
   EV_UNDEF    = (int)0xFFFFFFFF, /* guaranteed to be invalid */
   EV_NONE     =            0x00, /* no events */
-  EV_READ     =            0x01, /* ev_io detected read will not block */
-  EV_WRITE    =            0x02, /* ev_io detected write will not block */
+  EV_READ     =            0x01, /* ev_io/ev_uinet detected read will not block */
+  EV_WRITE    =            0x02, /* ev_io/ev_uinet detected write will not block */
   EV__IOFDSET =            0x80, /* internal use only */
   EV_IO       =         EV_READ, /* alias for type-detection */
   EV_TIMER    =      0x00000100, /* timer timed out */
@@ -230,6 +249,7 @@ enum {
   EV_FORK     =      0x00020000, /* event loop resumed in child */
   EV_CLEANUP  =      0x00040000, /* event loop resumed in child */
   EV_ASYNC    =      0x00080000, /* async intra-loop signal */
+  EV_UINET    =      0x00100000, /* for type detection */
   EV_CUSTOM   =      0x01000000, /* for use by user code */
   EV_ERROR    = (int)0x80000000  /* sent when an error occurs */
 };
@@ -458,6 +478,22 @@ typedef struct ev_async
 # define ev_async_pending(w) (+(w)->sent)
 #endif
 
+#if EV_UINET_ENABLE
+/* invoked when socket is either EV_READable or EV_WRITEable */
+/* revent EV_READ, EV_WRITE */
+typedef struct ev_uinet
+{
+  EV_WATCHER_LIST (ev_uinet)
+
+#if EV_WALK_ENABLE
+  UINET_LIST_ENTRY(ev_uinet) walk_list; /* private */
+#endif
+  struct ev_uinet_ctx *ctx;             /* private */
+  struct uinet_socket *so;              /* ro */
+  int events;                           /* ro */
+} ev_uinet;
+#endif
+
 /* the presence of this union forces similar struct layout */
 union ev_any_watcher
 {
@@ -488,6 +524,9 @@ union ev_any_watcher
 #endif
 #if EV_ASYNC_ENABLE
   struct ev_async async;
+#endif
+#if EV_UINET_ENABLE
+  struct ev_uinet uinet;
 #endif
 };
 
@@ -695,6 +734,7 @@ EV_API_DECL void ev_resume  (EV_P) EV_THROW;
 #define ev_fork_set(ev)                      /* nop, yes, this is a serious in-joke */
 #define ev_cleanup_set(ev)                   /* nop, yes, this is a serious in-joke */
 #define ev_async_set(ev)                     /* nop, yes, this is a serious in-joke */
+#define ev_uinet_set(ev,ctx_,events_)        do { (ev)->ctx = (ctx_); (ev)->events = (events_); } while (0)
 
 #define ev_io_init(ev,cb,fd,events)          do { ev_init ((ev), (cb)); ev_io_set ((ev),(fd),(events)); } while (0)
 #define ev_timer_init(ev,cb,after,repeat)    do { ev_init ((ev), (cb)); ev_timer_set ((ev),(after),(repeat)); } while (0)
@@ -709,6 +749,7 @@ EV_API_DECL void ev_resume  (EV_P) EV_THROW;
 #define ev_fork_init(ev,cb)                  do { ev_init ((ev), (cb)); ev_fork_set ((ev)); } while (0)
 #define ev_cleanup_init(ev,cb)               do { ev_init ((ev), (cb)); ev_cleanup_set ((ev)); } while (0)
 #define ev_async_init(ev,cb)                 do { ev_init ((ev), (cb)); ev_async_set ((ev)); } while (0)
+#define ev_uinet_init(ev,cb,ctx,events)      do { ev_init ((ev), (cb)); ev_uinet_set ((ev),(ctx),(events)); } while (0)
 
 #define ev_is_pending(ev)                    (0 + ((ev_watcher *)(void *)(ev))->pending) /* ro, true when watcher is waiting for callback invocation */
 #define ev_is_active(ev)                     (0 + ((ev_watcher *)(void *)(ev))->active) /* ro, true when the watcher has been started */
@@ -814,6 +855,13 @@ EV_API_DECL void ev_embed_sweep    (EV_P_ ev_embed *w) EV_THROW;
 EV_API_DECL void ev_async_start    (EV_P_ ev_async *w) EV_THROW;
 EV_API_DECL void ev_async_stop     (EV_P_ ev_async *w) EV_THROW;
 EV_API_DECL void ev_async_send     (EV_P_ ev_async *w) EV_THROW;
+# endif
+
+# if EV_UINET_ENABLE
+EV_API_DECL void *ev_uinet_attach  (struct uinet_socket *so) EV_THROW;
+EV_API_DECL void ev_uinet_detach   (void *ctx) EV_THROW;
+EV_API_DECL void ev_uinet_start    (EV_P_ ev_uinet *w) EV_THROW;
+EV_API_DECL void ev_uinet_stop     (EV_P_ ev_uinet *w) EV_THROW;
 # endif
 
 #if EV_COMPAT3
