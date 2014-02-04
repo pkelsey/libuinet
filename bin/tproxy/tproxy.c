@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2013-2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,7 +23,7 @@
  * SUCH DAMAGE.
  */
 
-
+#include <assert.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -37,57 +37,40 @@
 
 #include "uinet_api.h"
 
+#define EV_STANDALONE 1
+#define EV_UINET_ENABLE 1
+#include <ev.h>
 
-enum event_type {
-	EVENT_CONNECTED,
-	EVENT_RCV_READY,
-	EVENT_SND_READY
-};
-
-struct connection_context;
-
-struct event {
-	TAILQ_ENTRY(event) event_queue;
-	struct connection_context *conn;
-	enum event_type type;
-	int active;
-};
-
-
-struct event_queue {
-	TAILQ_HEAD(event_list_head, event) queue;
-	pthread_mutex_t lock;
-	pthread_cond_t cv;
-};
-
-
-struct splice_context *splice;
 
 struct connection_context {
-	struct splice_context *splice;
 	struct uinet_socket *so;
-	struct uinet_sockaddr *local_addr;	/* debugging aid */
-	struct uinet_sockaddr *foreign_addr;	/* debugging aid */
-	struct event_queue *eq;
-	struct event rcv_ready;
-	struct event snd_ready;
-	struct event connected;
-#define CONN_BUFFER_SIZE 1024
-	unsigned int occupied;
-	unsigned int input_index;
-	unsigned int output_index;
-	uint8_t buffer[CONN_BUFFER_SIZE];
+	void *soctx;
+	unsigned int write_shut;
+};
+
+
+struct pipe_context {
+	const char *name;
+	struct splice_context *splice;
+	struct connection_context *from;
+	struct connection_context *to;
+	ev_uinet from_watcher;
+	ev_uinet to_watcher;
 };
 
 
 struct splice_context {
 	TAILQ_ENTRY(splice_context) splice_table;
 	struct proxy_context *proxy;
-	void *synf_deferral;
-	struct uinet_sockaddr *client_addr;
-	struct uinet_sockaddr *server_addr;
+	ev_uinet outbound_connect_watcher;
+	uinet_synf_deferral_t synf_deferral;
+	struct uinet_in_l2tagstack l2tags;
+	struct uinet_sockaddr_in client_addr;
+	struct uinet_sockaddr_in server_addr;
 	struct connection_context client;
 	struct connection_context server;
+	struct pipe_context client_to_server;
+	struct pipe_context server_to_client;
 };
 
 
@@ -97,10 +80,21 @@ struct splice_table {
 	uint32_t mask;
 };
 
+
+struct synf_queue_entry {
+	STAILQ_ENTRY(synf_queue_entry) synf_queue;
+	struct splice_context *splice;
+};
+
+
 struct proxy_context {
+	struct ev_loop *loop;
 	pthread_t thread;
 	struct uinet_socket *listener;
-	struct event_queue eq;
+	ev_uinet listen_watcher;
+	ev_async synf_watcher;
+	pthread_mutex_t synf_queue_lock;
+	STAILQ_HEAD(, synf_queue_entry) synf_queue;
 	struct splice_table splicetab;
 	int verbose;
 	unsigned int client_fib;
@@ -108,108 +102,73 @@ struct proxy_context {
 };
 
 
+static __inline int imin(int a, int b) { return (a < b ? a : b); }
 
 
-static int
-event_init(struct event *e, struct connection_context *conn, enum event_type type)
+static void
+print_inc(struct uinet_in_conninfo *inc, int local)
 {
-	e->conn = conn;
-	e->type = type;
-	e->active = 0;
+	char buf[32];
 
-	return (0);
+	if (local)
+		printf("%s:%u", uinet_inet_ntoa(inc->inc_ie.ie_laddr, buf, sizeof(buf)), ntohs(inc->inc_ie.ie_lport));
+	else
+		printf("%s:%u", uinet_inet_ntoa(inc->inc_ie.ie_faddr, buf, sizeof(buf)), ntohs(inc->inc_ie.ie_fport));
 }
 
 
 static void
-event_send(struct event_queue *q, struct event *e)
+print_sin_port(struct uinet_sockaddr_in *sin, uint16_t port)
 {
-	pthread_mutex_lock(&q->lock);
-	if (!e->active) {
-		e->active = 1;
-		TAILQ_INSERT_TAIL(&q->queue, e, event_queue);
-		pthread_cond_signal(&q->cv);
-	}
-	pthread_mutex_unlock(&q->lock);
+	char buf[32];
+	printf("%s:%u", uinet_inet_ntoa(sin->sin_addr, buf, sizeof(buf)), ntohs(port));
 }
 
 
 static void
-event_queue_init(struct event_queue *q)
+conn_init(struct connection_context *conn, struct uinet_socket *so, void *soctx)
 {
-	TAILQ_INIT(&q->queue);
-	pthread_mutex_init(&q->lock, NULL);
-	pthread_cond_init(&q->cv, NULL);
-}
-
-
-static struct event *
-event_queue_next(struct event_queue *q)
-{
-	struct event * e;
-
-	pthread_mutex_lock(&q->lock);
-	while (TAILQ_EMPTY(&q->queue)) {
-		pthread_cond_wait(&q->cv, &q->lock);
-	}
-	e = TAILQ_FIRST(&q->queue);
-	TAILQ_REMOVE(&q->queue, e, event_queue);
-	e->active = 0;
-	pthread_mutex_unlock(&q->lock);
-
-	return (e);
-}
-
-
-static void
-conn_init(struct connection_context *conn, struct uinet_socket *so, struct splice_context *splice)
-{
-	conn->splice = splice;
 	conn->so = so;
-	conn->local_addr = NULL;
-	conn->foreign_addr = NULL;
-	conn->eq = &splice->proxy->eq;
-	event_init(&conn->rcv_ready, conn, EVENT_RCV_READY);
-	event_init(&conn->snd_ready, conn, EVENT_SND_READY);
-	event_init(&conn->connected, conn, EVENT_CONNECTED);
-	conn->occupied = 0;
-	conn->input_index = 0;
-	conn->output_index = 0;
+	conn->soctx = soctx;
+	conn->write_shut = 0;
+}
+
+
+static void
+conn_fini(struct connection_context *conn)
+{
+	if (conn->so)
+		uinet_soclose(conn->so);
+
+	if (conn->soctx)
+		ev_uinet_detach(conn->soctx);
 }
 
 
 static struct splice_context *
-splice_alloc(struct uinet_in_conninfo *inc)
+splice_alloc(struct uinet_in_l2info *l2i, struct uinet_in_conninfo *inc)
 {
 	struct splice_context *s;
 	struct uinet_sockaddr_in *sin;
 
-	s = malloc(sizeof(struct splice_context));
+	s = calloc(1, sizeof(struct splice_context));
 	if (NULL != s) {
 		s->proxy = NULL;
-		s->synf_deferral = 0;
+		s->synf_deferral = NULL;
 
+		s->l2tags = l2i->inl2i_tagstack;
 
 		/* XXX assuming IPV4 */
-		sin = calloc(2, sizeof(struct uinet_sockaddr_in));
-		if (NULL == sin) {
-			free(s);
-			return (NULL);
-		}
 
-		sin->sin_len = sizeof(struct uinet_sockaddr_in);
-		sin->sin_family = UINET_AF_INET;
-		sin->sin_port = inc->inc_ie.ie_fport;
-		sin->sin_addr = inc->inc_ie.ie_faddr;
-		s->client_addr = (struct uinet_sockaddr *)sin;
+		s->client_addr.sin_len = sizeof(struct uinet_sockaddr_in);
+		s->client_addr.sin_family = UINET_AF_INET;
+		s->client_addr.sin_port = inc->inc_ie.ie_fport;
+		s->client_addr.sin_addr = inc->inc_ie.ie_faddr;
 
-		sin++;
-
-		sin->sin_len = sizeof(struct uinet_sockaddr_in);
-		sin->sin_family = UINET_AF_INET;
-		sin->sin_port = inc->inc_ie.ie_lport;
-		sin->sin_addr = inc->inc_ie.ie_laddr;
-		s->server_addr = (struct uinet_sockaddr *)sin;
+		s->server_addr.sin_len = sizeof(struct uinet_sockaddr_in);
+		s->server_addr.sin_family = UINET_AF_INET;
+		s->server_addr.sin_port = inc->inc_ie.ie_lport;
+		s->server_addr.sin_addr = inc->inc_ie.ie_laddr;
 	}
 
 	return (s);
@@ -246,11 +205,13 @@ splice_table_init(struct splice_table *t, unsigned int nbuckets)
 
 
 static uint32_t
-splice_table_hash(struct splice_table *t, uinet_in_addr_t laddr, uinet_in_port_t lport, uinet_in_addr_t faddr, uinet_in_port_t fport)
+splice_table_hash(struct splice_table *t, struct uinet_in_l2tagstack *l2tags,
+		  uinet_in_addr_t laddr, uinet_in_port_t lport, uinet_in_addr_t faddr, uinet_in_port_t fport)
 {
 	uint32_t hash;
 
-	hash = laddr ^ lport ^ faddr ^ fport;
+	hash = uinet_l2tagstack_hash(l2tags);
+	hash ^= laddr ^ lport ^ faddr ^ fport;
 	hash ^= hash >> 16;
 
 	return (hash & t->mask);
@@ -258,21 +219,32 @@ splice_table_hash(struct splice_table *t, uinet_in_addr_t laddr, uinet_in_port_t
 
 
 static void
+splice_table_lock(struct splice_table *t)
+{
+	pthread_mutex_lock(&t->lock);
+}
+
+
+static void
+splice_table_unlock(struct splice_table *t)
+{
+	pthread_mutex_unlock(&t->lock);
+}
+
+
+static void
 splice_table_insert(struct splice_table *t, struct splice_context *splice)
 {
 	struct splice_table_bucket *bucket;
-	struct uinet_sockaddr_in *client_sin = (struct uinet_sockaddr_in *)splice->client_addr;
-	struct uinet_sockaddr_in *server_sin = (struct uinet_sockaddr_in *)splice->server_addr;
-
-	pthread_mutex_lock(&t->lock);
+	struct uinet_sockaddr_in *client_sin = &splice->client_addr;
+	struct uinet_sockaddr_in *server_sin = &splice->server_addr;
 
 	bucket = &t->buckets[splice_table_hash(t,
+					       &splice->l2tags,
 					       server_sin->sin_addr.s_addr, server_sin->sin_port,
 					       client_sin->sin_addr.s_addr, client_sin->sin_port)];
 	
 	TAILQ_INSERT_HEAD(bucket, splice, splice_table);
-
-	pthread_mutex_unlock(&t->lock);
 }
 
 
@@ -280,52 +252,82 @@ static void
 splice_table_remove(struct splice_table *t, struct splice_context *splice)
 {
 	struct splice_table_bucket *bucket;
-	struct uinet_sockaddr_in *client_sin = (struct uinet_sockaddr_in *)splice->client_addr;
-	struct uinet_sockaddr_in *server_sin = (struct uinet_sockaddr_in *)splice->server_addr;
+	struct uinet_sockaddr_in *client_sin = &splice->client_addr;
+	struct uinet_sockaddr_in *server_sin = &splice->server_addr;
 	
-	pthread_mutex_lock(&t->lock);
-
 	bucket = &t->buckets[splice_table_hash(t,
+					       &splice->l2tags,
 					       server_sin->sin_addr.s_addr, server_sin->sin_port,
 					       client_sin->sin_addr.s_addr, client_sin->sin_port)];
 	
 	TAILQ_REMOVE(bucket, splice, splice_table);
-
-	pthread_mutex_unlock(&t->lock);
 }
 
 
 static struct splice_context *
-splice_table_lookup(struct splice_table *t, struct uinet_in_conninfo *inc)
+splice_table_lookup(struct splice_table *t, struct uinet_in_l2info *l2i, struct uinet_in_conninfo *inc)
 {
 	struct splice_table_bucket *bucket;
 	struct splice_context *splice;
 
-	pthread_mutex_lock(&t->lock);
 	bucket = &t->buckets[splice_table_hash(t,
+					       &l2i->inl2i_tagstack,
 					       inc->inc_ie.ie_laddr.s_addr, inc->inc_ie.ie_lport,
 					       inc->inc_ie.ie_faddr.s_addr, inc->inc_ie.ie_fport)];
 					       
 	
 	TAILQ_FOREACH(splice, bucket, splice_table) {
-		struct uinet_sockaddr_in *client_sin = (struct uinet_sockaddr_in *)splice->client_addr;
-		struct uinet_sockaddr_in *server_sin = (struct uinet_sockaddr_in *)splice->server_addr;
+		struct uinet_sockaddr_in *client_sin = &splice->client_addr;
+		struct uinet_sockaddr_in *server_sin = &splice->server_addr;
 
 		/*
 		 * The connection info in inc is from the incoming SYN from
 		 * the client, so the client's address is in the foreign part.
 		 */
-		if ((client_sin->sin_addr.s_addr == inc->inc_ie.ie_faddr.s_addr) &&
+		if ((0 == uinet_l2tagstack_cmp(&splice->l2tags, &l2i->inl2i_tagstack)) &&
+		    (client_sin->sin_addr.s_addr == inc->inc_ie.ie_faddr.s_addr) &&
 		    (client_sin->sin_port == inc->inc_ie.ie_fport) &&
 		    (server_sin->sin_addr.s_addr == inc->inc_ie.ie_laddr.s_addr) &&
 		    (server_sin->sin_port == inc->inc_ie.ie_lport)) {
-			pthread_mutex_unlock(&t->lock);
 			return (splice);
 		}
 	}
 
-	pthread_mutex_unlock(&t->lock);
 	return (NULL);
+}
+
+
+static void
+splice_free(struct splice_context *splice)
+{
+	struct proxy_context *proxy = splice->proxy;
+
+	if (splice->synf_deferral)
+		uinet_synfilter_deferral_free(splice->synf_deferral);
+
+	if (proxy) {
+		splice_table_lock(&proxy->splicetab);
+		splice_table_remove(&proxy->splicetab, splice);
+		splice_table_unlock(&proxy->splicetab);
+	}
+
+	conn_fini(&splice->client);
+	conn_fini(&splice->server);
+	
+	free(splice);
+}
+
+
+static void
+splice_pipe_shut(struct splice_context *splice, struct pipe_context *pipe)
+{
+	struct proxy_context *proxy = splice->proxy;
+
+	printf("shutting pipe\n");
+
+	if (splice->client.write_shut && splice->server.write_shut) {
+		splice_free(splice);
+	}
 }
 
 
@@ -337,110 +339,11 @@ proxy_alloc(unsigned int num_splices)
 	p = malloc(sizeof(struct proxy_context));
 	if (NULL != p) {
 		p->listener = NULL;
-		event_queue_init(&p->eq);
 		splice_table_init(&p->splicetab, num_splices);
 		p->verbose = 0;
 	}
 
 	return (p);
-}
-
-
-static int
-proxy_conn_rcv(struct uinet_socket *so, void *arg, int waitflag)
-{
-	struct connection_context *conn = (struct connection_context *)arg;
-
-	event_send(conn->eq, &conn->rcv_ready);
-
-	return (UINET_SU_OK);
-}
-
-
-static int
-outbound_conn_complete(struct uinet_socket *so, void *arg, int waitflag)
-{
-	struct connection_context *conn = (struct connection_context *)arg;
-
-	if (conn->splice->proxy->verbose > 1)
-		printf("outbound_conn_complete\n");
-
-	event_send(conn->eq, &conn->connected);
-
-	uinet_soupcall_set(so, UINET_SO_RCV, proxy_conn_rcv, conn);
-
-	proxy_conn_rcv(so, conn, waitflag);
-
-	return (UINET_SU_OK);
-}
-
-
-static int
-inbound_conn_complete(struct uinet_socket *so, void *arg, int waitflag)
-{
-	struct proxy_context *proxy = (struct proxy_context *)arg;
-	struct uinet_in_conninfo inc;
-	struct connection_context *conn;
-	struct splice_context *splice;
-
-	if (proxy->verbose > 1)
-		printf("inbound_conn_complete\n");
-
-	uinet_sogetconninfo(so, &inc);
-
-	splice = splice_table_lookup(&proxy->splicetab, &inc);
-	if (NULL != splice) {
-		conn = &splice->client;
-		conn_init(conn, so, splice);
-
-		event_send(conn->eq, &conn->connected);
-
-		uinet_soupcall_set(so, UINET_SO_RCV, proxy_conn_rcv, conn);
-
-		proxy_conn_rcv(so, conn, waitflag);
-	} else {
-		printf("Failed to find splice for inbound connection\n");
-	}
-
-	return (UINET_SU_OK);
-}
-
-
-static int
-listener_upcall(struct uinet_socket *head, void *arg, int waitflag)
-{
-	struct uinet_socket *so;
-	struct uinet_sockaddr *sa = NULL;
-	struct proxy_context *proxy = arg;
-	struct splice_context *splice;
-	int error;
-
-	if (proxy->verbose > 1)
-		printf("listener_upcall\n");
-
-	error = uinet_soaccept(head, &sa, &so);
-	if (error != 0)
-		goto out;
-
-	if (proxy->verbose)
-		printf("new inbound connection\n");
-
-	splice = malloc(sizeof(struct splice_context));
-	if (NULL == splice) {
-		uinet_soclose(so);
-		goto out;
-	}
-
-	splice->proxy = proxy;
-	conn_init(&splice->client, so, splice);
-
-	uinet_soupcall_set(so, UINET_SO_RCV, inbound_conn_complete, proxy);
-
-out:
-	if (sa)
-		uinet_free_sockaddr(sa);
-
-	return (UINET_SU_OK);
 }
 
 
@@ -457,8 +360,7 @@ dobind(struct uinet_socket *so, uinet_in_addr_t addr, uinet_in_port_t port)
 	sin.sin_port = port;
 	error = uinet_sobind(so, (struct uinet_sockaddr *)&sin);
 	if (0 != error) {
-		char buf[32];
-		printf("Bind to %s:%u failed (%d)\n", uinet_inet_ntoa(sin.sin_addr, buf, sizeof(buf)), ntohs(port), error);
+		printf("Bind to "); print_sin_port(&sin, port); printf(" (%d)\n", error);
 	}
 
 	return (error);
@@ -466,245 +368,72 @@ dobind(struct uinet_socket *so, uinet_in_addr_t addr, uinet_in_port_t port)
 
 
 static void
-on_receive_ready(struct connection_context *rx, struct connection_context *tx)
+outbound_connect_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 {
-	struct uinet_iovec iov[2];
-	struct uinet_uio uio;
-	unsigned int space = CONN_BUFFER_SIZE - rx->occupied;
-	unsigned int bytes_to_end_of_buffer;
-	unsigned int bytes_read;
-	unsigned int bytes_written;
+	struct splice_context *splice = w->data;
+	struct proxy_context *proxy = splice->proxy;
+	struct uinet_socket *so = splice->server.so;
+	struct uinet_in_conninfo inc;
 	int error;
 
-	if (space > 0) {
-		bytes_to_end_of_buffer = CONN_BUFFER_SIZE - rx->input_index;
+	ev_uinet_stop(loop, &splice->outbound_connect_watcher);
 
-		uio.uio_iov = iov;
-		iov[0].iov_base = &rx->buffer[rx->input_index];
-		iov[0].iov_len = (space > bytes_to_end_of_buffer) ? bytes_to_end_of_buffer : space;
-		if (space > bytes_to_end_of_buffer) {
-			iov[1].iov_base = rx->buffer;
-			iov[1].iov_len = space - bytes_to_end_of_buffer;
-			uio.uio_iovcnt = 2;
-		} else {
-			uio.uio_iovcnt = 1;
+	if (uinet_sowritable(so, 0) >= 0) {
+		if (proxy->verbose) {
+			uinet_sogetconninfo(so, &inc);
+			printf("Connection from "); print_inc(&inc, 0); printf(" to "); print_inc(&inc, 1); printf(" complete\n");
 		}
-		uio.uio_offset = 0;
-		uio.uio_resid = space;
-	
-		error = uinet_soreceive(rx->so, NULL, &uio, NULL);
-		bytes_read = space - uio.uio_resid;
 
-		printf("read %u bytes from %p\n", bytes_read, rx);
-		
-		rx->occupied += bytes_read;
-		rx->input_index += bytes_read;
-		if (rx->input_index >= CONN_BUFFER_SIZE)
-			rx->input_index -= CONN_BUFFER_SIZE;
-	}
+		uinet_synfilter_deferral_deliver(proxy->listener, splice->synf_deferral, UINET_SYNF_ACCEPT);
+		splice->synf_deferral = NULL;
+	} else {
+		/* failed to connect */
+		error = uinet_sogeterror(so);
 
-
-	if (rx->occupied) {
-		bytes_to_end_of_buffer = CONN_BUFFER_SIZE - rx->output_index;
-
-		uio.uio_iov = iov;
-		iov[0].iov_base = &rx->buffer[rx->output_index];
-		iov[0].iov_len = (rx->occupied > bytes_to_end_of_buffer) ? bytes_to_end_of_buffer : rx->occupied;
-		if (rx->occupied > bytes_to_end_of_buffer) {
-			iov[1].iov_base = rx->buffer;
-			iov[1].iov_len = rx->occupied - bytes_to_end_of_buffer;
-			uio.uio_iovcnt = 2;
-		} else {
-			uio.uio_iovcnt = 1;
+		if (proxy->verbose) {
+			uinet_sogetconninfo(so, &inc);
+			printf("Connection from "); print_inc(&inc, 0); printf(" to "); print_inc(&inc, 1); printf(" failed (%d)\n", error);
 		}
-		uio.uio_offset = 0;
-		uio.uio_resid = rx->occupied;
-		error = uinet_sosend(tx->so, NULL, &uio, 0);
-		bytes_written = rx->occupied - uio.uio_resid;
 
-		printf("wrote %u bytes to %p\n", bytes_written, tx);
+		uinet_synfilter_deferral_deliver(proxy->listener, splice->synf_deferral,
+						 (UINET_ECONNREFUSED == error) ?
+						 UINET_SYNF_REJECT_RST : UINET_SYNF_REJECT_SILENT);
 
-		rx->occupied -= bytes_written;
-		rx->output_index += bytes_written;
-		if (rx->output_index >= CONN_BUFFER_SIZE)
-			rx->output_index -= CONN_BUFFER_SIZE;
+		splice->synf_deferral = NULL;
+		splice_free(splice);
 	}
 }
 
 
-static void *
-proxy_event_loop(void *arg)
+static void
+process_synf_queue(struct ev_loop *loop, ev_async *w, int revents)
 {
-	struct proxy_context *proxy = arg;
+	struct proxy_context *proxy = w->data;
+	struct synf_queue_entry *qentry;
 	struct splice_context *splice;
-	struct event *e;
-	struct connection_context *client;
-	struct connection_context *server;
 	struct uinet_socket *so;
-	struct uinet_sockaddr_in *client_sin;
-	struct uinet_sockaddr_in *server_sin;
-	struct uinet_sockaddr_in *local_sin;
-	struct uinet_sockaddr_in *foreign_sin;
 	int error;
-
-	uinet_initialize_thread();
-
-	if (proxy->verbose)
-		printf("Event loop started\n");
-
-	while (1) {
-		e = event_queue_next(&proxy->eq);
-		splice = e->conn->splice;
-		client = &splice->client;
-		server = &splice->server;
-		client_sin = (struct uinet_sockaddr_in *)splice->client_addr;
-		server_sin = (struct uinet_sockaddr_in *)splice->server_addr;
-
-		if (e->conn == client) {
-			so = client->so;
-
-			switch (e->type) {
-			case EVENT_CONNECTED:
-				if (uinet_sogetstate(so) & UINET_SS_ISCONNECTED) {
-					error = uinet_sogetpeeraddr(so, &client->foreign_addr);
-					if (error) {
-						printf("Error getting peer address for client connection (%d)\n", error);
-					}
-					
-					error = uinet_sogetsockaddr(so, &client->local_addr);
-					if (error) {
-						printf("Error getting local address for client connection (%d)\n", error);
-					}
-	
-					if (proxy->verbose) {
-						char buf1[32], buf2[32];
-
-						local_sin = (struct uinet_sockaddr_in *)client->local_addr;
-						foreign_sin = (struct uinet_sockaddr_in *)client->foreign_addr;
-
-						printf("Inbound connection to %s:%u from %s:%u established\n",
-						       uinet_inet_ntoa(local_sin->sin_addr, buf1, sizeof(buf1)),
-						       ntohs(local_sin->sin_port),
-						       uinet_inet_ntoa(foreign_sin->sin_addr, buf2, sizeof(buf2)),
-						       ntohs(foreign_sin->sin_port));
-					}
-				}
-				break;
-
-			case EVENT_RCV_READY:
-				if (uinet_sogetstate(so) & UINET_SS_ISDISCONNECTED) {
-					if (proxy->verbose) {
-						char buf1[32], buf2[32];
-						printf("Inbound connection to %s:%u from %s:%u closed\n",
-						       uinet_inet_ntoa(server_sin->sin_addr, buf1, sizeof(buf1)),
-						       ntohs(server_sin->sin_port),
-						       uinet_inet_ntoa(client_sin->sin_addr, buf2, sizeof(buf2)),
-						       ntohs(client_sin->sin_port));
-					}
-				} else {
-					on_receive_ready(client, server);
-				}
-				break;
-
-			default:
-				printf("Client connection event type %d\n", e->type);
-				break;
-			}
-		} else {
-			so = server->so;
-
-			switch (e->type) {
-			case EVENT_CONNECTED:
-				if (uinet_sogetstate(so) & UINET_SS_ISCONNECTED) {
-					error = uinet_sogetpeeraddr(so, &server->foreign_addr);
-					if (error) {
-						printf("Error getting peer address for server connection (%d)\n", error);
-					}
-
-					error = uinet_sogetsockaddr(so, &server->local_addr);
-					if (error) {
-						printf("Error getting local address for server connection (%d)\n", error);
-					}
-	
-					if (proxy->verbose) {
-						char buf1[32], buf2[32];
-
-						local_sin = (struct uinet_sockaddr_in *)server->local_addr;
-						foreign_sin = (struct uinet_sockaddr_in *)server->foreign_addr;
-			
-						printf("Outbound connection to %s:%u from %s:%u established\n",
-						       uinet_inet_ntoa(local_sin->sin_addr, buf1, sizeof(buf1)),
-						       ntohs(local_sin->sin_port),
-						       uinet_inet_ntoa(foreign_sin->sin_addr, buf2, sizeof(buf2)),
-						       ntohs(foreign_sin->sin_port));
-					}
-
-					uinet_synfilter_deferral_deliver(proxy->listener, splice->synf_deferral, UINET_SYNF_ACCEPT);
-				}
-				break;
-
-			case EVENT_RCV_READY:
-				if (uinet_sogetstate(so) & UINET_SS_ISDISCONNECTED) {
-					if (proxy->verbose) {
-						char buf1[32], buf2[32];
-						printf("Outbound connection to %s:%u from %s:%u closed\n",
-						       uinet_inet_ntoa(server_sin->sin_addr, buf1, sizeof(buf1)),
-						       ntohs(server_sin->sin_port),
-						       uinet_inet_ntoa(client_sin->sin_addr, buf2, sizeof(buf2)),
-						       ntohs(client_sin->sin_port));
-					}
-
-					uinet_synfilter_deferral_deliver(proxy->listener, splice->synf_deferral, UINET_SYNF_REJECT);
-
-					uinet_soupcall_clear(so, UINET_SO_RCV);					
-
-					splice_table_remove(&proxy->splicetab, splice);
-				} else {
-					on_receive_ready(server, client);
-				}
-				break;
-
-			default:
-				printf("Client connection event type %d\n", e->type);
-				break;
-			}
-			
-		}
-
-	}
-
-	if (proxy->verbose)
-		printf("Event loop exiting\n");
-
-	pthread_exit(NULL);
-}
-
-
-static int
-proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie_t cookie)
-{
-	struct proxy_context *proxy = arg;
-	struct uinet_socket *so = NULL;
-	struct splice_context *splice = NULL;
+	unsigned int optval, optlen;
+	uinet_api_synfilter_cookie_t cookie;
 	struct uinet_in_conninfo inc;
 	struct uinet_in_l2info l2i;
 	struct uinet_sockaddr_in sin;
-	unsigned int optval, optlen;
-	int error;
 
 	if (proxy->verbose > 1)
-		printf("proxy_syn_filter\n");
+		printf("Processing synf queue\n");
 
-	uinet_synfilter_getconninfo(cookie, &inc);
+	pthread_mutex_lock(&proxy->synf_queue_lock);
 
-	if (NULL == splice_table_lookup(&proxy->splicetab, &inc)) {
+	while (NULL != (qentry = UINET_STAILQ_FIRST(&proxy->synf_queue))) {
+		UINET_STAILQ_REMOVE_HEAD(&proxy->synf_queue, synf_queue);
+		pthread_mutex_unlock(&proxy->synf_queue_lock);
+		
+		splice = qentry->splice;
+		so = splice->server.so;
+		cookie = uinet_synfilter_deferral_get_cookie(splice->synf_deferral);
 
-		error = uinet_socreate(UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
-		if (0 != error) {
-			printf("Socket creation failed (%d)\n", error);
-			goto err;
-		}
-	
+		uinet_synfilter_getconninfo(cookie, &inc);
+
 		if ((error = uinet_make_socket_promiscuous(so, proxy->server_fib))) {
 			printf("Failed to make socket promiscuous (%d)\n", error);
 			goto err;
@@ -719,17 +448,8 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 			goto err;
 		}
 
-
-		if (proxy->verbose > 1) {
-			char buf1[32], buf2[32];
-			printf("SYN arrived from %s:%u to %s:%u\n",
-			       uinet_inet_ntoa(inc.inc_ie.ie_faddr, buf1, sizeof(buf1)), ntohs(inc.inc_ie.ie_fport),
-			       uinet_inet_ntoa(inc.inc_ie.ie_laddr, buf2, sizeof(buf2)), ntohs(inc.inc_ie.ie_lport));
-		}
-
 		if ((error = dobind(so, inc.inc_ie.ie_faddr.s_addr, inc.inc_ie.ie_fport))) {
-			char buf[32];
-			printf("Bind to %s:%u failed (%d)\n", uinet_inet_ntoa(inc.inc_ie.ie_faddr, buf, sizeof(buf)), ntohs(inc.inc_ie.ie_fport), error);
+			printf("Bind to "); print_inc(&inc, 0); printf(" failed (%d)\n", error);
 			goto err;
 		}
 
@@ -740,29 +460,8 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 			goto err;
 		}
 
-		splice = splice_alloc(&inc);
-		if (NULL == splice) {
-			goto err;
-		}
-
-		splice->proxy = proxy;
-		splice->synf_deferral = uinet_synfilter_deferral_alloc(lso, cookie);
-		if (NULL == splice->synf_deferral) {
-			printf("Failed to allocate SYN filter deferral\n");
-			goto err;
-		}
-
-		conn_init(&splice->server, so, splice);
-
-		splice_table_insert(&proxy->splicetab, splice);
-
-		uinet_soupcall_set(so, UINET_SO_RCV, outbound_conn_complete, &splice->server);
-
 		if (proxy->verbose) {
-			char buf1[32], buf2[32];
-			printf("Connecting from %s:%u to %s:%u\n",
-			       uinet_inet_ntoa(inc.inc_ie.ie_faddr, buf1, sizeof(buf1)), ntohs(inc.inc_ie.ie_fport),
-			       uinet_inet_ntoa(inc.inc_ie.ie_laddr, buf2, sizeof(buf2)), ntohs(inc.inc_ie.ie_lport));
+			printf("Connecting from "); print_inc(&inc, 0); printf(" to "); print_inc(&inc, 1); printf("\n");
 		}
 	
 		memset(&sin, 0, sizeof(struct uinet_sockaddr_in));
@@ -771,35 +470,322 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 		sin.sin_addr.s_addr = inc.inc_ie.ie_laddr.s_addr;
 		sin.sin_port = inc.inc_ie.ie_lport;
 		error = uinet_soconnect(so, (struct uinet_sockaddr *)&sin);
-		if (error && UINET_EINPROGRESS != error) {
-			char buf[32];
-			printf("Connect to %s:%u failed (%d)\n", uinet_inet_ntoa(inc.inc_ie.ie_laddr, buf, sizeof(buf)), ntohs(inc.inc_ie.ie_lport), error);
+		if (error) {
+			if (UINET_EINPROGRESS == error) {
+				error = 0;
+			} else {
+				printf("Connect to "); print_inc(&inc, 1); printf(" failed (%d)\n", error);
+				goto err;
+			}
+		}
+
+		ev_init(&splice->outbound_connect_watcher, outbound_connect_cb);
+		ev_uinet_set(&splice->outbound_connect_watcher, splice->server.soctx, EV_WRITE);
+		splice->outbound_connect_watcher.data = splice;
+		ev_uinet_start(loop, &splice->outbound_connect_watcher);
+
+	err:
+		if (error) {
+			uinet_synfilter_deferral_deliver(so, splice->synf_deferral,
+							 (UINET_ECONNREFUSED == error) ?
+							 UINET_SYNF_REJECT_RST : UINET_SYNF_REJECT_SILENT);
+
+			splice->synf_deferral = NULL;
+			splice_free(splice);
+		}
+
+		free(qentry);
+		
+		pthread_mutex_lock(&proxy->synf_queue_lock);
+	}
+	pthread_mutex_unlock(&proxy->synf_queue_lock);
+
+
+	return;
+}
+
+
+static int
+proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie_t cookie)
+{
+	struct proxy_context *proxy = arg;
+	struct uinet_socket *so = NULL;
+	void *soctx;
+	struct splice_context *splice = NULL;
+	struct synf_queue_entry *qentry = NULL;
+	uinet_synf_deferral_t deferral = NULL;
+	struct uinet_in_l2info l2i;
+	struct uinet_in_conninfo inc;
+	unsigned int optval, optlen;
+	int error;
+
+	uinet_synfilter_getl2info(cookie, &l2i);
+	uinet_synfilter_getconninfo(cookie, &inc);
+
+	if (proxy->verbose > 1) {
+		printf("SYN arrived from "); print_inc(&inc, 0); printf(" to "); print_inc(&inc, 1); printf(" ");
+	}
+
+	splice_table_lock(&proxy->splicetab);
+	if (NULL == splice_table_lookup(&proxy->splicetab, &l2i, &inc)) {
+
+		splice = splice_alloc(&l2i, &inc);
+		if (NULL == splice) {
+			printf("Failed to allocate splice context\n");
 			goto err;
 		}
+
+		deferral = uinet_synfilter_deferral_alloc(lso, cookie);
+		if (NULL == deferral) {
+			printf("Failed to allocate SYN filter deferral\n");
+			goto err;
+		}
+
+		splice->synf_deferral = deferral;
+
+		/* Create outbound socket here to avoid need to grab splice
+		 * table lock when processing the syn filter queue in the
+		 * event loop.
+		 */
+		error = uinet_socreate(UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
+		if (0 != error) {
+			printf("Outbound socket creation failed (%d)\n", error);
+			goto err;
+		}
+
+		soctx = ev_uinet_attach(so);
+		if (NULL == soctx) {
+			printf("Failed to alloc libev context for connection to server\n");
+			goto err;
+		}
+
+		conn_init(&splice->server, so, soctx);
+
+		splice_table_insert(&proxy->splicetab, splice);
+		splice->proxy = proxy;
+
+		splice_table_unlock(&proxy->splicetab);
+
+		if (proxy->verbose > 1) {
+			printf("...queueing to event loop\n");
+		}
+
+		qentry = malloc(sizeof(*qentry));
+		if (NULL == qentry) {
+			printf("Failed to allocate synf queue entry\n");
+			goto err;
+		}
+
+		qentry->splice = splice;
+
+		pthread_mutex_lock(&proxy->synf_queue_lock);
+		STAILQ_INSERT_TAIL(&proxy->synf_queue, qentry, synf_queue);
+		pthread_mutex_unlock(&proxy->synf_queue_lock);
+
+		ev_async_send(proxy->loop, &proxy->synf_watcher);
 
 		return (UINET_SYNF_DEFER);
 	}
 
-err:
-	if (so) uinet_soclose(so);
-	if (splice) free(splice);
+	if (proxy->verbose > 1) {
+		printf("...DUPLICATE\n");
+	}
 
-	return (UINET_SYNF_REJECT);
+err:
+	splice_table_unlock(&proxy->splicetab);
+	splice_free(splice);
+	if (qentry) free(qentry);
+
+	return (UINET_SYNF_REJECT_SILENT);
+}
+
+
+static void
+pipe_cb(struct ev_loop *loop, ev_uinet *w, int revents)
+{
+#define BUFFER_SIZE (64*1024)
+	struct pipe_context *pipe = w->data;
+	char buffer[BUFFER_SIZE];
+	struct uinet_iovec iov;
+	struct uinet_uio uio;
+	int max_read;
+	int max_write;
+	int read_size;
+	int error;
+
+	max_read = uinet_soreadable(pipe->from->so, 0);
+	if (max_read <= 0) {
+		/* the watcher should never be invoked if there is no error and there no bytes to be read */
+		assert(max_read != 0);
+		goto err;
+	} else {
+		max_write = uinet_sowritable(pipe->to->so, 0);
+		if (-1 == max_write) {
+			printf("%s: max_write == -1 (%d)\n", pipe->name, max_write);
+			goto err;
+		} else {
+			read_size = imin(imin(max_read, max_write), BUFFER_SIZE);
+
+			uio.uio_iov = &iov;
+			iov.iov_base = buffer;
+			iov.iov_len = read_size;
+			uio.uio_iovcnt = 1;
+			uio.uio_offset = 0;
+			uio.uio_resid = read_size;
+	
+			error = uinet_soreceive(pipe->from->so, NULL, &uio, NULL);
+			if (0 != error) {
+				printf("read error (%d), closing\n", error);
+				goto err;
+			}
+
+			assert(uio.uio_resid == 0);
+
+			uio.uio_iov = &iov;
+			iov.iov_base = buffer;
+			iov.iov_len = read_size;
+			uio.uio_iovcnt = 1;
+			uio.uio_offset = 0;
+			uio.uio_resid = read_size;
+			error = uinet_sosend(pipe->to->so, NULL, &uio, 0);
+			if (0 != error) {
+				printf("write error (%d), closing\n", error);
+				goto err;
+			}
+
+			if (max_write < max_read) {
+				/* limited by write space, so continue when
+				 * the destination watcher is writable
+				 */
+				assert(uinet_soreadable(pipe->from->so, 0) > 0);
+				if (w->events & EV_READ) {
+					/* we need to switch to a write
+					 * watch on &pipe->to_watcher
+					 */
+					assert(w == &pipe->from_watcher);
+					ev_uinet_stop(loop, &pipe->from_watcher);
+					ev_uinet_start(loop, &pipe->to_watcher);
+				}
+				/* else, continue as a write watch on &pipe->to_watcher */
+			} else if (!(w->events & EV_READ)) {
+				/* w is a write watcher (which implies w ==
+				 * &pipe->to_watcher), but write space
+				 * wasn't a limitation this time, so switch
+				 * back to a read watch on
+				 * &pipe->from_watcher.
+				 */
+				assert(w == &pipe->to_watcher);
+				ev_uinet_stop(loop, &pipe->to_watcher);
+				ev_uinet_start(loop, &pipe->from_watcher);
+			}
+			/* else, continue as a read watch on &pipe->from_watcher */
+		}
+	}
+
+	return;
+
+err:
+	ev_uinet_stop(loop, w);
+
+	uinet_soshutdown(pipe->to->so, UINET_SHUT_WR);
+	pipe->to->write_shut = 1;
+	splice_pipe_shut(pipe->splice, pipe);
+}
+
+
+void
+pipe_init(const char *name, struct ev_loop *loop, struct pipe_context *pipe, struct splice_context *splice,
+	  struct connection_context *from, struct connection_context *to)
+{
+	pipe->name = name;
+	pipe->splice = splice;
+
+	pipe->to = to;
+	ev_init(&pipe->to_watcher, pipe_cb);
+	ev_uinet_set(&pipe->to_watcher, to->soctx, EV_WRITE);
+	pipe->to_watcher.data = pipe;
+
+	pipe->from = from;
+	ev_init(&pipe->from_watcher, pipe_cb);
+	ev_uinet_set(&pipe->from_watcher, from->soctx, EV_READ);
+	pipe->from_watcher.data = pipe;
+
+	ev_uinet_start(loop, &pipe->from_watcher);
+}
+
+
+static void
+accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
+{
+	struct proxy_context *proxy = w->data;
+	struct uinet_socket *newso;
+	struct splice_context *splice;
+	struct uinet_in_l2info l2i;
+	struct uinet_in_conninfo inc;
+	void *soctx;
+
+
+	if (-1 == uinet_soaccept(w->so, NULL, &newso)) {
+		printf("accept failed\n");
+	} else {
+		uinet_getl2info(newso, &l2i);
+		uinet_sogetconninfo(newso, &inc);
+
+		splice_table_lock(&proxy->splicetab);
+		splice = splice_table_lookup(&proxy->splicetab, &l2i, &inc);
+		if (NULL == splice) {
+			printf("Unexpected inbound connection\n");
+			goto fail;
+		} else {
+			if (proxy->verbose > 1) {
+				printf("Inbound connection from "); print_inc(&inc, 0); printf(" to "); print_inc(&inc, 1); printf("\n");
+			}
+
+			soctx = ev_uinet_attach(newso);
+			if (NULL == soctx) {
+				printf("Failed to alloc libev context for client socket\n");
+				goto fail;
+			}
+
+			conn_init(&splice->client, newso, soctx);
+
+			pipe_init("client->server", loop, &splice->client_to_server, splice, &splice->client, &splice->server);
+			pipe_init("server->client", loop, &splice->server_to_client, splice, &splice->server, &splice->client);
+
+		}
+		splice_table_unlock(&proxy->splicetab);
+	}
+
+	return;
+
+fail:
+	if (splice)
+		splice_table_remove(&proxy->splicetab, splice);
+	splice_table_unlock(&proxy->splicetab);
+
 }
 
 
 static struct proxy_context *
-create_proxy(unsigned int client_fib, unsigned int server_fib,
+create_proxy(struct ev_loop *loop, unsigned int client_fib, unsigned int server_fib,
 	     uinet_in_addr_t listen_addr, uinet_in_port_t listen_port, int verbose)
 {
 	struct proxy_context *proxy = NULL;
 	struct uinet_socket *listener = NULL;
+	void *soctx = NULL;
 	int optlen, optval;
 	int error;
+	int async_watcher_started = 0;
 
 	error = uinet_socreate(UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
 	if (0 != error) {
 		printf("Listen socket creation failed (%d)\n", error);
+		goto fail;
+	}
+
+	soctx = ev_uinet_attach(listener);
+	if (NULL == soctx) {
+		printf("Failed to alloc libev socket context\n");
 		goto fail;
 	}
 	
@@ -810,33 +796,43 @@ create_proxy(unsigned int client_fib, unsigned int server_fib,
 
 	uinet_sosetnonblocking(listener, 1);
 
+	/* Set NODELAY on the listen socket so it will be set on all
+	 * accepted sockets via inheritance.
+	 */
 	optlen = sizeof(optval);
 	optval = 1;
 	if ((error = uinet_sosetsockopt(listener, UINET_IPPROTO_TCP, UINET_TCP_NODELAY, &optval, optlen)))
 		goto fail;
 
-	proxy = proxy_alloc(10000);
+	proxy = proxy_alloc(10000); /* XXX make tunable */
 	if (NULL == proxy)
 		goto fail;
+
+	
+	pthread_mutex_init(&proxy->synf_queue_lock, NULL);
+	UINET_STAILQ_INIT(&proxy->synf_queue);
+
+	ev_async_init(&proxy->synf_watcher, process_synf_queue);
+	proxy->synf_watcher.data = proxy;
+	ev_async_start(loop, &proxy->synf_watcher);
+	async_watcher_started = 1;
 
 	if ((error = uinet_synfilter_install(listener, proxy_syn_filter, proxy))) {
 		printf("Listen socket SYN filter install failed (%d)\n", error);
 		goto fail;
 	}
 	
-	uinet_soupcall_set(listener, UINET_SO_RCV, listener_upcall, proxy);
-	
+	/* Listen on all VLANs */
 	if ((error = uinet_setl2info2(listener, NULL, NULL, UINET_INL2I_TAG_ANY, NULL))) {
 		printf("Listen socket L2 info set failed (%d)\n", error);
 		goto fail;
 	}
 
+	proxy->loop = loop;
 	proxy->listener = listener;
 	proxy->verbose = verbose;
 	proxy->client_fib = client_fib;
 	proxy->server_fib = server_fib;
-
-	pthread_create(&proxy->thread, NULL, proxy_event_loop, proxy);
 
 	error = dobind(proxy->listener, listen_addr, htons(listen_port));
 	if (0 != error)
@@ -854,9 +850,16 @@ create_proxy(unsigned int client_fib, unsigned int server_fib,
 		printf("Listening on %s:%u\n", uinet_inet_ntoa(in, buf, sizeof(buf)), listen_port);
 	}
 
+	ev_init(&proxy->listen_watcher, accept_cb);
+	ev_uinet_set(&proxy->listen_watcher, soctx, EV_READ);
+	proxy->listen_watcher.data = proxy;
+	ev_uinet_start(loop, &proxy->listen_watcher);
+
 	return (proxy);
 
 fail:
+	if (async_watcher_started) ev_async_stop(loop, &proxy->synf_watcher);
+	if (soctx) ev_uinet_detach(soctx);
 	if (listener) uinet_soclose(listener);
 	if (proxy) free(proxy);
 
@@ -922,7 +925,7 @@ int main (int argc, char **argv)
 	argv += optind;
 
 	if (num_ifs < MIN_IFS) {
-		printf("Specify at least %u interfaces\n", MIN_IFS);
+		printf("Specify at least %u interface%s\n", MIN_IFS, MIN_IFS == 1 ? "" : "s");
 		return (1);
 	}
 
@@ -950,6 +953,8 @@ int main (int argc, char **argv)
 		}
 	}
 
+	struct ev_loop *loop = ev_default_loop(0);
+
 	struct proxy_context *proxy;
 
 	struct uinet_in_addr addr;
@@ -958,13 +963,12 @@ int main (int argc, char **argv)
 		return (1);
 	}
 
-	proxy = create_proxy(1, 2,
+	proxy = create_proxy(loop,
+			     1, 2,
 			     addr.s_addr, listen_port,
 			     verbose);
 
-	while (1) {
-		sleep(1);
-	}
+	ev_run(loop, 0);
 
 	for (i = 0; i < num_ifs; i++) {
 		uinet_ifdestroy_byname(ifnames[i]);
