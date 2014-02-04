@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2010 Kip Macy
  * All rights reserved.
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -55,14 +55,14 @@ MALLOC_DEFINE(M_IP6NDP, "ip6ndp", "IPv6 Neighbor Discovery");
 
 
 void
-malloc_init(void *data)
+uinet_malloc_init(void *data)
 {
 	/* Nothing to do here */
 }
 
 
 void
-malloc_uninit(void *data)
+uinet_malloc_uninit(void *data)
 {
 	/* Nothing to do here */
 }

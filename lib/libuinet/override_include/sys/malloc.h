@@ -28,6 +28,8 @@
 #ifndef	_UINET_SYS_MALLOC_H_
 #define _UINET_SYS_MALLOC_H_
 
+#define malloc_init uinet_malloc_init
+#define malloc_uninit uinet_malloc_uninit
 #define malloc   uinet_malloc
 #define free     uinet_free
 #define realloc	 uinet_realloc
