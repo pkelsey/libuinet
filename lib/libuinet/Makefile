@@ -89,6 +89,7 @@ VPATH+= $S/libkern
 
 UINET_SRCS+=			\
 	uinet_api.c		\
+	uinet_api_pool.c	\
 	uinet_clock.c		\
 	uinet_config.c		\
 	uinet_config_kernel.c	\
