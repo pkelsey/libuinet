@@ -62,7 +62,7 @@ uinet_thread_alloc(struct proc *p)
 		p = &proc0;
 	}
 
-	td = malloc(sizeof(struct thread), M_DEVBUF, M_WAITOK);
+	td = malloc(sizeof(struct thread), M_DEVBUF, M_ZERO | M_WAITOK);
 	if (NULL == td)
 		goto error;
 
@@ -80,6 +80,7 @@ uinet_thread_alloc(struct proc *p)
 	td->td_sleepqueue = (struct sleepqueue *)cond;
 	td->td_ucred = crhold(p->p_ucred);
 	td->td_proc = p;
+	td->td_pflags |= TDP_KTHREAD;
 
 	return (td);
 
