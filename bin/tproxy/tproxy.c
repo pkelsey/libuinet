@@ -33,8 +33,6 @@
 
 #include <arpa/inet.h>
 
-#include <sys/queue.h>
-
 #include "uinet_api.h"
 
 #define EV_STANDALONE 1
@@ -60,7 +58,7 @@ struct pipe_context {
 
 
 struct splice_context {
-	TAILQ_ENTRY(splice_context) splice_table;
+	UINET_TAILQ_ENTRY(splice_context) splice_table;
 	struct proxy_context *proxy;
 	ev_uinet outbound_connect_watcher;
 	uinet_synf_deferral_t synf_deferral;
@@ -76,13 +74,13 @@ struct splice_context {
 
 struct splice_table {
 	pthread_mutex_t lock;
-	TAILQ_HEAD(splice_table_bucket, splice_context) *buckets;
+	UINET_TAILQ_HEAD(splice_table_bucket, splice_context) *buckets;
 	uint32_t mask;
 };
 
 
 struct synf_queue_entry {
-	STAILQ_ENTRY(synf_queue_entry) synf_queue;
+	UINET_STAILQ_ENTRY(synf_queue_entry) synf_queue;
 	struct splice_context *splice;
 };
 
@@ -94,7 +92,7 @@ struct proxy_context {
 	ev_uinet listen_watcher;
 	ev_async synf_watcher;
 	pthread_mutex_t synf_queue_lock;
-	STAILQ_HEAD(, synf_queue_entry) synf_queue;
+	UINET_STAILQ_HEAD(, synf_queue_entry) synf_queue;
 	struct splice_table splicetab;
 	int verbose;
 	unsigned int client_fib;
@@ -195,7 +193,7 @@ splice_table_init(struct splice_table *t, unsigned int nbuckets)
 		return (ENOMEM);
 
 	for (i = 0; i < actual_buckets; i++) {
-		TAILQ_INIT(&t->buckets[i]);
+		UINET_TAILQ_INIT(&t->buckets[i]);
 	}
 
 	t->mask = actual_buckets - 1;
@@ -244,7 +242,7 @@ splice_table_insert(struct splice_table *t, struct splice_context *splice)
 					       server_sin->sin_addr.s_addr, server_sin->sin_port,
 					       client_sin->sin_addr.s_addr, client_sin->sin_port)];
 	
-	TAILQ_INSERT_HEAD(bucket, splice, splice_table);
+	UINET_TAILQ_INSERT_HEAD(bucket, splice, splice_table);
 }
 
 
@@ -260,7 +258,7 @@ splice_table_remove(struct splice_table *t, struct splice_context *splice)
 					       server_sin->sin_addr.s_addr, server_sin->sin_port,
 					       client_sin->sin_addr.s_addr, client_sin->sin_port)];
 	
-	TAILQ_REMOVE(bucket, splice, splice_table);
+	UINET_TAILQ_REMOVE(bucket, splice, splice_table);
 }
 
 
@@ -276,7 +274,7 @@ splice_table_lookup(struct splice_table *t, struct uinet_in_l2info *l2i, struct 
 					       inc->inc_ie.ie_faddr.s_addr, inc->inc_ie.ie_fport)];
 					       
 	
-	TAILQ_FOREACH(splice, bucket, splice_table) {
+	UINET_TAILQ_FOREACH(splice, bucket, splice_table) {
 		struct uinet_sockaddr_in *client_sin = &splice->client_addr;
 		struct uinet_sockaddr_in *server_sin = &splice->server_addr;
 
@@ -579,7 +577,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 		qentry->splice = splice;
 
 		pthread_mutex_lock(&proxy->synf_queue_lock);
-		STAILQ_INSERT_TAIL(&proxy->synf_queue, qentry, synf_queue);
+		UINET_STAILQ_INSERT_TAIL(&proxy->synf_queue, qentry, synf_queue);
 		pthread_mutex_unlock(&proxy->synf_queue_lock);
 
 		ev_async_send(proxy->loop, &proxy->synf_watcher);
