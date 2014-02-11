@@ -42,7 +42,7 @@
 
 struct connection_context {
 	struct uinet_socket *so;
-	void *soctx;
+	struct ev_uinet_ctx *soctx;
 	unsigned int write_shut;
 };
 
@@ -124,7 +124,7 @@ print_sin_port(struct uinet_sockaddr_in *sin, uint16_t port)
 
 
 static void
-conn_init(struct connection_context *conn, struct uinet_socket *so, void *soctx)
+conn_init(struct connection_context *conn, struct uinet_socket *so, struct ev_uinet_ctx *soctx)
 {
 	conn->so = so;
 	conn->soctx = soctx;
@@ -508,7 +508,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 {
 	struct proxy_context *proxy = arg;
 	struct uinet_socket *so = NULL;
-	void *soctx;
+	struct ev_uinet_ctx *soctx;
 	struct splice_context *splice = NULL;
 	struct synf_queue_entry *qentry = NULL;
 	uinet_synf_deferral_t deferral = NULL;
@@ -720,7 +720,7 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	struct splice_context *splice;
 	struct uinet_in_l2info l2i;
 	struct uinet_in_conninfo inc;
-	void *soctx;
+	struct ev_uinet_ctx *soctx;
 
 
 	if (-1 == uinet_soaccept(w->so, NULL, &newso)) {
@@ -770,7 +770,7 @@ create_proxy(struct ev_loop *loop, unsigned int client_fib, unsigned int server_
 {
 	struct proxy_context *proxy = NULL;
 	struct uinet_socket *listener = NULL;
-	void *soctx = NULL;
+	struct ev_uinet_ctx *soctx = NULL;
 	int optlen, optval;
 	int error;
 	int async_watcher_started = 0;

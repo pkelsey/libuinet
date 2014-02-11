@@ -482,6 +482,8 @@ typedef struct ev_async
 #if EV_UINET_ENABLE
 /* invoked when socket is either EV_READable or EV_WRITEable */
 /* revent EV_READ, EV_WRITE */
+struct ev_uinet_ctx;
+
 typedef struct ev_uinet
 {
   EV_WATCHER_LIST (ev_uinet)
@@ -859,8 +861,8 @@ EV_API_DECL void ev_async_send     (EV_P_ ev_async *w) EV_THROW;
 # endif
 
 # if EV_UINET_ENABLE
-EV_API_DECL void *ev_uinet_attach  (struct uinet_socket *so) EV_THROW;
-EV_API_DECL void ev_uinet_detach   (void *ctx) EV_THROW;
+EV_API_DECL struct ev_uinet_ctx *ev_uinet_attach  (struct uinet_socket *so) EV_THROW;
+EV_API_DECL void ev_uinet_detach   (struct ev_uinet_ctx *ctx) EV_THROW;
 EV_API_DECL void ev_uinet_start    (EV_P_ ev_uinet *w) EV_THROW;
 EV_API_DECL void ev_uinet_stop     (EV_P_ ev_uinet *w) EV_THROW;
 # endif

@@ -4824,7 +4824,7 @@ ev_async_send (EV_P_ ev_async *w) EV_THROW
 #endif
 
 #if EV_UINET_ENABLE
-void *
+struct ev_uinet_ctx *
 ev_uinet_attach (struct uinet_socket *so)
 {
   ev_uinet_ctx *ctx;
@@ -4851,7 +4851,7 @@ ev_uinet_attach (struct uinet_socket *so)
 }
 
 void
-ev_uinet_detach (void *ctx)
+ev_uinet_detach (struct ev_uinet_ctx *ctx)
 {
   ev_free (ctx);
 }

@@ -163,7 +163,7 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	struct echo_context *echo = w->data;
 	struct uinet_socket *newso = NULL;
 	struct connection_context *conn = NULL;
-	void *soctx = NULL;
+	struct ev_uinet_ctx *soctx = NULL;
 
 	if (-1 == uinet_soaccept(w->so, NULL, &newso)) {
 		printf("accept failed\n");
@@ -201,7 +201,7 @@ create_echo(struct ev_loop *loop, struct server_config *cfg)
 {
 	struct echo_context *echo = NULL;
 	struct uinet_socket *listener = NULL;
-	void *soctx = NULL;
+	struct ev_uinet_ctx *soctx = NULL;
 	struct uinet_in_addr addr;
 	int optlen, optval;
 	int error;
