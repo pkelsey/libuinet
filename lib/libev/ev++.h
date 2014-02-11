@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2007,2008,2010 Marc Alexander Lehmann <libev@schmorp.de>
  * All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modifica-
  * tion, are permitted provided that the following conditions are met:
@@ -77,6 +78,7 @@ namespace ev {
     FORK     = EV_FORK,
     ASYNC    = EV_ASYNC,
     EMBED    = EV_EMBED,
+    UINET    = EV_UINET,
 #   undef ERROR // some systems stupidly #define ERROR
     ERROR    = EV_ERROR
   };
@@ -803,6 +805,32 @@ namespace ev {
       return ev_async_pending (static_cast<ev_async *>(this));
     }
   EV_END_WATCHER (async, async)
+  #endif
+
+  #if EV_UINET_ENABLE
+  EV_BEGIN_WATCHER (uinet, uinet)
+    void set (struct ev_uinet_ctx *ctx, int events) throw ()
+    {
+      int active = is_active ();
+      if (active) stop ();
+      ev_uinet_set (static_cast<ev_uinet *>(this), ctx, events);
+      if (active) start ();
+    }
+
+    void set (int events) throw ()
+    {
+      int active = is_active ();
+      if (active) stop ();
+      ev_uinet_set (static_cast<ev_uinet *>(this), ctx, events);
+      if (active) start ();
+    }
+
+    void start (struct ev_uinet_ctx *ctx, int events) throw ()
+    {
+      set (ctx, events);
+      start ();
+    }
+  EV_END_WATCHER (uinet, uinet)
   #endif
 
   #undef EV_PX
