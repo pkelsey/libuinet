@@ -3,6 +3,7 @@
  *
  * Copyright (c) 2007,2008,2009,2010,2011,2012 Marc Alexander Lehmann <libev@schmorp.de>
  * All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modifica-
  * tion, are permitted provided that the following conditions are met:
