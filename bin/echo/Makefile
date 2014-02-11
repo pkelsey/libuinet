@@ -7,7 +7,7 @@ PROG=echo
 UINET_LIBS=uinet
 
 CFLAGS= -I${TOPDIR}/network/uinet/lib/libev
-LDFLAGS= ${TOPDIR}/network/uinet/lib/libev/.libs/libev.a ${TOPDIR}/network/uinet/lib/libev/.libs/ev.o -lm
+LDADD= ${TOPDIR}/network/uinet/lib/libev/.libs/libev.a -lm
 
 DEBUG_FLAGS=-g -O0
 
