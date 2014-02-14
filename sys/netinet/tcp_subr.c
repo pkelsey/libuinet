@@ -1730,11 +1730,14 @@ tcp_maxmtu(struct in_conninfo *inc, int *flags)
 {
 	struct route sro;
 	struct sockaddr_in *dst;
-	struct ifnet *ifp;
+	struct ifnet *ifp = NULL;
 	u_long maxmtu = 0;
 
 	KASSERT(inc != NULL, ("tcp_maxmtu with NULL in_conninfo pointer"));
 
+#ifdef PROMISCUOUS_INET
+	if (!(inc->inc_flags & INC_PROMISC)) {
+#endif
 	bzero(&sro, sizeof(sro));
 	if (inc->inc_faddr.s_addr != INADDR_ANY) {
 	        dst = (struct sockaddr_in *)&sro.ro_dst;
@@ -1750,14 +1753,28 @@ tcp_maxmtu(struct in_conninfo *inc, int *flags)
 		else
 			maxmtu = min(sro.ro_rt->rt_rmx.rmx_mtu, ifp->if_mtu);
 
-		/* Report additional interface capabilities. */
-		if (flags != NULL) {
-			if (ifp->if_capenable & IFCAP_TSO4 &&
-			    ifp->if_hwassist & CSUM_TSO)
-				*flags |= CSUM_TSO;
-		}
 		RTFREE(sro.ro_rt);
 	}
+#ifdef PROMISCUOUS_INET
+	} else {
+		ifp = ifnet_byfib_ref(inc->inc_fibnum);
+		if (ifp)
+			maxmtu = ifp->if_mtu;
+	}
+#endif
+
+	/* Report additional interface capabilities. */
+	if (ifp && (flags != NULL)) {
+		if (ifp->if_capenable & IFCAP_TSO4 &&
+		    ifp->if_hwassist & CSUM_TSO)
+			*flags |= CSUM_TSO;
+	}
+
+#ifdef PROMISCUOUS_INET
+	if (ifp && (inc->inc_flags & INC_PROMISC))
+		if_rele(ifp);
+#endif
+
 	return (maxmtu);
 }
 #endif /* INET */

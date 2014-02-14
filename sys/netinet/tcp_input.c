@@ -1073,6 +1073,10 @@ relocked:
 		inc.inc_fport = th->th_sport;
 		inc.inc_lport = th->th_dport;
 		inc.inc_fibnum = so->so_fibnum;
+#ifdef PROMISCUOUS_INET
+		if (inp->inp_flags2 & INP_PROMISC)
+			inc.inc_flags |= INC_PROMISC;
+#endif
 
 		/*
 		 * Check for an existing connection attempt in syncache if

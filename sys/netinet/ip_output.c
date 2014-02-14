@@ -1020,10 +1020,13 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			case SO_PROMISC:
 #ifdef PROMISCUOUS_INET
 				INP_WLOCK(inp);
-				if ((so->so_options & SO_PROMISC) != 0)
+				if ((so->so_options & SO_PROMISC) != 0) {
 					inp->inp_flags2 |= INP_PROMISC;
-				else
+					inp->inp_inc.inc_flags |= INC_PROMISC;
+				} else {
 					inp->inp_flags2 &= ~INP_PROMISC;
+					inp->inp_inc.inc_flags &= ~INC_PROMISC;
+				}
 				INP_WUNLOCK(inp);
 				error = 0;
 #else
