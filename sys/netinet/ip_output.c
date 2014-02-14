@@ -741,7 +741,7 @@ done:
 		ifa_free(&ia->ia_ifa);
 
 #ifdef PROMISCUOUS_INET
-	if (inp && (inp->inp_flags2 & INP_PROMISC) && ifp) {
+	if (ispromisc) {
 		if_rele(ifp);
 	}
 #endif
