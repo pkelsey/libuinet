@@ -153,12 +153,12 @@ in_promisc_tagcmp(const struct in_l2tagstack *l2ts1, const struct in_l2tagstack 
 	i2 = 0;
 	while (1) {
 		/* skip zero-masked tags */
-		while (tagcnt1 && l2ts1->inl2t_masks[i1]) {
+		while (tagcnt1 && !l2ts1->inl2t_masks[i1]) {
 			tagcnt1--;
 			i1++;
 		}
 
-		while (tagcnt2 && l2ts2->inl2t_masks[i2]) {
+		while (tagcnt2 && !l2ts2->inl2t_masks[i2]) {
 			tagcnt2--;
 			i2++;
 		}
