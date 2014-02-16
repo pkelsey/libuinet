@@ -5,19 +5,49 @@ This is a user-space port of the FreeBSD TCP/IP stack, begun with the
 FreeBSD 9.1-RELEASE sources and many pieces of Kip Macy's user-space
 port of an earlier version of the FreeBSD stack, libplebnet.
 
+Unlike the stock FreeBSD TCP/IP stack, this stack can initiate and
+terminate arbitrary TCP/IP connections, including those on
+arbitrarily-nested VLANs.  Listen sockets can be bound to a wildcard
+IP address (across everything on the wire, not just local interfaces),
+wildcard port, and specific VLAN tags stacks.  L2 information for
+accepted connections is available to the application.  Outbound
+connections can be bound to any IP and port, as well as any MAC
+address and VLAN tag stack.
 
-The current build target is a test program for exercising the stack
-that does a netmap takeover of the interface in the host system
-specified in the environment variable UINETIF, uses the same IP
-configuration that the host interface had, and runs a simple TCP
-loopback server on port 2222 on that interface.
+Packet I/O is currently accomplished via netmap.
 
 
-cd wanproxy/network/uinet/lib/libuinet
-gmake TOPDIR=../../../..
-export UINETIF=em1
-./uinet_test
+Building libuinet
+=============================================================================
 
-netcat or similar can then be used to make connections to the loopback
-server and drive traffic.
+cd network/uinet/lib/libuinet
+gmake
 
+If your netmap includes are not in the system include path,
+
+gmake NETMAP_INCLUDES=<path to netmap includes>
+
+
+Building the sample programs
+=============================================================================
+
+The sample programs are libev-based, so in addition to building
+libuinet before building them, you must also build the libev port.
+
+To build the libev port:
+
+cd network/uinet/lib/libev
+./configure --with-uinet=../libuinet/api_include
+make
+
+To build the sample programs:
+
+cd network/uinet/bin/<prog>
+gmake
+
+
+The currently functioning sample programs are:
+
+echo		A loopback server
+echo++		A C++ loopback server
+tproxy		A transparent proxy

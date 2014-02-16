@@ -4,6 +4,8 @@ Directory	Description
 =============	=============================================================
 bin		Test/sample programs that use libuinet.
 lib		Libraries that are or use the user-space networking stack.
+lib/libev	Port of libev-4.15 that provides a uinet watcher type so uinet
+		sockets can be used in libev-based programs.
 lib/libuinet	Library containing the user-space port of the FreeBSD TCP/IP
 		stack and additional management and configuration interfaces.
 		Many kernel interfaces (or portions thereof) had to be
