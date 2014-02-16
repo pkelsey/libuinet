@@ -2395,7 +2395,8 @@ childcb (EV_P_ ev_signal *sw, int revents)
 
 #if EV_UINET_ENABLE
 enum {
-  EV_UINET_PENDING   = 0x100 /* needs to be a bit that does not overlap EV_READ or EV_WRITE */
+  EV_UINET_PENDING    = 0x100, /* needs to be a bit that does not overlap EV_READ or EV_WRITE */
+  EV_UINET_INHIBITED  = 0x200  /* needs to be a bit that does not overlap EV_READ or EV_WRITE */
 };
 
 typedef struct ev_uinet_ctx
@@ -2478,6 +2479,9 @@ uinet_reenable_upcalls (EV_P_ ev_prepare *w_prepare, int revents)
       so = soctx->so;
       current_events = 0;
 
+      /* clear upcall inhibit */
+      soctx->pend_flags = EV_NONE;
+
       if (soctx->num_readers > 0)
 	{
 	  uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
@@ -2550,7 +2554,7 @@ uinet_process_pending_list (EV_P_ ev_async *w_async, int revents)
 	  w = (ev_uinet *)w->next;
 	}
 
-      soctx->pend_flags = EV_NONE;
+      soctx->pend_flags = EV_UINET_INHIBITED;
     }
 }
 #endif
@@ -4861,6 +4865,7 @@ ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
 {
   ev_uinet_ctx *soctx = w->ctx;
   struct uinet_socket *so = soctx->so;
+  int inhibited;
   int initial_events;
 
   if (expect_false (ev_is_active (w)))
@@ -4883,10 +4888,11 @@ ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
   wlist_add (&soctx->head, (WL)w);
 
   initial_events = 0;
+  inhibited = soctx->pend_flags & EV_UINET_INHIBITED;
 
   if (w->events & EV_READ)
     {
-      if (0 == soctx->num_readers)
+      if (0 == soctx->num_readers) 
 	{
 	  /* Setting the loop in soctx here allows migrating a socket to
 	   * another loop when all watchers for that socket are stopped.
@@ -4894,12 +4900,13 @@ ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
 #if EV_MULTIPLICITY
 	  soctx->loop = EV_A;
 #endif
-	  uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
+	  if (!inhibited)
+	    uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
 	}
 
       soctx->num_readers++;
 
-      if (uinet_soreadable (so, 0))
+      if (!inhibited && uinet_soreadable (so, 0))
 	initial_events |= EV_READ;
     }
 
@@ -4913,12 +4920,13 @@ ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
 #if EV_MULTIPLICITY
 	  soctx->loop = EV_A;
 #endif
-	  uinet_soupcall_set (so, UINET_SO_SND, uinet_write_watcher_upcall, soctx);
+	  if (!inhibited)
+	    uinet_soupcall_set (so, UINET_SO_SND, uinet_write_watcher_upcall, soctx);
 	}
 
       soctx->num_writers++;
       
-      if (uinet_sowritable (so, 0))
+      if (!inhibited && uinet_sowritable (so, 0))
 	initial_events |= EV_WRITE;
     }
 
@@ -4937,6 +4945,7 @@ ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
 {
   ev_uinet_ctx *soctx = w->ctx;
   struct uinet_socket *so = soctx->so;
+  int inhibited;
 
   clear_pending (EV_A_ (W)w);
   if (expect_false (!ev_is_active (w)))
@@ -4944,17 +4953,19 @@ ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
 
   EV_FREQUENT_CHECK;
 
+  inhibited = soctx->pend_flags & EV_UINET_INHIBITED;
+  
   if (w->events & EV_READ)
     {
       soctx->num_readers--;
-      if (0 == soctx->num_readers)
+      if (!inhibited && (0 == soctx->num_readers))
 	uinet_soupcall_clear (so, UINET_SO_RCV);
     }
 
   if (w->events & EV_WRITE)
     {
       soctx->num_writers--;
-      if (0 == soctx->num_writers)
+      if (!inhibited && (0 == soctx->num_writers))
 	uinet_soupcall_clear (so, UINET_SO_SND);
     }
 
