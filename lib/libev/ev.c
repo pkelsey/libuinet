@@ -4887,53 +4887,48 @@ ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
 
   wlist_add (&soctx->head, (WL)w);
 
+  /* Setting the loop in soctx here allows migrating a socket to
+   * another loop when all watchers for that socket are stopped.
+   */
+#if EV_MULTIPLICITY
+  if (0 == soctx->num_readers + soctx->num_writers)
+    soctx->loop = EV_A;
+#endif
+    
+  /* It is important to set each upcall before checking for the
+   * corresponding initial event in order to avoid missing the event due to
+   * the race inherent in executing those two actions the other way.
+   */
+
   initial_events = 0;
   inhibited = soctx->pend_flags & EV_UINET_INHIBITED;
 
   if (w->events & EV_READ)
     {
-      if (0 == soctx->num_readers) 
+      if (!inhibited && (0 == soctx->num_readers)) 
 	{
-	  /* Setting the loop in soctx here allows migrating a socket to
-	   * another loop when all watchers for that socket are stopped.
-	   */
-#if EV_MULTIPLICITY
-	  soctx->loop = EV_A;
-#endif
-	  if (!inhibited)
-	    uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
+	  uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
+
+	  if (uinet_soreadable (so, 0))
+	    initial_events |= EV_READ;
 	}
 
       soctx->num_readers++;
-
-      if (!inhibited && uinet_soreadable (so, 0))
-	initial_events |= EV_READ;
     }
 
   if (w->events & EV_WRITE)
     {
-      if (0 == soctx->num_writers)
+      if (!inhibited && (0 == soctx->num_writers))
 	{
-	  /* Setting the loop in soctx here allows migrating a socket to
-	   * another loop when all watchers for that socket are stopped.
-	   */
-#if EV_MULTIPLICITY
-	  soctx->loop = EV_A;
-#endif
-	  if (!inhibited)
-	    uinet_soupcall_set (so, UINET_SO_SND, uinet_write_watcher_upcall, soctx);
+	  uinet_soupcall_set (so, UINET_SO_SND, uinet_write_watcher_upcall, soctx);
+
+	  if (uinet_sowritable (so, 0))
+	    initial_events |= EV_WRITE;
 	}
 
       soctx->num_writers++;
-      
-      if (!inhibited && uinet_sowritable (so, 0))
-	initial_events |= EV_WRITE;
     }
 
-  /* It is important to set the upcalls before reporting the initial events
-   * in order to avoid missing events due to the race inherent in executing
-   * those two actions the other way.
-   */
   if (initial_events)
 	  uinet_socket_events (soctx, initial_events);
 
@@ -4974,7 +4969,7 @@ ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
   /* If there are now no more watchers for this socket and it is on the
    * pending list, remove it from the pending list. No lock is required for
    * accessing soctx->pend_flags because it will only be checked when there
-   * are no watchers, and thus no upcalls installed.
+   * are no watchers and thus no upcalls installed.
    */
   if ((NULL == soctx->head) && (soctx->pend_flags & EV_UINET_PENDING)) {
     soctx->pend_flags = EV_NONE;
