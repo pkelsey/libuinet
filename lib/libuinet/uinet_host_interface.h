@@ -105,6 +105,7 @@ void *uhi_realloc(void *p, uint64_t size);
 void  uhi_free(void *p);
 
 void  uhi_clock_gettime(int id, int64_t *sec, long *nsec);
+uint64_t  uhi_clock_gettime_ns(int id);
 int   uhi_nanosleep(uint64_t nsecs);
 
 int   uhi_open(const char *path, int flags);
@@ -147,5 +148,8 @@ int   uhi_rwlock_tryrlock(uhi_rwlock_t *rw);
 void  uhi_rwlock_runlock(uhi_rwlock_t *rw);
 int   uhi_rwlock_tryupgrade(uhi_rwlock_t *rw);
 void  uhi_rwlock_downgrade(uhi_rwlock_t *rw);
+
+int   uhi_get_ifaddr(const char *ifname, uint8_t *ethaddr);
+
 
 #endif /* _UINET_HOST_INTERFACE_H_ */

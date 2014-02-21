@@ -49,6 +49,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #if defined(__APPLE__)
@@ -56,6 +57,18 @@
 #include <mach/mach.h>
 #include <mach/thread_policy.h>
 #endif
+
+#include <net/ethernet.h>
+#if defined(__FreeBSD__)
+#include <net/if.h>
+#include <net/if_dl.h>
+#endif /*  __FreeBSD__ */
+
+#if defined(__linux__)
+#include <netpacket/packet.h>
+#endif /* __linux__ */
+
+#include <ifaddrs.h>
 
 #if defined(__FreeBSD__)
 #include <sys/cpuset.h>
@@ -176,6 +189,18 @@ uhi_clock_gettime(int id, int64_t *sec, long *nsec)
 	*sec = (int64_t)ts.tv_sec;
 	*nsec = (long)ts.tv_nsec;
 #endif /* __APPLE__ */
+}
+
+
+uint64_t
+uhi_clock_gettime_ns(int id)
+{
+	int64_t sec;
+	long nsec;
+	 
+	uhi_clock_gettime(id, &sec, &nsec);
+
+	return ((uint64_t)sec * 1000000000ULL + nsec);
 }
 
 
@@ -747,3 +772,52 @@ uhi_rwlock_downgrade(uhi_rwlock_t *rw)
 }
 
 
+int
+uhi_get_ifaddr(const char *ifname, uint8_t *ethaddr)
+{
+	struct ifaddrs *ifa, *ifa_current;
+	int af;
+	int error;
+
+	if (-1 == getifaddrs(&ifa)) {
+		perror("getifaddrs failed");
+		return (-1);
+	}
+
+#if defined(__FreeBSD__)
+	af = AF_LINK;
+#elif defined(__linux__)			
+	af = AF_PACKET;
+#else
+#error  Add support for obtaining an interface MAC address to this platform.
+#endif /* __FreeBSD__*/
+
+	ifa_current = ifa;
+	error = -1;
+	while (NULL != ifa_current) {
+		if ((0 == strcmp(ifa_current->ifa_name, ifname)) &&
+		    (af == ifa_current->ifa_addr->sa_family) &&
+		    (NULL != ifa_current->ifa_data)) {
+			unsigned char *addr;
+
+#if defined(__FreeBSD__)
+			struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa_current->ifa_addr;
+			addr = &sdl->sdl_data[sdl->sdl_nlen];
+#elif defined(__linux__)			
+			struct sockaddr_ll *sll = (struct sockaddr_ll *)ifa_current->ifa_addr;
+			addr = sll->sll_addr;
+#else
+#error  Add support for obtaining an interface MAC address to this platform.
+#endif /* __FreeBSD__*/
+			
+			memcpy(ethaddr, addr, ETHER_ADDR_LEN);
+			error = 0;
+			break;
+		}
+		ifa_current = ifa_current->ifa_next;
+	}
+
+	freeifaddrs(ifa);
+
+	return (error);
+}
