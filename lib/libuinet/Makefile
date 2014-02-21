@@ -94,6 +94,7 @@ UINET_SRCS+=			\
 	uinet_config.c		\
 	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
+	uinet_if_pcap.c		\
 	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
@@ -152,7 +153,8 @@ endif
 UINET_HOST_SRCS+=		\
 	uinet_api_errno.c	\
 	uinet_arc4random.c	\
-	uinet_host_interface.c  \
+	uinet_host_interface.c	\
+	uinet_if_pcap_host.c	\
 	uinet_kern_shutdown.c
 
 ifneq (${HOST_OS},Darwin)

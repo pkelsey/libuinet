@@ -42,7 +42,8 @@ typedef enum {
 
 typedef enum {
 	UINET_IFTYPE_LOOPBACK,
-	UINET_IFTYPE_NETMAP
+	UINET_IFTYPE_NETMAP,
+	UINET_IFTYPE_PCAP
 } uinet_iftype_t;
 
 
