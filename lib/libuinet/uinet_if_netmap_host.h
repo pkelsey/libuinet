@@ -28,7 +28,6 @@
 
 struct if_netmap_host_context;
 
-int if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr);
 struct if_netmap_host_context *if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigned int qno);
 void if_netmap_deregister_if(struct if_netmap_host_context *ctx);
 int if_netmap_rxsync(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur, const uint32_t *reserved);

@@ -54,19 +54,11 @@
 #include <linux/version.h>
 #endif /* __linux__ */
 
-#include <net/ethernet.h>
 #if defined(__FreeBSD__)
 #include <net/if.h>
-#include <net/if_dl.h>
 #endif /*  __FreeBSD__ */
 #include <net/netmap.h>
 #include <net/netmap_user.h>
-
-#if defined(__linux__)
-#include <netpacket/packet.h>
-#endif /* __linux__ */
-
-#include <ifaddrs.h>
 
 #include "uinet_if_netmap_host.h"
 #include "uinet_host_interface.h"
@@ -81,57 +73,6 @@ struct if_netmap_host_context {
 	struct netmap_ring *hw_rx_ring;
 	struct netmap_ring *hw_tx_ring;
 };
-
-
-int
-if_netmap_get_ifaddr(const char *ifname, uint8_t *ethaddr)
-{
-	struct ifaddrs *ifa, *ifa_current;
-	int af;
-	int error;
-
-	if (-1 == getifaddrs(&ifa)) {
-		perror("getifaddrs failed");
-		return (-1);
-	}
-
-#if defined(__FreeBSD__)
-	af = AF_LINK;
-#elif defined(__linux__)			
-	af = AF_PACKET;
-#else
-#error  Add support for obtaining an interface MAC address to this platform.
-#endif /* __FreeBSD__*/
-
-	ifa_current = ifa;
-	error = -1;
-	while (NULL != ifa_current) {
-		if ((0 == strcmp(ifa_current->ifa_name, ifname)) &&
-		    (af == ifa_current->ifa_addr->sa_family) &&
-		    (NULL != ifa_current->ifa_data)) {
-			unsigned char *addr;
-
-#if defined(__FreeBSD__)
-			struct sockaddr_dl *sdl = (struct sockaddr_dl *)ifa_current->ifa_addr;
-			addr = &sdl->sdl_data[sdl->sdl_nlen];
-#elif defined(__linux__)			
-			struct sockaddr_ll *sll = (struct sockaddr_ll *)ifa_current->ifa_addr;
-			addr = sll->sll_addr;
-#else
-#error  Add support for obtaining an interface MAC address to this platform.
-#endif /* __FreeBSD__*/
-			
-			memcpy(ethaddr, addr, ETHER_ADDR_LEN);
-			error = 0;
-			break;
-		}
-		ifa_current = ifa_current->ifa_next;
-	}
-
-	freeifaddrs(ifa);
-
-	return (error);
-}
 
 
 struct if_netmap_host_context *

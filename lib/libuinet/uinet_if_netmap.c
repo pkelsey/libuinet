@@ -373,7 +373,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	}
 
 	if (!sc->isvale) {
-		if (0 != if_netmap_get_ifaddr(sc->host_ifname, sc->addr)) {
+		if (0 != uhi_get_ifaddr(sc->host_ifname, sc->addr)) {
 			printf("failed to find interface address\n");
 			error = ENXIO;
 			goto fail;
@@ -442,6 +442,8 @@ if_netmap_send(void *arg)
 	u_int pktlen;
 	int rv;
 
+	if (sc->cfg->cpu >= 0)
+		sched_bind(sc->tx_thread, sc->cfg->cpu);
 
 	while (1) {
 		mtx_lock(&sc->tx_lock);
@@ -617,6 +619,9 @@ if_netmap_receive(void *arg)
 
 	sc = (struct if_netmap_softc *)arg;
 
+	if (sc->cfg->cpu >= 0)
+		sched_bind(sc->rx_thread, sc->cfg->cpu);
+
 	rv = if_netmap_rxsync(sc->nm_host_ctx, NULL, NULL, NULL);
 	if (rv == -1)
 		printf("could not sync rx descriptors before receive loop\n");
@@ -649,7 +654,7 @@ if_netmap_receive(void *arg)
 				 * know the data is going to fit in a
 				 * cluster
 				 */
-				m = m_devget(slotbuf, pktlen, 0, sc->ifp, NULL);
+				m = m_devget(slotbuf, pktlen, ETHER_ALIGN, sc->ifp, NULL);
 
 				if (NULL == m) {
 					/* XXX dropped. should count this */
@@ -672,6 +677,17 @@ if_netmap_receive(void *arg)
 
 					if_netmap_rxsetslot(sc->nm_host_ctx, &sc->hw_rx_rsvd_begin, slotindex);
 				} else {
+					/* XXX presumably in this path the
+					 * IP header isn't aligned on a
+					 * 32-bit boundary because the
+					 * ethernet header is and there is
+					 * no ETHER_ALIGN adjustment?  this
+					 * would be an issue for ip_src and
+					 * ip_dst on platforms that don't
+					 * support 16-bit aligned access to
+					 * 32-bit values.
+					 */
+					
 					bi->nm_index = slotindex;
 					
 					m->m_pkthdr.len = m->m_len = pktlen;
@@ -747,11 +763,6 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 		ether_ifdetach(ifp);
 		if_free(ifp);
 		return (1);
-	}
-
-	if (sc->cfg->cpu >= 0) {
-		sched_bind(sc->tx_thread, sc->cfg->cpu);
-		sched_bind(sc->rx_thread, sc->cfg->cpu);
 	}
 
 	return (0);
