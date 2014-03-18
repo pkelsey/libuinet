@@ -63,6 +63,13 @@
 #include "uinet_if_netmap_host.h"
 #include "uinet_host_interface.h"
 
+/* XXX The netmap host interface should be converted to NETMAP_API >= 10
+ * semantics and internally translate to NETMAP_API < 10.  Currently it is
+ * done the other way.
+ */
+#if NETMAP_API >= 10
+#define NETMAP_RING_NEXT(r, i) nm_ring_next((r), (i))
+#endif
 
 struct if_netmap_host_context {
 	int fd;
@@ -108,7 +115,12 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 	}
 
 	ctx->req.nr_version = NETMAP_API;
+#if NETMAP_API < 10
 	ctx->req.nr_ringid = NETMAP_NO_TX_POLL | NETMAP_HW_RING | qno;
+#else
+	ctx->req.nr_ringid = NETMAP_NO_TX_POLL | qno;
+	ctx->req.nr_flags = NR_REG_ONE_NIC;
+#endif
 	snprintf(ctx->req.nr_name, sizeof(ctx->req.nr_name), "%s", ifname);
 
 	if (-1 == ioctl(ctx->fd, NIOCREGIF, &ctx->req)) {
@@ -123,10 +135,12 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 	ctx->hw_rx_ring = NETMAP_RXRING(NETMAP_IF(ctx->mem, ctx->req.nr_offset), qno);
 	ctx->hw_tx_ring = NETMAP_TXRING(NETMAP_IF(ctx->mem, ctx->req.nr_offset), qno);
 
+#if NETMAP_API < 10
 	/* NIOCREGIF will reset the hardware rings, but the reserved count
 	 * might still be non-zero from a previous user's activities
 	 */
 	ctx->hw_rx_ring->reserved = 0;
+#endif
 
 	return (ctx);
 
@@ -153,9 +167,18 @@ if_netmap_rxsync(struct if_netmap_host_context *ctx, const uint32_t *avail, cons
 {
 	struct netmap_ring *rxr = ctx->hw_rx_ring;
 
-	if (avail) rxr->avail = *avail;
 	if (cur) rxr->cur = *cur;
+
+#if NETMAP_API < 10
+	if (avail) rxr->avail = *avail;
 	if (reserved) rxr->reserved = *reserved;
+#else
+	if (reserved) {
+		rxr->head = rxr->cur - *reserved;
+		if ((int)rxr->head < 0)
+			rxr->head += rxr->num_slots;
+	}
+#endif
 
 	return (ioctl(ctx->fd, NIOCRXSYNC, NULL));
 }
@@ -164,7 +187,11 @@ if_netmap_rxsync(struct if_netmap_host_context *ctx, const uint32_t *avail, cons
 uint32_t
 if_netmap_rxavail(struct if_netmap_host_context *ctx)
 {
+#if NETMAP_API < 10
 	return (ctx->hw_rx_ring->avail);
+#else
+	return (nm_ring_space(ctx->hw_rx_ring));
+#endif
 }
 
 
@@ -178,7 +205,14 @@ if_netmap_rxcur(struct if_netmap_host_context *ctx)
 uint32_t
 if_netmap_rxreserved(struct if_netmap_host_context *ctx)
 {
+#if NETMAP_API < 10
 	return (ctx->hw_rx_ring->reserved);
+#else
+	int ret = ctx->hw_rx_ring->cur - ctx->hw_rx_ring->head;
+	if (ret < 0)
+		ret += ctx->hw_rx_ring->num_slots;
+	return (ret);
+#endif
 }
 
 
@@ -226,8 +260,13 @@ if_netmap_txsync(struct if_netmap_host_context *ctx, const uint32_t *avail, cons
 {
 	struct netmap_ring *txr = ctx->hw_tx_ring;
 
-	if (avail) txr->avail = *avail;
+#if NETMAP_API < 10
 	if (cur) txr->cur = *cur;
+	if (avail) txr->avail = *avail;
+#else
+	if (cur)
+		txr->head = txr->cur = *cur;
+#endif
 
 	return (ioctl(ctx->fd, NIOCTXSYNC, NULL));
 }
@@ -236,7 +275,11 @@ if_netmap_txsync(struct if_netmap_host_context *ctx, const uint32_t *avail, cons
 uint32_t
 if_netmap_txavail(struct if_netmap_host_context *ctx)
 {
+#if NETMAP_API < 10
 	return (ctx->hw_tx_ring->avail);
+#else
+	return (nm_ring_space(ctx->hw_tx_ring));
+#endif
 }
 
 
