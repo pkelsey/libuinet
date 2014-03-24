@@ -20,7 +20,7 @@ Packet I/O is currently accomplished via netmap.
 Building libuinet
 =============================================================================
 
-cd network/uinet/lib/libuinet
+cd lib/libuinet
 gmake
 
 If your netmap includes are not in the system include path,
@@ -36,13 +36,13 @@ libuinet before building them, you must also build the libev port.
 
 To build the libev port:
 
-cd network/uinet/lib/libev
+cd lib/libev
 ./configure --with-uinet=../libuinet/api_include
 make
 
 To build the sample programs:
 
-cd network/uinet/bin/<prog>
+cd bin/<prog>
 gmake
 
 

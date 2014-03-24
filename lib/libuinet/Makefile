@@ -4,14 +4,14 @@
 #
 DEBUG=-ggdb -O0
 
-TOPDIR?=${CURDIR}/../../../..
-S=${TOPDIR}/network/uinet/sys
+TOPDIR?=${CURDIR}/../..
+S=${TOPDIR}/sys
 API_INCLUDES_ROOT:=${CURDIR}/api_include
 MACHINE_INCLUDES_ROOT:=${CURDIR}/machine_include
 OVERRIDE_INCLUDES_ROOT:=${CURDIR}/override_include
 X86_INCLUDES=0
 
-include ${TOPDIR}/network/uinet/mk/kern.pre.mk
+include ${TOPDIR}/mk/kern.pre.mk
 
 KERNPREINCLUDES:= ${INCLUDES}
 INCLUDES= -I${OVERRIDE_INCLUDES_ROOT} -I${API_INCLUDES_ROOT} ${KERNPREINCLUDES}
@@ -366,5 +366,5 @@ vnode_if_typedef.h:
 	${AWK} -f $S/tools/vnode_if.awk $S/kern/vnode_if.src -q
 
 
-include ${TOPDIR}/network/uinet/mk/kern.mk
+include ${TOPDIR}/mk/kern.mk
 

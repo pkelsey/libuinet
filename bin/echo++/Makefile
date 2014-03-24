@@ -1,14 +1,14 @@
 
 
-TOPDIR?=${CURDIR}/../../../..
+TOPDIR?=${CURDIR}/../..
 
 PROG_CXX=echo++
 
 UINET_LIBS=uinet
 
-CXXFLAGS= -I${TOPDIR}/network/uinet/lib/libev
-LDADD= ${TOPDIR}/network/uinet/lib/libev/.libs/libev.a -lm
+CXXFLAGS= -I${TOPDIR}/lib/libev
+LDADD= ${TOPDIR}/lib/libev/.libs/libev.a -lm -lpcap
 
 DEBUG_FLAGS=-g -O0
 
-include $(TOPDIR)/network/uinet/mk/prog.mk
+include ${TOPDIR}/mk/prog.mk

@@ -1,7 +1,7 @@
-CPPFLAGS+=-I${TOPDIR}/network/uinet/lib/libuinet/api_include
+CPPFLAGS+=-I${TOPDIR}/lib/libuinet/api_include
 CPPFLAGS+=-DHAVE_UINET=1
 
-LDADD+=         -L${TOPDIR}/network/uinet/lib/libuinet
+LDADD+=         -L${TOPDIR}/lib/libuinet
 LDADD+=		-luinet
 ifeq "${OSNAME}" "Linux"
 LDADD+=		-lcrypto

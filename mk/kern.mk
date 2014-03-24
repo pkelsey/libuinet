@@ -115,5 +115,5 @@ endif
 endif
 
 
-${IMACROS_FILE}: ${TOPDIR}/network/uinet/mk/kern.pre.mk
+${IMACROS_FILE}: ${TOPDIR}/mk/kern.pre.mk
 	echo | ${CC} -E -dM - | grep -v -E '${IMACROS_FILTER_EXPR}' > ${IMACROS_FILE}
