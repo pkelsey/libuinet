@@ -9,12 +9,13 @@ Unlike the stock FreeBSD TCP/IP stack, this stack can initiate and
 terminate arbitrary TCP/IP connections, including those on
 arbitrarily-nested VLANs.  Listen sockets can be bound to a wildcard
 IP address (across everything on the wire, not just local interfaces),
-wildcard port, and specific VLAN tags stacks.  L2 information for
+wildcard port, and specific VLAN tag stacks.  L2 information for
 accepted connections is available to the application.  Outbound
 connections can be bound to any IP and port, as well as any MAC
 address and VLAN tag stack.
 
-Packet I/O is currently accomplished via netmap.
+Packet I/O is currently accomplished via netmap or libpcap (although
+the latter interface is relatively new and untested).
 
 
 Building libuinet
