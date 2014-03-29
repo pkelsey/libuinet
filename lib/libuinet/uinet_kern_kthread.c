@@ -98,7 +98,7 @@ thread_end_routine(struct uhi_thread_start_args *start_args)
 {
 	struct thread *td = start_args->thread_specific_data;
 
-	cv_destroy((struct cv *)&td->td_sleepqueue);
+	cv_destroy((struct cv *)td->td_sleepqueue);
 }
 
 
