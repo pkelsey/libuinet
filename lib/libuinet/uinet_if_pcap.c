@@ -24,6 +24,7 @@
  */
 
 #include <sys/ctype.h>
+#include <sys/dirent.h>
 #include <sys/param.h>
 #include <sys/time.h>
 #include <sys/socket.h>
@@ -55,7 +56,7 @@ struct if_pcap_softc {
 	const struct uinet_config_if *cfg;
 	uint8_t addr[ETHER_ADDR_LEN];
 	int isfile;
-	char host_ifname[IF_NAMESIZE];
+	char host_ifname[MAXNAMLEN];
 
 	struct if_pcap_host_context *pcap_host_ctx;
 
@@ -233,6 +234,8 @@ if_pcap_send(void *arg)
 				if (0 != if_pcap_sendpacket(sc->pcap_host_ctx, pkt, pktlen))
 					ifp->if_oerrors++;
 			} else {
+				if (sc->isfile)
+					printf("if_pcap_send: Packet send attempt in file mode\n");
 				ifp->if_oerrors++;
 			}
 
