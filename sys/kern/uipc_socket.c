@@ -107,6 +107,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/uipc_socket.c 233353 2012-03-23 11:26
 #include "opt_inet6.h"
 #include "opt_zero.h"
 #include "opt_compat.h"
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 
 #include <sys/param.h>
@@ -450,7 +451,7 @@ SYSCTL_INT(_regression, OID_AUTO, sonewconn_earlytest, CTLFLAG_RW,
 /*
  * When an attempt at a new connection is noted on a socket which accepts
  * connections, sonewconn is called.  If the connection is possible (subject
- * to space constraints, etc.) then we allocate a new structure, propoerly
+ * to space constraints, etc.) then we allocate a new structure, properly
  * linked into the data structure of the original socket, and return this.
  * Connstatus may be 0, or SO_ISCONFIRMING, or SO_ISCONNECTED.
  *
@@ -542,6 +543,63 @@ sonewconn(struct socket *head, int connstatus)
 	}
 	return (so);
 }
+
+#ifdef PASSIVE_INET
+/*
+ * When a new connection is completed on a listening socket that is
+ * configured for passive reassembly, sonewconn_passive_client is called to
+ * create a socket representing the client side of the reassembled
+ * connection.  We allocate a new structure, inherit configuration from the
+ * listening socket, and return this.
+ * Connstatus may be 0, or SO_ISCONFIRMING, or SO_ISCONNECTING.
+ *
+ * Note: the ref count on the socket is 1 on return.
+ */
+struct socket *
+sonewconn_passive_client(struct socket *head, int connstatus)
+{
+	struct socket *so;
+
+	VNET_ASSERT(head->so_vnet != NULL, ("%s:%d so_vnet is NULL, head=%p",
+	    __func__, __LINE__, head));
+	so = soalloc(head->so_vnet);
+	if (so == NULL)
+		return (NULL);
+	so->so_head = NULL; /* just inheriting from head, not otherwise associating */
+	so->so_type = head->so_type;
+	so->so_options = head->so_options &~ SO_ACCEPTCONN;
+	so->so_linger = head->so_linger;
+	so->so_state = head->so_state | SS_NOFDREF | (head->so_state & SS_NBIO);
+	so->so_fibnum = head->so_fibnum;
+	so->so_proto = head->so_proto;
+	so->so_cred = crhold(head->so_cred);
+#ifdef MAC
+	mac_socket_newconn(head, so);
+#endif
+#ifdef PROMISCUOUS_INET
+	in_promisc_socket_newconn(head, so);
+#endif
+	knlist_init_mtx(&so->so_rcv.sb_sel.si_note, SOCKBUF_MTX(&so->so_rcv));
+	knlist_init_mtx(&so->so_snd.sb_sel.si_note, SOCKBUF_MTX(&so->so_snd));
+	VNET_SO_ASSERT(head);
+	if (soreserve(so, head->so_snd.sb_hiwat, head->so_rcv.sb_hiwat) ||
+	    (*so->so_proto->pr_usrreqs->pru_attach)(so, 0, NULL)) {
+		sodealloc(so);
+		return (NULL);
+	}
+	so->so_rcv.sb_lowat = head->so_rcv.sb_lowat;
+	so->so_snd.sb_lowat = head->so_snd.sb_lowat;
+	so->so_rcv.sb_timeo = head->so_rcv.sb_timeo;
+	so->so_snd.sb_timeo = head->so_snd.sb_timeo;
+	so->so_rcv.sb_flags |= head->so_rcv.sb_flags & SB_AUTOSIZE;
+	so->so_snd.sb_flags |= head->so_snd.sb_flags & SB_AUTOSIZE;
+	so->so_state |= connstatus;
+
+	so->so_count = 1;
+
+	return (so);
+}
+#endif /* PASSIVE_INET */
 
 int
 sobind(struct socket *so, struct sockaddr *nam, struct thread *td)
@@ -2603,8 +2661,9 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 #endif /* PROMISCUOUS_INET */
 			break;
 
+		case SO_PASSIVE:
 		case SO_PROMISC:
-#ifdef PROMISCUOUS_INET
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET)
 			error = sooptcopyin(sopt, &optval, sizeof optval,
 					    sizeof optval);
 			if (error) {

@@ -27,7 +27,7 @@
 #ifndef	_UINET_API_TYPES_H_
 #define	_UINET_API_TYPES_H_
 
-
+#define UINET_IF_NAMESIZE	16
 
 struct uinet_socket;
 
@@ -228,10 +228,64 @@ struct uinet_uio {
 #define	UINET_TCP_INFO		0x20	/* retrieve tcp_info structure */
 #define	UINET_TCP_CONGESTION	0x40	/* get/set congestion control algorithm */
 #define	UINET_TCP_KEEPINIT	0x80	/* N, time to establish connection */
-#define	UINET_TCP_KEEPIDLE	0x100	/* L,N,X start keeplives after this period */
+#define	UINET_TCP_KEEPIDLE	0x100	/* L,N,X start keepalives after this period */
 #define	UINET_TCP_KEEPINTVL	0x200	/* L,N interval between keepalives */
 #define	UINET_TCP_KEEPCNT	0x400	/* L,N number of keepalives before close */
+#define UINET_TCP_REASSDL	0x800	/* wait this long for missing segments */
 
+struct uinet_tcp_info {
+	uint8_t		tcpi_state;		/* TCP FSM state. */
+	uint8_t		__tcpi_ca_state;
+	uint8_t		__tcpi_retransmits;
+	uint8_t		__tcpi_probes;
+	uint8_t		__tcpi_backoff;
+	uint8_t		tcpi_options;		/* Options enabled on conn. */
+	uint8_t		tcpi_snd_wscale:4,	/* RFC1323 send shift value. */
+			tcpi_rcv_wscale:4;	/* RFC1323 recv shift value. */
+
+	uint32_t	tcpi_rto;		/* Retransmission timeout (usec). */
+	uint32_t	__tcpi_ato;
+	uint32_t	tcpi_snd_mss;		/* Max segment size for send. */
+	uint32_t	tcpi_rcv_mss;		/* Max segment size for receive. */
+
+	uint32_t	__tcpi_unacked;
+	uint32_t	__tcpi_sacked;
+	uint32_t	__tcpi_lost;
+	uint32_t	__tcpi_retrans;
+	uint32_t	__tcpi_fackets;
+
+	/* Times; measurements in usecs. */
+	uint32_t	__tcpi_last_data_sent;
+	uint32_t	__tcpi_last_ack_sent;	/* Also unimpl. on Linux? */
+	uint32_t	tcpi_last_data_recv;	/* Time since last recv data. */
+	uint32_t	__tcpi_last_ack_recv;
+
+	/* Metrics; variable units. */
+	uint32_t	__tcpi_pmtu;
+	uint32_t	__tcpi_rcv_ssthresh;
+	uint32_t	tcpi_rtt;		/* Smoothed RTT in usecs. */
+	uint32_t	tcpi_rttvar;		/* RTT variance in usecs. */
+	uint32_t	tcpi_snd_ssthresh;	/* Slow start threshold. */
+	uint32_t	tcpi_snd_cwnd;		/* Send congestion window. */
+	uint32_t	__tcpi_advmss;
+	uint32_t	__tcpi_reordering;
+
+	uint32_t	__tcpi_rcv_rtt;
+	uint32_t	tcpi_rcv_space;		/* Advertised recv window. */
+
+	/* FreeBSD extensions to tcp_info. */
+	uint32_t	tcpi_snd_wnd;		/* Advertised send window. */
+	uint32_t	tcpi_snd_bwnd;		/* No longer used. */
+	uint32_t	tcpi_snd_nxt;		/* Next egress seqno */
+	uint32_t	tcpi_rcv_nxt;		/* Next ingress seqno */
+	uint32_t	tcpi_toe_tid;		/* HWTID for TOE endpoints */
+	uint32_t	tcpi_snd_rexmitpack;	/* Retransmitted packets */
+	uint32_t	tcpi_rcv_ooopack;	/* Out-of-order packets */
+	uint32_t	tcpi_snd_zerowin;	/* Zero-sized windows sent */
+	
+	/* Padding to grow without breaking ABI. */
+	uint32_t	__tcpi_pad[26];		/* Padding. */
+};
 
 
 #define UINET_IN_L2INFO_MAX_TAGS	16

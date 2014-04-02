@@ -86,6 +86,8 @@
 #define	TCPTV_KEEPINTVL	( 75*hz)		/* default probe interval */
 #define	TCPTV_KEEPCNT	8			/* max probes before drop */
 
+#define TCPTV_REASSDL	(  5*hz)		/* initial passive reassembly deadline */
+
 #define TCPTV_FINWAIT2_TIMEOUT (60*hz)         /* FIN_WAIT_2 timeout if no receiver */
 
 /*
@@ -138,6 +140,8 @@ static const char *tcptimers[] =
 
 #ifdef _KERNEL
 
+#include "opt_passiveinet.h"
+
 struct xtcp_timer;
 
 struct tcp_timer {
@@ -146,18 +150,27 @@ struct tcp_timer {
 	struct	callout tt_keep;	/* keepalive */
 	struct	callout tt_2msl;	/* 2*msl TIME_WAIT timer */
 	struct	callout tt_delack;	/* delayed ACK timer */
+#ifdef PASSIVE_INET
+	struct	callout tt_reassdl;	/* reassmbly deadline timer */
+#endif
 };
 #define TT_DELACK	0x01
 #define TT_REXMT	0x02
 #define TT_PERSIST	0x04
 #define TT_KEEP		0x08
 #define TT_2MSL		0x10
+#ifdef PASSIVE_INET
+#define TT_REASSDL	0x20
+#endif
 
 #define	TP_KEEPINIT(tp)	((tp)->t_keepinit ? (tp)->t_keepinit : tcp_keepinit)
 #define	TP_KEEPIDLE(tp)	((tp)->t_keepidle ? (tp)->t_keepidle : tcp_keepidle)
 #define	TP_KEEPINTVL(tp) ((tp)->t_keepintvl ? (tp)->t_keepintvl : tcp_keepintvl)
 #define	TP_KEEPCNT(tp)	((tp)->t_keepcnt ? (tp)->t_keepcnt : tcp_keepcnt)
 #define	TP_MAXIDLE(tp)	(TP_KEEPCNT(tp) * TP_KEEPINTVL(tp))
+#ifdef PASSIVE_INET
+#define TP_REASSDL(tp)  ((tp)->t_reassdl ? (tp)->t_reassdl : tcp_reassdl) 
+#endif
 
 extern int tcp_keepinit;		/* time to establish connection */
 extern int tcp_keepidle;		/* time before keepalive probes begin */
@@ -170,6 +183,9 @@ extern int tcp_rexmit_slop;
 extern int tcp_msl;
 extern int tcp_ttl;			/* time to live for TCP segs */
 extern int tcp_backoff[];
+#ifdef PASSIVE_INET
+extern int tcp_reassdl;			/* deadline for segment delivery from reass. q */
+#endif
 
 extern int tcp_finwait2_timeout;
 extern int tcp_fast_finwait2_recycle;
@@ -184,6 +200,9 @@ void	tcp_timer_rexmt(void *xtp);
 void	tcp_timer_delack(void *xtp);
 void	tcp_timer_to_xtimer(struct tcpcb *tp, struct tcp_timer *timer,
 	struct xtcp_timer *xtimer);
+#ifdef PASSIVE_INET
+void	tcp_timer_reassdl(void *xtp);
+#endif
 
 #endif /* _KERNEL */
 

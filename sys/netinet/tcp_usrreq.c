@@ -1449,6 +1449,9 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 		case TCP_KEEPIDLE:
 		case TCP_KEEPINTVL:
 		case TCP_KEEPINIT:
+#ifdef PASSIVE_INET
+		case TCP_REASSDL:
+#endif
 			INP_WUNLOCK(inp);
 			error = sooptcopyin(sopt, &ui, sizeof(ui), sizeof(ui));
 			if (error)
@@ -1487,6 +1490,11 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 					tcp_timer_activate(tp, TT_KEEP,
 					    TP_KEEPINIT(tp));
 				break;
+#ifdef PASSIVE_INET
+			case TCP_REASSDL:
+				tp->t_reassdl = ui;
+				break;
+#endif
 			}
 			INP_WUNLOCK(inp);
 			break;

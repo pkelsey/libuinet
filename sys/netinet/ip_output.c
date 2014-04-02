@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 #include "opt_route.h"
 #include "opt_mbuf_stress_test.h"
 #include "opt_mpath.h"
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 #include "opt_sctp.h"
 
@@ -1016,6 +1017,22 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				inp->inp_inc.inc_fibnum = so->so_fibnum;
 				INP_WUNLOCK(inp);
 				error = 0;
+				break;
+			case SO_PASSIVE:
+#ifdef PASSIVE_INET
+				INP_WLOCK(inp);
+				if ((so->so_options & SO_PASSIVE) != 0) {
+					inp->inp_flags2 |= INP_PASSIVE;
+					inp->inp_inc.inc_flags |= INC_PASSIVE;
+				} else {
+					inp->inp_flags2 &= ~INP_PASSIVE;
+					inp->inp_inc.inc_flags &= ~INC_PASSIVE;
+				}
+				INP_WUNLOCK(inp);
+				error = 0;
+#else
+				error = ENOPROTOOPT;
+#endif /* PASSIVE_INET */
 				break;
 			case SO_PROMISC:
 #ifdef PROMISCUOUS_INET

@@ -247,6 +247,7 @@ NETINET_SRCS+=		\
 	igmp.c		\
 	in.c		\
 	in_mcast.c	\
+	in_passive.c	\
 	in_pcb.c	\
 	in_promisc.c	\
 	in_proto.c	\

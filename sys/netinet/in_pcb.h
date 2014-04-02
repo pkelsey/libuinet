@@ -116,8 +116,9 @@ struct in_conninfo {
  * Flags for inc_flags.
  */
 #define	INC_ISIPV6	0x01
-#define	INC_PROMISC	0x02		/* connection is promiscuous */
-#define	INC_SYNFILTERED	0x04		/* a SYN filter has been applied */
+#define	INC_PASSIVE	0x02		/* connection is being passively reassembled */
+#define	INC_PROMISC	0x04		/* connection is promiscuous */
+#define	INC_SYNFILTERED	0x08		/* a SYN filter has been applied */
 
 #define	inc_fport	inc_ie.ie_fport
 #define	inc_lport	inc_ie.ie_lport
@@ -551,8 +552,9 @@ void 	inp_4tuple_get(struct inpcb *inp, uint32_t *laddr, uint16_t *lp,
 #define	INP_RT_VALID		0x00000002 /* cached rtentry is valid */
 #define	INP_PCBGROUPWILD	0x00000004 /* in pcbgroup wildcard list */
 #define	INP_REUSEPORT		0x00000008 /* SO_REUSEPORT option is set */
-#define	INP_PROMISC		0x00000010 /* promiscuous inet mode enabled */
-#define	INP_SYNFILTER		0x00000020 /* a SYN filter has been attached */
+#define	INP_PASSIVE		0x00000010 /* passive inet mode enabled */
+#define	INP_PROMISC		0x00000020 /* promiscuous inet mode enabled */
+#define	INP_SYNFILTER		0x00000040 /* a SYN filter has been attached */
 
 /*
  * Flags passed to in_pcblookup*() functions.

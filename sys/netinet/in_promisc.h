@@ -130,9 +130,10 @@ struct syn_filter {
 	 * listening promiscuous socket.  Runs with INP_RLOCK(inp) held.
 	 */
 #define SYNF_ACCEPT		0	/* Process SYN normally */
-#define SYNF_REJECT_RST		1	/* Discard SYN, send RST */
-#define SYNF_REJECT_SILENT	2	/* Discard SYN silently */
-#define SYNF_DEFER		3	/* Decision will be returned later via setsockopt() */
+#define SYNF_ACCEPT_PASSIVE	1	/* Process SYN for passive reassembly */
+#define SYNF_REJECT_RST		2	/* Discard SYN, send RST */
+#define SYNF_REJECT_SILENT	3	/* Discard SYN silently */
+#define SYNF_DEFER		4	/* Decision will be returned later via setsockopt() */
 	int	(*synf_callback)(struct inpcb *inp, void *inst_arg,
 				 struct syn_filter_cbarg *arg);
 
@@ -156,6 +157,7 @@ struct syn_filter {
 struct in_l2info *in_promisc_l2info_alloc(int flags);
 void in_promisc_l2info_free(struct in_l2info *l2info);
 void in_promisc_l2info_copy(struct in_l2info *dst, const struct in_l2info *src);
+void in_promisc_l2info_copy_swap(struct in_l2info *dst, const struct in_l2info *src);
 void in_promisc_l2tagstack_copy(struct in_l2tagstack *dst, const struct in_l2tagstack *src);
 int in_promisc_tagcmp(const struct in_l2tagstack *l2ts1, const struct in_l2tagstack *l2ts2);
 int in_promisc_socket_init(struct socket *so, int flags);

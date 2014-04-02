@@ -169,6 +169,105 @@ tcp_reass_sysctl_qsize(SYSCTL_HANDLER_ARGS)
 	return (sysctl_handle_int(oidp, arg1, arg2, req));
 }
 
+#ifdef PASSIVE_INET
+static int
+tcp_reass_next_hole_deadline(struct tcpcb *tp)
+{
+	struct tseg_qent *q;
+	int delta;
+
+	INP_WLOCK_ASSERT(tp->t_inpcb);
+
+	q = TAILQ_FIRST(&tp->t_segageq);
+	if (q) {
+		delta = ticks - q->tqe_ticks;
+		if (delta < TP_REASSDL(tp)) {
+			return (TP_REASSDL(tp) - delta);
+		} else {
+			return (1);
+		}
+	}
+
+	return (0);
+}
+
+void
+tcp_reass_deliver_holes(struct tcpcb *tp)
+{
+	struct socket *so = tp->t_inpcb->inp_socket;
+	struct tseg_qent *q, *p, *qtmp;
+	int delta;
+	int hole_size;
+	struct mbuf *m_hole, *m_tmp;
+	int contiguous;
+
+	INP_WLOCK_ASSERT(tp->t_inpcb);
+
+	/* Search into the sequence space for the furthest expired segment. */
+	p = NULL;
+	LIST_FOREACH(q, &tp->t_segq, tqe_q) {
+		delta = ticks - q->tqe_ticks;
+		if (delta >= TP_REASSDL(tp))
+			p = q;
+	}
+
+	if (p) {
+		SOCKBUF_LOCK(&so->so_rcv);
+
+		contiguous = 0;
+		LIST_FOREACH_SAFE(q, &tp->t_segq, tqe_q, qtmp) {
+			if (contiguous && q->tqe_th->th_seq != tp->rcv_nxt)
+				break;
+
+			if (!(so->so_rcv.sb_state & SBS_CANTRCVMORE)) {
+				hole_size = q->tqe_th->th_seq - tp->rcv_nxt;
+				if (hole_size) {
+					m_hole = m_getm(NULL, hole_size, M_NOWAIT, MT_DATA);
+
+					/* XXX any reasonable way to ensure this doesn't happen or have a better outcome if it does? */
+					KASSERT(m_hole != NULL, ("%s: mbuf allocation for hole failed", __func__));
+					m_tmp = m_hole;
+					while (m_tmp) {
+						int clear_size;
+						m_tmp->m_len = (m_tmp->m_flags & M_EXT) ? m_tmp->m_ext.ext_size :
+						    ((m_tmp->m_flags & M_PKTHDR) ? MHLEN : MLEN);
+						clear_size = imin(hole_size, m_tmp->m_len);
+						m_tmp->m_len = clear_size;
+						memset(m_tmp->m_data, 0, clear_size);
+						hole_size -= clear_size;
+						m_tmp = m_tmp->m_next;
+					}
+
+					sbappendstream_locked(&so->so_rcv, m_hole);
+				}
+			}
+
+			tp->rcv_nxt = q->tqe_th->th_seq + q->tqe_len;
+
+			LIST_REMOVE(q, tqe_q);
+			TAILQ_REMOVE(&tp->t_segageq, q, tqe_ageq);
+
+			if (so->so_rcv.sb_state & SBS_CANTRCVMORE)
+				m_freem(q->tqe_m);
+			else
+				sbappendstream_locked(&so->so_rcv, q->tqe_m);
+
+			uma_zfree(V_tcp_reass_zone, q);
+
+			tp->t_segqlen--;
+			if (q == p) {
+				contiguous = 1;
+			}
+		}
+
+		tcp_timer_activate(tp, TT_REASSDL, tcp_reass_next_hole_deadline(tp));
+
+		ND6_HINT(tp);
+		sorwakeup_locked(so);
+	}
+}
+#endif /* PASSIVE_INET */
+
 int
 tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 {
@@ -180,8 +279,20 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	char *s = NULL;
 	int flags;
 	struct tseg_qent tqs;
+#ifdef PASSIVE_INET
+	int deliver_leading_hole = 0;
+	int replace_tqs_in_list = 0;
+	int passive;
+	int hole_size;
+	struct mbuf *m_hole, *m_tmp;
+	struct tseg_qent *reclaimed_tqe = NULL;
+#endif
 
 	INP_WLOCK_ASSERT(tp->t_inpcb);
+
+#ifdef PASSIVE_INET
+	passive = tp->t_inpcb->inp_flags2 & INP_PASSIVE;
+#endif
 
 	/*
 	 * XXX: tcp_reass() is rather inefficient with its data structures
@@ -214,15 +325,31 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	if (th->th_seq != tp->rcv_nxt &&
 	    tp->t_segqlen >= (so->so_rcv.sb_hiwat / tp->t_maxseg) + 1) {
 		V_tcp_reass_overflows++;
-		TCPSTAT_INC(tcps_rcvmemdrop);
-		m_freem(m);
-		*tlenp = 0;
-		if ((s = tcp_log_addrs(&tp->t_inpcb->inp_inc, th, NULL, NULL))) {
-			log(LOG_DEBUG, "%s; %s: queue limit reached, "
-			    "segment dropped\n", s, __func__);
-			free(s, M_TCPLOG);
+#ifdef PASSIVE_INET
+		/*
+		 * In the passive case, we will deliver the leading hole and
+		 * the first queue entry in response to the resource
+		 * shortage, instead of dropping the current packet.
+		 * Dropping the current packet isn't a winning strategy here
+		 * - as passive observers of the packet stream, retransmits
+		 * will not occur due to our drops.
+		 */
+		if (passive)
+			deliver_leading_hole = 1;
+		else {
+#endif
+			TCPSTAT_INC(tcps_rcvmemdrop);
+			m_freem(m);
+			*tlenp = 0;
+			if ((s = tcp_log_addrs(&tp->t_inpcb->inp_inc, th, NULL, NULL))) {
+				log(LOG_DEBUG, "%s; %s: queue limit reached, "
+				    "segment dropped\n", s, __func__);
+				free(s, M_TCPLOG);
+			}
+			return (0);
+#ifdef PASSIVE_INET
 		}
-		return (0);
+#endif
 	}
 
 	/*
@@ -235,26 +362,43 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	te = uma_zalloc(V_tcp_reass_zone, M_NOWAIT);
 	if (te == NULL) {
 		if (th->th_seq != tp->rcv_nxt) {
-			TCPSTAT_INC(tcps_rcvmemdrop);
-			m_freem(m);
-			*tlenp = 0;
-			if ((s = tcp_log_addrs(&tp->t_inpcb->inp_inc, th, NULL,
-			    NULL))) {
-				log(LOG_DEBUG, "%s; %s: global zone limit "
-				    "reached, segment dropped\n", s, __func__);
-				free(s, M_TCPLOG);
+#ifdef PASSIVE_INET
+			/*
+			 * In the passive case, we will deliver the leading
+			 * hole and the first queue entry in response to the
+			 * resource shortage, instead of dropping the
+			 * current packet.  Dropping the current packet
+			 * isn't a winning strategy here - as passive
+			 * observers of the packet stream, retransmits will
+			 * not occur due to our drops.
+			 */
+			if (passive)
+				deliver_leading_hole = 1;
+			else {
+#endif
+				TCPSTAT_INC(tcps_rcvmemdrop);
+				m_freem(m);
+				*tlenp = 0;
+				if ((s = tcp_log_addrs(&tp->t_inpcb->inp_inc, th, NULL,
+						       NULL))) {
+					log(LOG_DEBUG, "%s; %s: global zone limit "
+					    "reached, segment dropped\n", s, __func__);
+					free(s, M_TCPLOG);
+				}
+				return (0);
+#ifdef PASSIVE_INET
 			}
-			return (0);
-		} else {
-			bzero(&tqs, sizeof(struct tseg_qent));
-			te = &tqs;
-			if ((s = tcp_log_addrs(&tp->t_inpcb->inp_inc, th, NULL,
-			    NULL))) {
-				log(LOG_DEBUG,
-				    "%s; %s: global zone limit reached, using "
-				    "stack for missing segment\n", s, __func__);
-				free(s, M_TCPLOG);
-			}
+#endif
+		}
+		
+		bzero(&tqs, sizeof(struct tseg_qent));
+		te = &tqs;
+		if ((s = tcp_log_addrs(&tp->t_inpcb->inp_inc, th, NULL,
+				       NULL))) {
+			log(LOG_DEBUG,
+			    "%s; %s: global zone limit reached, using "
+			    "stack for missing segment\n", s, __func__);
+			free(s, M_TCPLOG);
 		}
 	}
 	tp->t_segqlen++;
@@ -328,12 +472,25 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	te->tqe_m = m;
 	te->tqe_th = th;
 	te->tqe_len = *tlenp;
+#ifdef PASSIVE_INET
+	te->tqe_ticks = ticks;
+
+	TAILQ_INSERT_TAIL(&tp->t_segageq, te, tqe_ageq);
+#endif
 
 	if (p == NULL) {
 		LIST_INSERT_HEAD(&tp->t_segq, te, tqe_q);
 	} else {
-		KASSERT(te != &tqs, ("%s: temporary stack based entry not "
-		    "first element in queue", __func__));
+#ifdef PASSIVE_INET
+		if (passive && te == &tqs)
+			replace_tqs_in_list = 1;
+		else {
+#endif
+			KASSERT(te != &tqs, ("%s: temporary stack based entry not "
+					     "first element in queue", __func__));
+#ifdef PASSIVE_INET
+		}
+#endif
 		LIST_INSERT_AFTER(p, te, tqe_q);
 	}
 
@@ -345,23 +502,82 @@ present:
 	if (!TCPS_HAVEESTABLISHED(tp->t_state))
 		return (0);
 	q = LIST_FIRST(&tp->t_segq);
+#ifdef PASSIVE_INET
+	if (!q || (q->tqe_th->th_seq != tp->rcv_nxt && !deliver_leading_hole)) {
+		if (q && q->tqe_th->th_seq != tp->rcv_nxt) {
+			tcp_timer_activate(tp, TT_REASSDL, tcp_reass_next_hole_deadline(tp));
+		}
+		return (0);
+	}
+#else
 	if (!q || q->tqe_th->th_seq != tp->rcv_nxt)
 		return (0);
+#endif
 	SOCKBUF_LOCK(&so->so_rcv);
+#ifdef PASSIVE_INET
+	if (deliver_leading_hole) {
+		if (!(so->so_rcv.sb_state & SBS_CANTRCVMORE)) {
+			hole_size = q->tqe_th->th_seq - tp->rcv_nxt;
+			m_hole = m_getm(NULL, hole_size, M_NOWAIT, MT_DATA);
+
+			/* XXX any reasonable way to ensure this doesn't happen or have a better outcome if it does? */
+			KASSERT(m_hole != NULL, ("%s: mbuf allocation for hole failed", __func__));
+			m_tmp = m_hole;
+			while (m_tmp) {
+				int clear_size;
+				m_tmp->m_len = (m_tmp->m_flags & M_EXT) ? m_tmp->m_ext.ext_size :
+				    ((m_tmp->m_flags & M_PKTHDR) ? MHLEN : MLEN);
+				clear_size = imin(hole_size, m_tmp->m_len);
+				m_tmp->m_len = clear_size;
+				memset(m_tmp->m_data, 0, clear_size);
+				hole_size -= clear_size;
+				m_tmp = m_tmp->m_next;
+			}
+
+			sbappendstream_locked(&so->so_rcv, m_hole);
+		}
+		tp->rcv_nxt = q->tqe_th->th_seq;
+	}	
+#endif
 	do {
 		tp->rcv_nxt += q->tqe_len;
 		flags = q->tqe_th->th_flags & TH_FIN;
 		nq = LIST_NEXT(q, tqe_q);
 		LIST_REMOVE(q, tqe_q);
+#ifdef PASSIVE_INET
+		TAILQ_REMOVE(&tp->t_segageq, q, tqe_ageq);
+#endif
 		if (so->so_rcv.sb_state & SBS_CANTRCVMORE)
 			m_freem(q->tqe_m);
 		else
 			sbappendstream_locked(&so->so_rcv, q->tqe_m);
-		if (q != &tqs)
-			uma_zfree(V_tcp_reass_zone, q);
+		if (q != &tqs) {
+#ifdef PASSIVE_INET
+			if (replace_tqs_in_list && !reclaimed_tqe)
+				reclaimed_tqe = q;
+			else
+#endif
+				uma_zfree(V_tcp_reass_zone, q);
+		}
+#ifdef PASSIVE_INET
+		else
+			replace_tqs_in_list = 0;
+#endif
 		tp->t_segqlen--;
 		q = nq;
 	} while (q && q->tqe_th->th_seq == tp->rcv_nxt);
+#ifdef PASSIVE_INET
+	if (replace_tqs_in_list) {
+		*reclaimed_tqe = tqs;
+		LIST_INSERT_AFTER(&tqs, reclaimed_tqe, tqe_q);
+		LIST_REMOVE(&tqs, tqe_q);
+
+		TAILQ_INSERT_AFTER(&tp->t_segageq, &tqs, reclaimed_tqe, tqe_ageq);
+		TAILQ_REMOVE(&tp->t_segageq, &tqs, tqe_ageq);
+	}
+
+	tcp_timer_activate(tp, TT_REASSDL, tcp_reass_next_hole_deadline(tp));
+#endif
 	ND6_HINT(tp);
 	sorwakeup_locked(so);
 	return (flags);

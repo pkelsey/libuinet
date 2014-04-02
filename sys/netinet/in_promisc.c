@@ -126,6 +126,20 @@ in_promisc_l2info_copy(struct in_l2info *dst, const struct in_l2info *src)
 
 
 void
+in_promisc_l2info_copy_swap(struct in_l2info *dst, const struct in_l2info *src)
+{
+	memcpy(dst->inl2i_local_addr, src->inl2i_foreign_addr,
+	       IN_L2INFO_ADDR_MAX);
+	memcpy(dst->inl2i_foreign_addr, src->inl2i_local_addr,
+	       IN_L2INFO_ADDR_MAX);
+
+	dst->inl2i_flags = src->inl2i_flags;
+
+	in_promisc_l2tagstack_copy(&dst->inl2i_tagstack, &src->inl2i_tagstack);
+}
+
+
+void
 in_promisc_l2tagstack_copy(struct in_l2tagstack *dst, const struct in_l2tagstack *src)
 {
 	memcpy(dst, src, sizeof(*dst));

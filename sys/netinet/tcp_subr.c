@@ -36,6 +36,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_subr.c 238247 2012-07-08 14:21
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 #include "opt_tcpdebug.h"
 
@@ -342,6 +343,9 @@ tcp_init(void)
 	if (tcp_rexmit_min < 1)
 		tcp_rexmit_min = 1;
 	tcp_rexmit_slop = TCPTV_CPU_VAR;
+#ifdef PASSIVE_INET
+	tcp_reassdl = TCPTV_REASSDL;
+#endif
 	tcp_finwait2_timeout = TCPTV_FINWAIT2_TIMEOUT;
 	tcp_tcbhashsize = hashsize;
 
@@ -714,6 +718,9 @@ tcp_newtcpcb(struct inpcb *inp)
 #endif
 	tp->t_timers = &tm->tt;
 	/*	LIST_INIT(&tp->t_segq); */	/* XXX covered by M_ZERO */
+#ifdef PASSIVE_INET
+	TAILQ_INIT(&tp->t_segageq);
+#endif
 	tp->t_maxseg = tp->t_maxopd =
 #ifdef INET6
 		isipv6 ? V_tcp_v6mssdflt :
@@ -726,6 +733,9 @@ tcp_newtcpcb(struct inpcb *inp)
 	callout_init(&tp->t_timers->tt_keep, CALLOUT_MPSAFE);
 	callout_init(&tp->t_timers->tt_2msl, CALLOUT_MPSAFE);
 	callout_init(&tp->t_timers->tt_delack, CALLOUT_MPSAFE);
+#ifdef PASSIVE_INET
+	callout_init(&tp->t_timers->tt_reassdl, CALLOUT_MPSAFE);
+#endif
 
 	if (V_tcp_do_rfc1323)
 		tp->t_flags = (TF_REQ_SCALE|TF_REQ_TSTMP);
@@ -874,6 +884,9 @@ tcp_discardcb(struct tcpcb *tp)
 	callout_stop(&tp->t_timers->tt_keep);
 	callout_stop(&tp->t_timers->tt_2msl);
 	callout_stop(&tp->t_timers->tt_delack);
+#ifdef PASSIVE_INET
+	callout_stop(&tp->t_timers->tt_reassdl);
+#endif
 
 	/*
 	 * If we got enough samples through the srtt filter,

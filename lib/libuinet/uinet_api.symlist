@@ -19,6 +19,7 @@ uinet_interface_up
 uinet_l2tagstack_cmp
 uinet_l2tagstack_hash
 uinet_mac_aton
+uinet_make_socket_passive
 uinet_make_socket_promiscuous
 uinet_pool_alloc_arg
 uinet_pool_create
@@ -37,6 +38,7 @@ uinet_soconnect
 uinet_socreate
 uinet_sogetconninfo
 uinet_sogeterror
+uinet_sogetpassivepeer
 uinet_sogetsockopt
 uinet_sogetstate
 uinet_sogetuserctx

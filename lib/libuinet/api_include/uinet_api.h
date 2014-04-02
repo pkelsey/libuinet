@@ -46,10 +46,11 @@ int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loop
 int   uinet_initialize_thread(void);
 int   uinet_interface_add_alias(const char *name, const char *addr, const char *braddr, const char *mask);
 int   uinet_interface_create(const char *name);
-int   uinet_interface_up(const char *name, unsigned int promisc);
+int   uinet_interface_up(const char *name, unsigned int promisc, unsigned int promiscinet);
 int   uinet_l2tagstack_cmp(const struct uinet_in_l2tagstack *ts1, const struct uinet_in_l2tagstack *ts2);
 uint32_t uinet_l2tagstack_hash(const struct uinet_in_l2tagstack *ts);
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
+int   uinet_make_socket_passive(struct uinet_socket *so);
 int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
 uinet_pool_t uinet_pool_create(char *name, int size, uinet_pool_ctor ctor, uinet_pool_dtor dtor,
 			       uinet_pool_init init, uinet_pool_fini fini, int align, uint16_t flags);
@@ -82,6 +83,7 @@ int   uinet_soconnect(struct uinet_socket *so, struct uinet_sockaddr *nam);
 int   uinet_socreate(int dom, struct uinet_socket **aso, int type, int proto);
 void  uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc);
 int   uinet_sogeterror(struct uinet_socket *so);
+struct uinet_socket *uinet_sogetpassivepeer(struct uinet_socket *so);
 int   uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int *optlen);
 int   uinet_sogetstate(struct uinet_socket *so);
 void *uinet_sogetuserctx(struct uinet_socket *so, int key);

@@ -33,6 +33,7 @@
 __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_timer.c 232945 2012-03-13 20:37:57Z glebius $");
 
 #include "opt_inet6.h"
+#include "opt_passiveinet.h"
 #include "opt_tcpdebug.h"
 
 #include <sys/param.h>
@@ -97,6 +98,12 @@ int	tcp_rexmit_slop;
 SYSCTL_PROC(_net_inet_tcp, OID_AUTO, rexmit_slop, CTLTYPE_INT|CTLFLAG_RW,
     &tcp_rexmit_slop, 0, sysctl_msec_to_ticks, "I",
     "Retransmission Timer Slop");
+
+#ifdef PASSIVE_INET
+int	tcp_reassdl;
+SYSCTL_PROC(_net_inet_tcp, TCPCTL_REASSDL, reassdl, CTLTYPE_INT|CTLFLAG_RW,
+    &tcp_reassdl, 0, sysctl_msec_to_ticks, "I", "deadline for segment delivery from reassembly queue");
+#endif
 
 static int	always_keepalive = 1;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, always_keepalive, CTLFLAG_RW,
@@ -594,6 +601,43 @@ out:
 	CURVNET_RESTORE();
 }
 
+#ifdef PASSIVE_INET
+void
+tcp_timer_reassdl(void *xtp)
+{
+	struct tcpcb *tp = xtp;
+	struct inpcb *inp;
+	CURVNET_SET(tp->t_vnet);
+
+	inp = tp->t_inpcb;
+	/*
+	 * XXXRW: While this assert is in fact correct, bugs in the tcpcb
+	 * tear-down mean we need it as a work-around for races between
+	 * timers and tcp_discardcb().
+	 *
+	 * KASSERT(inp != NULL, ("tcp_timer_reassdl: inp == NULL"));
+	 */
+	if (inp == NULL) {
+		tcp_timer_race++;
+		CURVNET_RESTORE();
+		return;
+	}
+	INP_WLOCK(inp);
+	if ((inp->inp_flags & INP_DROPPED) || callout_pending(&tp->t_timers->tt_reassdl)
+	    || !callout_active(&tp->t_timers->tt_reassdl)) {
+		INP_WUNLOCK(inp);
+		CURVNET_RESTORE();
+		return;
+	}
+	callout_deactivate(&tp->t_timers->tt_reassdl);
+
+	tcp_reass_deliver_holes(tp);
+	
+	INP_WUNLOCK(inp);
+	CURVNET_RESTORE();
+}
+#endif /* PASSIVE_INET */
+
 void
 tcp_timer_activate(struct tcpcb *tp, int timer_type, u_int delta)
 {
@@ -623,6 +667,12 @@ tcp_timer_activate(struct tcpcb *tp, int timer_type, u_int delta)
 			t_callout = &tp->t_timers->tt_2msl;
 			f_callout = tcp_timer_2msl;
 			break;
+#ifdef PASSIVE_INET
+		case TT_REASSDL:
+			t_callout = &tp->t_timers->tt_reassdl;
+			f_callout = tcp_timer_reassdl;
+			break;
+#endif
 		default:
 			panic("bad timer_type");
 		}
@@ -654,6 +704,11 @@ tcp_timer_active(struct tcpcb *tp, int timer_type)
 		case TT_2MSL:
 			t_callout = &tp->t_timers->tt_2msl;
 			break;
+#ifdef PASSIVE_INET
+		case TT_REASSDL:
+			t_callout = &tp->t_timers->tt_reassdl;
+			break;
+#endif
 		default:
 			panic("bad timer_type");
 		}

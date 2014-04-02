@@ -122,8 +122,6 @@ uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *name)
 		return (EINVAL);
 	}
 
-	printf("found interface %s (ifname=%s alias=%s)\n", name, ifcfg->name, ifcfg->alias);
-
 	error = socreate(PF_INET, so, SOCK_DGRAM, 0, td->td_ucred, td);
 	if (0 != error) {
 		printf("ifconfig socket creation failed (%d)\n", error);
@@ -183,16 +181,26 @@ uinet_interface_add_alias(const char *name, const char *addr, const char *braddr
 		goto out;
 	}
 
-	ina.ifra_broadaddr = template;
-	if (inet_pton(AF_INET, braddr, &ina.ifra_broadaddr.sin_addr) <= 0) {
-		error = EAFNOSUPPORT;
-		goto out;
+	if (braddr == NULL || braddr[0] == '\0') {
+		/* stack will set based on net class */
+		ina.ifra_broadaddr.sin_len = 0;
+	} else {
+		ina.ifra_broadaddr = template;
+		if (inet_pton(AF_INET, braddr, &ina.ifra_broadaddr.sin_addr) <= 0) {
+			error = EAFNOSUPPORT;
+			goto out;
+		}
 	}
 
-	ina.ifra_mask = template;
-	if (inet_pton(AF_INET, mask, &ina.ifra_mask.sin_addr) <= 0) {
-		error = EAFNOSUPPORT;
-		goto out;
+	if (mask == NULL || mask[0] == '\0') {
+		/* stack will set based on net class */
+		ina.ifra_mask.sin_len = 0;
+	} else {
+		ina.ifra_mask = template;
+		if (inet_pton(AF_INET, mask, &ina.ifra_mask.sin_addr) <= 0) {
+			error = EAFNOSUPPORT;
+			goto out;
+		}
 	}
 
 	error = uinet_ifconfig_do(cfg_so, SIOCAIFADDR, &ina);
@@ -224,7 +232,7 @@ uinet_interface_create(const char *name)
 
 
 int
-uinet_interface_up(const char *name, unsigned int promisc)
+uinet_interface_up(const char *name, unsigned int promisc, unsigned int promiscinet)
 {
 	struct socket *cfg_so;
 	struct ifreq ifr;
@@ -240,7 +248,11 @@ uinet_interface_up(const char *name, unsigned int promisc)
 	if (0 == error) {
 		ifr.ifr_flags |= IFF_UP;
 		if (promisc)
-			ifr.ifr_flagshigh |= (IFF_PPROMISC | IFF_PROMISCINET) >> 16;
+			ifr.ifr_flagshigh |= IFF_PPROMISC >> 16;
+		
+		if (promiscinet)
+			ifr.ifr_flagshigh |= IFF_PROMISCINET >> 16;
+		
 		error = uinet_ifconfig_do(cfg_so, SIOCSIFFLAGS, &ifr);
 	}
 
@@ -275,6 +287,31 @@ uinet_mac_aton(const char *macstr, uint8_t *macout)
 	}
 
 	return (0);
+}
+
+
+int
+uinet_make_socket_passive(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int optval, optlen;
+	int error;
+
+	optlen = sizeof(optval);
+
+	optval = 1;
+	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_PASSIVE, &optval, optlen)))
+		goto out;
+	
+	optval = 1;
+	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_REUSEPORT, &optval, optlen)))
+		goto out;
+
+	optval = 256*1024;
+	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_RCVBUF, &optval, optlen)))
+		goto out;
+out:
+	return (error);
 }
 
 
@@ -578,6 +615,15 @@ uinet_sogeterror(struct uinet_socket *so)
 }
 
 
+struct uinet_socket *
+uinet_sogetpassivepeer(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+
+	return ((struct uinet_socket *)(so_internal->so_passive_peer));
+}
+
+
 int
 uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval,
 		   unsigned int *optlen)
@@ -585,6 +631,7 @@ uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval
 	size_t local_optlen;
 	int result;
 
+	local_optlen = *optlen;
 	result = so_getsockopt((struct socket *)so, level, optname, optval, &local_optlen);
 	*optlen = local_optlen;
 

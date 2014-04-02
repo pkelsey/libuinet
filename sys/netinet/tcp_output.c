@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_output.c 238247 2012-07-08 14:
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
+#include "opt_passiveinet.h"
 #include "opt_tcpdebug.h"
 
 #include <sys/param.h>
@@ -197,6 +198,12 @@ tcp_output(struct tcpcb *tp)
 #endif
 
 	INP_WLOCK_ASSERT(tp->t_inpcb);
+
+#ifdef PASSIVE_INET
+	if (tp->t_inpcb->inp_flags2 & INP_PASSIVE) {
+		return (0);
+	}
+#endif
 
 	/*
 	 * Determine length of data that should be transmitted,

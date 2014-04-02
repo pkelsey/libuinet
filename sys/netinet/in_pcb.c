@@ -43,6 +43,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/in_pcb.c 237910 2012-07-01 08:47:1
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_pcbgroup.h"
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 
 #include <sys/param.h>
@@ -87,6 +88,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/in_pcb.c 237910 2012-07-01 08:47:1
 #endif
 #ifdef INET
 #include <netinet/in_var.h>
+#endif
+#ifdef PASSIVE_INET
+#include <netinet/in_passive.h>
 #endif
 #ifdef INET6
 #include <netinet/ip6.h>
@@ -344,6 +348,15 @@ in_pcballoc(struct socket *so, struct inpcbinfo *pcbinfo)
 		goto out;
 	mac_inpcb_create(so, inp);
 #endif
+#ifdef PASSIVE_INET
+	error = in_passive_inpcb_init(inp, M_NOWAIT);
+	if (error != 0) {
+#ifdef MAC
+		mac_inpcb_destroy(inp);
+#endif
+		goto out;
+	}
+#endif /* PASSIVE_INET */
 #ifdef PROMISCUOUS_INET
 	error = in_promisc_inpcb_init(inp, M_NOWAIT);
 	if (error != 0) {
@@ -2786,6 +2799,12 @@ db_print_inpflags2(int inp_flags2)
 		db_printf("%sINP_REUSEPORT", comma ? ", " : "");
 		comma = 1;
 	}
+#ifdef PASSIVE_INET
+	if (inp_flags2 & INP_PASSIVE) {
+		db_printf("%sINP_PASSIVE", comma ? ", " : "");
+		comma = 1;
+	}
+#endif
 #ifdef PROMISCUOUS_INET
 	if (inp_flags2 & INP_PROMISC) {
 		db_printf("%sINP_PROMISC", comma ? ", " : "");

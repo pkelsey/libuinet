@@ -289,6 +289,13 @@ if_pcap_receive_handler(void *ctx, const uint8_t *buf, unsigned int size)
 	m->m_len = m->m_pkthdr.len = size;
 	m->m_pkthdr.rcvif = sc->ifp;
 
+#pragma GCC diagnostic ignored "-Wformat"
+#pragma GCC diagnostic ignored "-Wformat-extra-args"
+	if (sc->isfile)
+		printf("injecting packet from file: %48D\n", mtod(m, unsigned char *), " ");
+#pragma GCC diagnostic error "-Wformat"
+#pragma GCC diagnostic error "-Wformat-extra-args"
+
 	sc->ifp->if_input(sc->ifp, m);
 }
 
@@ -301,6 +308,9 @@ if_pcap_receive(void *arg)
 
 	if (sc->cfg->cpu >= 0)
 		sched_bind(sc->rx_thread, sc->cfg->cpu);
+
+	if (sc->isfile)
+		pause("pcaprx", hz);
 
 	result = if_pcap_loop(sc->pcap_host_ctx);
 	

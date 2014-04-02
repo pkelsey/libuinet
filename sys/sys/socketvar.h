@@ -141,6 +141,7 @@ struct socket {
 	unsigned int so_user_ctx_count; /* (b) number of user contexts in use, lock needed to increment */
 #define SOMAXUSERCTX 1
 	void *so_user_ctx[SOMAXUSERCTX]; /* (a) each pointer managed by user */
+	struct socket *so_passive_peer;	/* (a) peer socket when performing passive reassembly */
 };
 
 /*
@@ -350,7 +351,8 @@ void	solisten_proto(struct socket *so, int backlog);
 int	solisten_proto_check(struct socket *so);
 struct socket *
 	sonewconn(struct socket *head, int connstatus);
-
+struct socket *
+	sonewconn_passive_client(struct socket *head, int connstatus);
 
 int	sopoll(struct socket *so, int events, struct ucred *active_cred,
 	    struct thread *td);

@@ -37,6 +37,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_syncache.c 238247 2012-07-08 1
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
 #include "opt_pcbgroup.h"
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 
 #include <sys/param.h>
@@ -733,6 +734,98 @@ syncache_badack(struct in_conninfo *inc)
 	SCH_UNLOCK(sch);
 }
 
+#ifdef PASSIVE_INET
+/*
+ * Extract parameters from the SYN|ACK coming from the server in a passively
+ * reconstructed connection and update the corresponding syncache entry.
+ */
+void
+syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
+    struct tcphdr *th, struct mbuf *m)
+{
+	struct syncache *sc;
+	struct syncache_head *sch;
+#ifdef INET6
+	struct in6_addr in6addrtmp;
+#endif
+	struct in_addr inaddrtmp;
+	uint16_t porttmp;
+
+	/*
+	 * Swap the endpoints before doing the syncache lookup, as the
+	 * SYN|ACK is moving in the other direction.
+	 */
+#ifdef INET6
+	if (inc->inc_flags & INC_ISIPV6) {
+		in6addrtmp = inc->inc6_faddr;
+		inc->inc6_faddr = inc->inc6_laddr;
+		inc->inc6_laddr = in6addrtmp;
+	} else
+#endif
+	{
+		inaddrtmp = inc->inc_faddr;
+		inc->inc_faddr = inc->inc_laddr;
+		inc->inc_laddr = inaddrtmp;
+	}
+	porttmp = inc->inc_fport;
+	inc->inc_fport = inc->inc_lport;
+	inc->inc_lport = porttmp;
+
+#ifdef PROMISCUOUS_INET
+	sc = syncache_lookup(inc, &sch, m);	/* returns locked sch */
+#else
+	sc = syncache_lookup(inc, &sch);	/* returns locked sch */
+#endif /* PROMISCUOUS_INET */
+	SCH_LOCK_ASSERT(sch);
+
+	if (sc) {
+		sc->sc_flags |= SCF_PASSIVE_SYNACK;
+
+		sc->sc_iss = th->th_seq;
+
+		if (!(th->th_flags & TH_ECE))
+			sc->sc_flags &= ~SCF_ECN;
+			
+		/* XXX check that we have enough receive space configured */
+		sc->sc_wnd = th->th_win;
+
+		/*
+		 * If the SYN|ACK doesn't indicate a given option, we aren't
+		 * doing it, otherwise if the SYN that created this syncache
+		 * entry also indicates the option, we take on the SYN|ACK
+		 * sender's configuration as our own.
+		 */
+
+		if (!(to->to_flags & TOF_SCALE)) {
+			sc->sc_flags &= ~SCF_WINSCALE;
+			sc->sc_requested_s_scale = 0;
+			sc->sc_requested_r_scale = 0;
+		} else if (sc->sc_flags & SCF_WINSCALE)
+			sc->sc_requested_r_scale = to->to_wscale;
+
+		if (!(to->to_flags & TOF_TS)) {
+			sc->sc_flags &= ~SCF_TIMESTAMP;
+			sc->sc_ts = 0;
+			sc->sc_tsreflect = 0;
+		} else if (sc->sc_flags & SCF_TIMESTAMP) {
+			sc->sc_ts = to->to_tsval;
+			sc->sc_tsreflect = to->to_tsecr;
+		}
+
+		if (!(to->to_flags & TOF_SACKPERM))
+			sc->sc_flags &= ~SCF_SACK;
+
+#ifdef TCP_SIGNATURE
+		if (!(to->to_flags & TOF_SIGNATURE))
+			sc->sc_flags &= ~SCF_SIGNATURE;
+#endif
+	}
+	/* XXX else report out-of-sequence handshake failure? could just be syncookies here... */
+
+	SCH_UNLOCK(sch);
+}
+#endif /* PASSIVE_INET */
+
 void
 #ifdef PROMISCUOUS_INET
 syncache_unreach(struct in_conninfo *inc, struct tcphdr *th, struct mbuf *m)
@@ -774,6 +867,396 @@ done:
 	SCH_UNLOCK(sch);
 }
 
+#ifdef PASSIVE_INET
+static struct mbuf *
+syncache_synthesize_synack(struct syncache *sc, struct tcphdr **pth)
+{
+	struct ip *ip = NULL;
+	struct mbuf *m;
+	struct tcphdr *th = NULL;
+	int optlen;
+	u_int16_t hlen, tlen, mssopt;
+	struct tcpopt to;
+#ifdef INET6
+	struct ip6_hdr *ip6 = NULL;
+#endif
+
+	hlen =
+#ifdef INET6
+	       (sc->sc_inc.inc_flags & INC_ISIPV6) ? sizeof(struct ip6_hdr) :
+#endif
+		sizeof(struct ip);
+	tlen = hlen + sizeof(struct tcphdr);
+
+	mssopt = sc->sc_peer_mss;
+
+	/* XXX: Assume that the entire packet will fit in a header mbuf. */
+	KASSERT(max_linkhdr + tlen + TCP_MAXOLEN <= MHLEN,
+	    ("syncache: mbuf too small"));
+
+	/* Create the IP+TCP header from scratch. */
+	m = m_gethdr(M_DONTWAIT, MT_DATA);
+	if (m == NULL)
+		return (NULL);
+
+	m->m_data += max_linkhdr;
+	m->m_len = tlen;
+	m->m_pkthdr.len = tlen;
+	m->m_pkthdr.rcvif = NULL;
+
+#ifdef INET6
+	if (sc->sc_inc.inc_flags & INC_ISIPV6) {
+		ip6 = mtod(m, struct ip6_hdr *);
+		ip6->ip6_vfc = IPV6_VERSION;
+		ip6->ip6_nxt = IPPROTO_TCP;
+		ip6->ip6_src = sc->sc_inc.inc6_laddr;
+		ip6->ip6_dst = sc->sc_inc.inc6_faddr;
+		ip6->ip6_plen = htons(tlen - hlen);
+		/* ip6_hlim is set after checksum */
+		ip6->ip6_flow &= ~IPV6_FLOWLABEL_MASK;
+		ip6->ip6_flow |= sc->sc_flowlabel;
+
+		th = (struct tcphdr *)(ip6 + 1);
+	}
+#endif
+#if defined(INET6) && defined(INET)
+	else
+#endif
+#ifdef INET
+	{
+		ip = mtod(m, struct ip *);
+		ip->ip_v = IPVERSION;
+		ip->ip_hl = sizeof(struct ip) >> 2;
+		ip->ip_len = tlen;
+		ip->ip_id = 0;
+		ip->ip_off = 0;
+		ip->ip_sum = 0;
+		ip->ip_p = IPPROTO_TCP;
+		ip->ip_src = sc->sc_inc.inc_laddr;
+		ip->ip_dst = sc->sc_inc.inc_faddr;
+		ip->ip_ttl = sc->sc_ip_ttl;
+		ip->ip_tos = sc->sc_ip_tos;
+
+		th = (struct tcphdr *)(ip + 1);
+	}
+#endif /* INET */
+	*pth = th;
+	th->th_sport = sc->sc_inc.inc_lport;
+	th->th_dport = sc->sc_inc.inc_fport;
+
+	th->th_seq = htonl(sc->sc_iss);
+	th->th_ack = htonl(sc->sc_irs + 1);
+	th->th_off = sizeof(struct tcphdr) >> 2;
+	th->th_x2 = 0;
+	th->th_flags = TH_SYN|TH_ACK;
+	th->th_win = htons(sc->sc_wnd);
+	th->th_urp = 0;
+
+	if (sc->sc_flags & SCF_ECN) {
+		th->th_flags |= TH_ECE;
+		TCPSTAT_INC(tcps_ecn_shs);
+	}
+
+	/* Tack on the TCP options. */
+	if ((sc->sc_flags & SCF_NOOPT) == 0) {
+		to.to_flags = 0;
+
+		to.to_mss = mssopt;
+		to.to_flags = TOF_MSS;
+		if (sc->sc_flags & SCF_WINSCALE) {
+			to.to_wscale = sc->sc_requested_r_scale;
+			to.to_flags |= TOF_SCALE;
+		}
+		if (sc->sc_flags & SCF_TIMESTAMP) {
+			/* Virgin timestamp or TCP cookie enhanced one. */
+			to.to_tsval = sc->sc_ts;
+			to.to_tsecr = sc->sc_tsreflect;
+			to.to_flags |= TOF_TS;
+		}
+		if (sc->sc_flags & SCF_SACK)
+			to.to_flags |= TOF_SACKPERM;
+#ifdef TCP_SIGNATURE
+		if (sc->sc_flags & SCF_SIGNATURE)
+			to.to_flags |= TOF_SIGNATURE;
+#endif
+		optlen = tcp_addoptions(&to, (u_char *)(th + 1));
+
+		/* Adjust headers by option size. */
+		th->th_off = (sizeof(struct tcphdr) + optlen) >> 2;
+		m->m_len += optlen;
+		m->m_pkthdr.len += optlen;
+
+#ifdef TCP_SIGNATURE
+		if (sc->sc_flags & SCF_SIGNATURE)
+			tcp_signature_compute(m, 0, 0, optlen,
+			    to.to_signature, IPSEC_DIR_OUTBOUND);
+#endif
+#ifdef INET6
+		if (sc->sc_inc.inc_flags & INC_ISIPV6)
+			ip6->ip6_plen = htons(ntohs(ip6->ip6_plen) + optlen);
+		else
+#endif
+			ip->ip_len += optlen;
+	} else
+		optlen = 0;
+
+	M_SETFIB(m, sc->sc_inc.inc_fibnum);
+
+	return (m);
+}
+
+/*
+ * Build a new TCP socket structure, representing the client in a passively
+ * reconstructed connection, from a syncache entry.
+ */
+static struct socket *
+syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
+{
+	struct inpcb *inp = NULL;
+	struct socket *so = NULL;
+	struct tcpcb *tp;
+	int error;
+	char *s;
+	struct mbuf *m1;
+	struct tcphdr *th;
+
+	so = sonewconn_passive_client(lso, SS_ISCONNECTING);
+	if (so == NULL) {
+		/*
+		 * Drop the connection; we will either send a RST or
+		 * have the peer retransmit its SYN again after its
+		 * RTO and try again.
+		 */
+		TCPSTAT_INC(tcps_listendrop);
+		if ((s = tcp_log_addrs(&sc->sc_inc, NULL, NULL, NULL))) {
+			log(LOG_DEBUG, "%s; %s: Passive client socket create "
+			    "failed due to limits or memory shortage\n",
+			    s, __func__);
+			free(s, M_TCPLOG);
+		}
+		goto abort2;
+	}
+
+	inp = sotoinpcb(so);
+	inp->inp_inc.inc_fibnum = so->so_fibnum;
+	INP_WLOCK(inp);
+	INP_HASH_WLOCK(&V_tcbinfo);
+
+#ifdef PROMISCUOUS_INET
+	if (inp->inp_flags2 & INP_PROMISC) {
+		struct ifl2info *l2i_tag;
+		struct in_l2info *l2i, *inp_l2i;
+		
+		l2i_tag = (struct ifl2info *)m_tag_locate(m,
+							  MTAG_PROMISCINET,
+							  MTAG_PROMISCINET_L2INFO,
+							  NULL);
+		KASSERT(l2i_tag != NULL,
+			("%s: No MTAG_PROMISCINET_L2INFO on mbuf", __func__));
+
+		l2i = &l2i_tag->ifl2i_info;
+		inp_l2i = inp->inp_l2info;
+
+		in_promisc_l2info_copy_swap(inp_l2i, l2i);
+	}
+#endif /* PROMISCUOUS_INET */
+
+	/* Insert new socket into PCB hash list. */
+	inp->inp_inc.inc_flags = sc->sc_inc.inc_flags;
+#ifdef INET6
+	if (sc->sc_inc.inc_flags & INC_ISIPV6) {
+		inp->in6p_laddr = sc->sc_inc.inc6_faddr;
+	} else {
+		inp->inp_vflag &= ~INP_IPV6;
+		inp->inp_vflag |= INP_IPV4;
+#endif
+		inp->inp_laddr = sc->sc_inc.inc_faddr;
+#ifdef INET6
+	}
+#endif
+
+	/*
+	 * Install in the reservation hash table for now, but don't yet
+	 * install a connection group since the full 4-tuple isn't yet
+	 * configured.
+	 */
+	inp->inp_lport = sc->sc_inc.inc_fport;
+	if ((error = in_pcbinshash_nopcbgroup(inp)) != 0) {
+		/*
+		 * Undo the assignments above if we failed to
+		 * put the PCB on the hash lists.
+		 */
+#ifdef INET6
+		if (sc->sc_inc.inc_flags & INC_ISIPV6)
+			inp->in6p_laddr = in6addr_any;
+		else
+#endif
+			inp->inp_laddr.s_addr = INADDR_ANY;
+		inp->inp_lport = 0;
+		if ((s = tcp_log_addrs(&sc->sc_inc, NULL, NULL, NULL))) {
+			log(LOG_DEBUG, "%s; %s: in_pcbinshash failed "
+			    "with error %i\n",
+			    s, __func__, error);
+			free(s, M_TCPLOG);
+		}
+		INP_HASH_WUNLOCK(&V_tcbinfo);
+		goto abort;
+	}
+#ifdef IPSEC
+	/* Copy old policy into new socket's. */
+	if (ipsec_copy_policy(sotoinpcb(lso)->inp_sp, inp->inp_sp))
+		printf("syncache_passive_client_socket: could not copy policy\n");
+#endif
+#ifdef INET6
+	if (sc->sc_inc.inc_flags & INC_ISIPV6) {
+		struct inpcb *oinp = sotoinpcb(lso);
+		struct in6_addr laddr6;
+		struct sockaddr_in6 sin6;
+		/*
+		 * Inherit socket options from the listening socket.
+		 * Note that in6p_inputopts are not (and should not be)
+		 * copied, since it stores previously received options and is
+		 * used to detect if each new option is different than the
+		 * previous one and hence should be passed to a user.
+		 * If we copied in6p_inputopts, a user would not be able to
+		 * receive options just after calling the accept system call.
+		 */
+		inp->inp_flags |= oinp->inp_flags & INP_CONTROLOPTS;
+		if (oinp->in6p_outputopts)
+			inp->in6p_outputopts =
+			    ip6_copypktopts(oinp->in6p_outputopts, M_NOWAIT);
+
+		sin6.sin6_family = AF_INET6;
+		sin6.sin6_len = sizeof(sin6);
+		sin6.sin6_addr = sc->sc_inc.inc6_laddr;
+		sin6.sin6_port = sc->sc_inc.inc_lport;
+		sin6.sin6_flowinfo = sin6.sin6_scope_id = 0;
+		laddr6 = inp->in6p_laddr;
+		if ((error = in6_pcbconnect_mbuf(inp, (struct sockaddr *)&sin6,
+		    thread0.td_ucred, m)) != 0) {
+			inp->in6p_laddr = laddr6;
+			if ((s = tcp_log_addrs(&sc->sc_inc, NULL, NULL, NULL))) {
+				log(LOG_DEBUG, "%s; %s: in6_pcbconnect failed "
+				    "with error %i\n",
+				    s, __func__, error);
+				free(s, M_TCPLOG);
+			}
+			INP_HASH_WUNLOCK(&V_tcbinfo);
+			goto abort;
+		}
+		/* Override flowlabel from in6_pcbconnect. */
+		inp->inp_flow &= ~IPV6_FLOWLABEL_MASK;
+		inp->inp_flow |= sc->sc_flowlabel; /* XXX do we really want to inherit the flowlabel from sc? */
+	}
+#endif /* INET6 */
+#if defined(INET) && defined(INET6)
+	else
+#endif
+#ifdef INET
+	{
+		struct in_addr laddr;
+		struct sockaddr_in sin;
+/* XXX i believe we want to get have an ip_srcroute(m) that preserves hop order instead of reversing it */
+#if 0
+		inp->inp_options = (m) ? ip_srcroute(m) : NULL;
+		
+		if (inp->inp_options == NULL) {
+			inp->inp_options = sc->sc_ipopts;
+			sc->sc_ipopts = NULL;
+		}
+#else
+		inp->inp_options = NULL;
+#endif
+		sin.sin_family = AF_INET;
+		sin.sin_len = sizeof(sin);
+		sin.sin_addr = sc->sc_inc.inc_laddr;
+		sin.sin_port = sc->sc_inc.inc_lport;
+		bzero((caddr_t)sin.sin_zero, sizeof(sin.sin_zero));
+		laddr = inp->inp_laddr;
+		/* XXX we don't really want to use m to select a pcbgroup, do we?  the flowid may be inappropriate for our tuple. perhaps save the flow id from the captured SYN/ACK and add it to our reconstructed SYN|ACK that we will pass to tcp_do_segment() below, and supply that mbuf here */
+		if ((error = in_pcbconnect_mbuf(inp, (struct sockaddr *)&sin,
+		    thread0.td_ucred, m)) != 0) {
+			inp->inp_laddr = laddr;
+			if ((s = tcp_log_addrs(&sc->sc_inc, NULL, NULL, NULL))) {
+				log(LOG_DEBUG, "%s; %s: in_pcbconnect failed "
+				    "with error %i\n",
+				    s, __func__, error);
+				free(s, M_TCPLOG);
+			}
+			INP_HASH_WUNLOCK(&V_tcbinfo);
+			goto abort;
+		}
+	}
+#endif /* INET */
+	INP_HASH_WUNLOCK(&V_tcbinfo);
+	tp = intotcpcb(inp);
+	tp->t_state = TCPS_SYN_SENT;
+	tp->iss = sc->sc_irs;
+	tcp_sendseqinit(tp);
+
+	/* Advance due to sent SYN */
+	tp->snd_max++;
+	tp->snd_nxt++;
+
+#if 0
+	tp->last_ack_sent = tp->rcv_nxt;
+#endif
+
+	tp->t_flags = sototcpcb(lso)->t_flags & (TF_NOPUSH|TF_NODELAY);
+	if (sc->sc_flags & SCF_NOOPT)
+		tp->t_flags |= TF_NOOPT;
+	else {
+		if (sc->sc_flags & SCF_WINSCALE) {
+			tp->t_flags |= TF_REQ_SCALE|TF_RCVD_SCALE;
+			tp->snd_scale = sc->sc_requested_r_scale;
+			tp->request_r_scale = sc->sc_requested_s_scale;
+		}
+		if (sc->sc_flags & SCF_TIMESTAMP) {
+			tp->t_flags |= TF_REQ_TSTMP|TF_RCVD_TSTMP;
+			tp->ts_recent = sc->sc_tsreflect;
+			tp->ts_recent_age = tcp_ts_getticks();
+			tp->ts_offset = sc->sc_tsoff;
+		}
+#ifdef TCP_SIGNATURE
+		if (sc->sc_flags & SCF_SIGNATURE)
+			tp->t_flags |= TF_SIGNATURE;
+#endif
+		if (sc->sc_flags & SCF_SACK)
+			tp->t_flags |= TF_SACK_PERMIT;
+	}
+
+	if (sc->sc_flags & SCF_ECN)
+		tp->t_flags |= TF_ECN_PERMIT;
+
+	/*
+	 * Set up MSS and get cached values from tcp_hostcache.
+	 * This might overwrite some of the defaults we just set.
+	 */
+	tcp_mss(tp, sc->sc_peer_mss);
+
+	m1 = syncache_synthesize_synack(sc, &th);
+
+	/* tcp_fields_to_host(th); */
+	th->th_seq = ntohl(th->th_seq);
+	th->th_ack = ntohl(th->th_ack);
+	th->th_win = ntohs(th->th_win);
+	th->th_urp = ntohs(th->th_urp);
+
+	tcp_do_segment(m1, th, so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED);
+
+	/* return with inp locked */
+	return (so);
+
+abort:
+	INP_WUNLOCK(inp);
+abort2:
+	if (so != NULL)
+		soabort(so);
+
+	return (NULL);
+}
+#endif /* PASSIVE_INET */
+
 /*
  * Build a new TCP socket structure from a syncache entry.
  */
@@ -781,12 +1264,25 @@ static struct socket *
 syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 {
 	struct inpcb *inp = NULL;
-	struct socket *so;
+	struct socket *so = NULL;
+#ifdef PASSIVE_INET
+	struct socket *client_so = NULL;
+	struct inpcb *client_inp = NULL;
+#endif
 	struct tcpcb *tp;
 	int error;
 	char *s;
 
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
+
+#ifdef PASSIVE_INET
+	if (sotoinpcb(lso)->inp_flags2 & INP_PASSIVE) {
+		client_so = syncache_passive_client_socket(sc, lso, m);
+		if (client_so == NULL)
+			goto abort2;
+		client_inp = sotoinpcb(client_so);
+	}
+#endif
 
 	/*
 	 * Ok, create the full blown connection, and set things up
@@ -813,6 +1309,9 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 #ifdef MAC
 	mac_socketpeer_set_from_mbuf(m, so);
 #endif
+	
+	so->so_passive_peer = client_so;
+	client_so->so_passive_peer = so;
 
 	inp = sotoinpcb(so);
 	inp->inp_inc.inc_fibnum = so->so_fibnum;
@@ -1029,6 +1528,9 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	tcp_timer_activate(tp, TT_KEEP, TP_KEEPINIT(tp));
 
 	INP_WUNLOCK(inp);
+#ifdef PASSIVE_INET
+	INP_WUNLOCK(client_inp);
+#endif
 
 	TCPSTAT_INC(tcps_accepts);
 	return (so);
@@ -1038,7 +1540,12 @@ abort:
 abort2:
 	if (so != NULL)
 		soabort(so);
-
+#ifdef PASSIVE_INET
+	if (client_so != NULL) {
+		INP_WUNLOCK(client_inp);
+		soabort(client_so);
+	}
+#endif
 	return (NULL);
 }
 
@@ -1107,6 +1614,20 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		V_tcp_syncache.cache_count--;
 		SCH_UNLOCK(sch);
 	}
+
+
+#ifdef PASSIVE_INET
+	/*
+	 * If this is a passive connection, but we haven't seen the SYN|ACK
+	 * occur between the SYN and the ACK of the SYN|ACK, then try to
+	 * carry on by accepting the ACK without validating the sequence
+	 * number and the timestamp.
+	 */
+	if ((inc->inc_flags & INC_PASSIVE) && !(sc->sc_flags & SCF_PASSIVE_SYNACK)) {
+		sc->sc_iss = th->th_ack - 1;
+		sc->sc_ts = to->to_tsecr;
+	}
+#endif
 
 	/*
 	 * Segment validation:
@@ -1216,6 +1737,9 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	u_int32_t flowtmp;
 	u_int ltflags;
 	int win, sb_hiwat, ip_ttl, ip_tos;
+#ifdef PASSIVE_INET
+	int passive;
+#endif
 #ifdef PROMISCUOUS_INET
 	int promisc_listen, synfilter;
 	struct m_tag *l2tag = NULL;
@@ -1253,6 +1777,9 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	win = sbspace(&so->so_rcv);
 	sb_hiwat = so->so_rcv.sb_hiwat;
 	ltflags = (tp->t_flags & (TF_NOOPT | TF_SIGNATURE));
+#ifdef PASSIVE_INET
+	passive = inp->inp_flags2 & INP_PASSIVE;
+#endif
 #ifdef PROMISCUOUS_INET
 	promisc_listen = inp->inp_flags2 & INP_PROMISC;
 	synfilter = inp->inp_flags2 & INP_SYNFILTER;
@@ -1380,6 +1907,12 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		cbarg.l2i = &l2info_tag->ifl2i_info;
 
 		decision = syn_filter_run_callback(inp, &cbarg);
+#ifdef PASSIVE_INET
+		if (SYNF_ACCEPT_PASSIVE == decision) {
+			passive = 1;
+			decision = SYNF_ACCEPT;
+		}
+#endif
 		if (SYNF_ACCEPT != decision) {
 			SCH_UNLOCK(sch);
 
@@ -1553,7 +2086,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	/*
 	 * Do a standard 3-way handshake.
 	 */
+#ifdef PASSIVE_INET
+	if (passive || TOEPCB_ISSET(sc) || syncache_respond(sc) == 0) {
+#else
 	if (TOEPCB_ISSET(sc) || syncache_respond(sc) == 0) {
+#endif
 		if (V_tcp_syncookies && V_tcp_syncookiesonly && sc != &scs)
 			syncache_free(sc);
 		else if (sc != &scs)

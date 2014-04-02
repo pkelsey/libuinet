@@ -119,6 +119,7 @@ typedef	__uid_t		uid_t;
 #define	SO_NO_OFFLOAD	0x00004000	/* socket cannot be offloaded */
 #define	SO_NO_DDP	0x00008000	/* disable direct data placement */
 #define	SO_PROMISC	0x00010000	/* socket will be used for promiscuous listen */
+#define	SO_PASSIVE	0x00020000	/* socket will be used for passive reassembly */
 
 /*
  * Additional options, not kept in so_options.

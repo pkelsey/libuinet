@@ -34,6 +34,7 @@
 #define _NETINET_TCP_SYNCACHE_H_
 #ifdef _KERNEL
 
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 
 struct toeopt;
@@ -64,6 +65,10 @@ void	 syncache_badack(struct in_conninfo *, struct mbuf *);
 void	 syncache_chkrst(struct in_conninfo *, struct tcphdr *);
 void	 syncache_badack(struct in_conninfo *);
 #endif /* PROMISCUOUS_INET */
+#ifdef PASSIVE_INET
+void	 syncache_passive_synack(struct in_conninfo *, struct tcpopt *,
+	     struct tcphdr *, struct mbuf *);
+#endif
 int	 syncache_pcbcount(void);
 int	 syncache_pcblist(struct sysctl_req *req, int max_pcbs, int *pcbs_exported);
 
@@ -102,14 +107,15 @@ struct syncache {
 /*
  * Flags for the sc_flags field.
  */
-#define SCF_NOOPT	0x01			/* no TCP options */
-#define SCF_WINSCALE	0x02			/* negotiated window scaling */
-#define SCF_TIMESTAMP	0x04			/* negotiated timestamps */
-						/* MSS is implicit */
-#define SCF_UNREACH	0x10			/* icmp unreachable received */
-#define SCF_SIGNATURE	0x20			/* send MD5 digests */
-#define SCF_SACK	0x80			/* send SACK option */
-#define SCF_ECN		0x100			/* send ECN setup packet */
+#define SCF_NOOPT		0x01			/* no TCP options */
+#define SCF_WINSCALE		0x02			/* negotiated window scaling */
+#define SCF_TIMESTAMP		0x04			/* negotiated timestamps */
+							/* MSS is implicit */
+#define SCF_UNREACH		0x10			/* icmp unreachable received */
+#define SCF_SIGNATURE		0x20			/* send MD5 digests */
+#define SCF_SACK		0x80			/* send SACK option */
+#define SCF_ECN			0x100			/* send ECN setup packet */
+#define SCF_PASSIVE_SYNACK	0x200			/* SYN|ACK captured in passive mode */
 
 #define	SYNCOOKIE_SECRET_SIZE	8	/* dwords */
 #define	SYNCOOKIE_LIFETIME	16	/* seconds */

@@ -36,6 +36,8 @@
 #include <netinet/tcp.h>
 
 #ifdef _KERNEL
+#include "opt_passiveinet.h"
+
 #include <net/vnet.h>
 
 /*
@@ -52,8 +54,15 @@ struct tseg_qent {
 	int	tqe_len;		/* TCP segment data length */
 	struct	tcphdr *tqe_th;		/* a pointer to tcp header */
 	struct	mbuf	*tqe_m;		/* mbuf contains packet */
+#ifdef PASSIVE_INET
+	TAILQ_ENTRY(tseg_qent) tqe_ageq;
+	int tqe_ticks;			/* ticks when queued */
+#endif
 };
 LIST_HEAD(tsegqe_head, tseg_qent);
+#ifdef PASSIVE_INET
+TAILQ_HEAD(tsegageqe_head, tseg_qent);
+#endif
 
 struct sackblk {
 	tcp_seq start;		/* start seq no. of sack block */
@@ -101,6 +110,9 @@ do {								\
  */
 struct tcpcb {
 	struct	tsegqe_head t_segq;	/* segment reassembly queue */
+#ifdef PASSIVE_INET
+	struct	tsegageqe_head t_segageq; /* segment age queue */
+#endif
 	void	*t_pspare[2];		/* new reassembly queue */
 	int	t_segqlen;		/* segment reassembly queue length */
 	int	t_dupacks;		/* consecutive dup acks recd */
@@ -208,7 +220,12 @@ struct tcpcb {
 	u_int	t_keepintvl;		/* interval between keepalives */
 	u_int	t_keepcnt;		/* number of keepalives before close */
 
+#ifdef PASSIVE_INET
+	uint32_t t_ispare[7];		/* 5 UTO, 3 TBD, 1 PASSIVE */
+	uint32_t t_reassdl;
+#else
 	uint32_t t_ispare[8];		/* 5 UTO, 3 TBD */
+#endif
 	void	*t_pspare2[4];		/* 4 TBD */
 	uint64_t _pad[6];		/* 6 TBD (1-2 CC/RTT?) */
 };
@@ -577,6 +594,9 @@ struct	xtcpcb {
 #define	TCPCTL_DROP		15	/* drop tcp connection */
 #define	TCPCTL_MAXID		16
 #define TCPCTL_FINWAIT2_TIMEOUT        17
+#ifdef PASSIVE_INET
+#define TCPCTL_REASSDL		18
+#endif
 
 #define TCPCTL_NAMES { \
 	{ 0, 0 }, \
@@ -670,10 +690,19 @@ char	*tcp_log_vain(struct in_conninfo *, struct tcphdr *, void *,
 int	 tcp_reass(struct tcpcb *, struct tcphdr *, int *, struct mbuf *);
 void	 tcp_reass_init(void);
 void	 tcp_reass_flush(struct tcpcb *);
+#ifdef PASSIVE_INET
+void	 tcp_reass_deliver_holes(struct tcpcb *tp);
+#endif
 #ifdef VIMAGE
 void	 tcp_reass_destroy(void);
 #endif
+
 void	 tcp_input(struct mbuf *, int);
+#define	TI_UNLOCKED	1
+#define	TI_WLOCKED	2
+void	 tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
+	     struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos,
+	     int ti_locked);
 u_long	 tcp_maxmtu(struct in_conninfo *, int *);
 u_long	 tcp_maxmtu6(struct in_conninfo *, int *);
 void	 tcp_mss_update(struct tcpcb *, int, int, struct hc_metrics_lite *,

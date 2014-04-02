@@ -54,6 +54,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_input.c 238247 2012-07-08 14:2
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 #include "opt_tcpdebug.h"
 
@@ -212,9 +213,6 @@ VNET_DEFINE(struct inpcbhead, tcb);
 VNET_DEFINE(struct inpcbinfo, tcbinfo);
 
 static void	 tcp_dooptions(struct tcpopt *, u_char *, int, int);
-static void	 tcp_do_segment(struct mbuf *, struct tcphdr *,
-		     struct socket *, struct tcpcb *, int, int, uint8_t,
-		     int);
 static void	 tcp_dropwithreset(struct mbuf *, struct tcphdr *,
 		     struct tcpcb *, int, int);
 static void	 tcp_pulloutofband(struct socket *,
@@ -577,6 +575,9 @@ tcp_input(struct mbuf *m, int off0)
 	int drop_hdrlen;
 	int thflags;
 	int rstreason = 0;	/* For badport_bandlim accounting purposes */
+#ifdef PASSIVE_INET
+	int passive_reverse_syn_ack = 0;
+#endif
 #ifdef TCP_SIGNATURE
 	uint8_t sig_checked = 0;
 #endif
@@ -593,8 +594,6 @@ tcp_input(struct mbuf *m, int off0)
 	struct tcpopt to;		/* options in this segment */
 	char *s = NULL;			/* address and port logging */
 	int ti_locked;
-#define	TI_UNLOCKED	1
-#define	TI_WLOCKED	2
 
 #ifdef TCPDEBUG
 	/*
@@ -876,6 +875,27 @@ findpcb:
 		    th->th_sport, ip->ip_dst, th->th_dport,
 		    INPLOOKUP_WILDCARD | INPLOOKUP_WLOCKPCB,
 		    m->m_pkthdr.rcvif, m);
+#ifdef PASSIVE_INET
+	/*
+	 * Ensure SYN|ACKs originating from an endpoint that we are
+	 * impersonating for passive reassembly associate with the
+	 * corresponding passive-reassembly listen socket.
+	 */
+	if ((inp == NULL) && ((thflags & (TH_SYN|TH_ACK)) == (TH_SYN|TH_ACK))) {
+		inp = in_pcblookup_mbuf(&V_tcbinfo, ip->ip_dst,
+		    th->th_dport, ip->ip_src, th->th_sport,
+		    INPLOOKUP_WILDCARD | INPLOOKUP_WLOCKPCB,
+		    m->m_pkthdr.rcvif, m);
+
+		if (inp &&
+		    (inp->inp_socket->so_options & (SO_ACCEPTCONN|SO_PASSIVE))) {
+			passive_reverse_syn_ack = 1;
+		} else if (inp) {
+			INP_WUNLOCK(inp);
+			inp = NULL;
+		}
+	}
+#endif /* PASSIVE_INET */
 #endif /* INET */
 
 	/*
@@ -1073,6 +1093,10 @@ relocked:
 		inc.inc_fport = th->th_sport;
 		inc.inc_lport = th->th_dport;
 		inc.inc_fibnum = so->so_fibnum;
+#ifdef PASSIVE_INET
+		if (inp->inp_flags2 & INP_PASSIVE)
+			inc.inc_flags |= INC_PASSIVE;
+#endif
 #ifdef PROMISCUOUS_INET
 		if (inp->inp_flags2 & INP_PROMISC)
 			inc.inc_flags |= INC_PROMISC;
@@ -1198,6 +1222,17 @@ relocked:
 			TCPSTAT_INC(tcps_badsyn);
 			goto dropunlock;
 		}
+#ifdef PASSIVE_INET
+		/*
+		 * Process (SYN|ACK) sent by endpoint we are impersonating
+		 * for passive reassembly.
+		 */
+		if (passive_reverse_syn_ack && (thflags & TH_ACK)) {
+			tcp_dooptions(&to, optp, optlen, TH_SYN);
+			syncache_passive_synack(&inc, &to, th, m);
+			goto dropunlock;
+		}
+#endif /* PASSIVE_INET */
 		/*
 		 * (SYN|ACK) is bogus on a listen socket.
 		 */
@@ -1451,7 +1486,7 @@ drop:
 		m_freem(m);
 }
 
-static void
+void
 tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
     struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos,
     int ti_locked)
@@ -2140,7 +2175,6 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	 */
 	if ((to.to_flags & TOF_TS) != 0 && tp->ts_recent &&
 	    TSTMP_LT(to.to_tsval, tp->ts_recent)) {
-
 		/* Check to see if ts_recent is over 24 days old.  */
 		if (tcp_ts_getticks() - tp->ts_recent_age > TCP_PAWS_IDLE) {
 			/*
@@ -2159,8 +2193,10 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			TCPSTAT_INC(tcps_rcvduppack);
 			TCPSTAT_ADD(tcps_rcvdupbyte, tlen);
 			TCPSTAT_INC(tcps_pawsdrop);
-			if (tlen)
+			if (tlen) {
+				printf(">>>>>>. drop after ack (1)\n");
 				goto dropafterack;
+			}
 			goto drop;
 		}
 	}
@@ -2270,10 +2306,14 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			if (tp->rcv_wnd == 0 && th->th_seq == tp->rcv_nxt) {
 				tp->t_flags |= TF_ACKNOW;
 				TCPSTAT_INC(tcps_rcvwinprobe);
-			} else
+			} else {
+				printf(">>>>>>. drop after ack (2)\n");
 				goto dropafterack;
-		} else
+			}
+		} else {
+			printf(">>>>>>>>>>>>>>>>>. dropping %u bytes after window\n", todrop);
 			TCPSTAT_ADD(tcps_rcvbyteafterwin, todrop);
+		}
 		m_adj(m, -todrop);
 		tlen -= todrop;
 		thflags &= ~(TH_PUSH|TH_FIN);
@@ -2328,9 +2368,10 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		if (tp->t_state == TCPS_SYN_RECEIVED ||
 		    (tp->t_flags & TF_NEEDSYN))
 			goto step6;
-		else if (tp->t_flags & TF_ACKNOW)
+		else if (tp->t_flags & TF_ACKNOW) {
+			printf(">>>>>>. drop after ack (3)\n");
 			goto dropafterack;
-		else
+		} else
 			goto drop;
 	}
 
@@ -2392,8 +2433,15 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	case TCPS_CLOSE_WAIT:
 	case TCPS_CLOSING:
 	case TCPS_LAST_ACK:
+#ifdef PASSIVE_INET
+		if (tp->t_inpcb->inp_flags2 & INP_PASSIVE) {
+			if (SEQ_LT(tp->snd_max, th->th_ack))
+				tp->snd_max = th->th_ack;
+		}
+#endif
 		if (SEQ_GT(th->th_ack, tp->snd_max)) {
 			TCPSTAT_INC(tcps_rcvacktoomuch);
+			printf(">>>>>>. drop after ack (4)\n");
 			goto dropafterack;
 		}
 		if ((tp->t_flags & TF_SACK_PERMIT) &&
@@ -2727,6 +2775,7 @@ process_ACK:
 				tcp_twstart(tp);
 				INP_INFO_WUNLOCK(&V_tcbinfo);
 				m_freem(m);
+				printf(">>>>>>>>>>>>>>>>>>> CLOSING finisacked tlen=%u\n", tlen);
 				return;
 			}
 			break;
@@ -2832,6 +2881,7 @@ step6:
 		if (SEQ_GT(tp->rcv_nxt, tp->rcv_up))
 			tp->rcv_up = tp->rcv_nxt;
 	}
+
 dodata:							/* XXX */
 	INP_WLOCK_ASSERT(tp->t_inpcb);
 
@@ -2994,6 +3044,7 @@ check_delack:
 	return;
 
 dropafterack:
+	printf(">>>>>>. drop after ack tlen=%d\n", tlen);
 	/*
 	 * Generate an ACK dropping incoming segment if it occupies
 	 * sequence space, where the ACK reflects our state.
@@ -3031,6 +3082,7 @@ dropafterack:
 	return;
 
 dropwithreset:
+	printf(">>>>>>. drop with reset tlen=%d\n", tlen);
 	if (ti_locked == TI_WLOCKED)
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 	ti_locked = TI_UNLOCKED;
@@ -3043,6 +3095,7 @@ dropwithreset:
 	return;
 
 drop:
+	printf(">>>>>>. drop tlen=%d\n", tlen);
 	if (ti_locked == TI_WLOCKED) {
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 		ti_locked = TI_UNLOCKED;

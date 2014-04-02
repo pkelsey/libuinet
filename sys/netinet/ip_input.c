@@ -36,6 +36,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_input.c 237910 2012-07-01 08:47
 #include "opt_ipfw.h"
 #include "opt_ipstealth.h"
 #include "opt_ipsec.h"
+#include "opt_passiveinet.h"
 #include "opt_route.h"
 
 #include <sys/param.h>
@@ -602,6 +603,17 @@ passin:
 			goto ours;
 		}
 	}
+
+#ifdef PASSIVE_INET
+	LIST_FOREACH(ia, INADDR_HASH(ip->ip_src.s_addr), ia_hash) {
+		if (IA_SIN(ia)->sin_addr.s_addr == ip->ip_src.s_addr && 
+		    (!checkif || ia->ia_ifp == ifp)) {
+			ifa_ref(&ia->ia_ifa);
+			/* IN_IFADDR_RUNLOCK(); */
+			goto ours;
+		}
+	}
+#endif
 	/* IN_IFADDR_RUNLOCK(); */
 
 	/*
