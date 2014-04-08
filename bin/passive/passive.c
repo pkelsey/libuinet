@@ -150,13 +150,19 @@ passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 
 		conn->bytes_read += read_size;
 
-		if (conn->server->verbose > 1)
+		if (conn->server->verbose > 2)
 			print_tcp_state(w->so, conn->label);
 
-		if (conn->server->verbose) {
-			buffer[read_size] = '\0';
+		if (conn->server->verbose > 1) {
+
 			printf("========================================================================================\n");
-			printf("To %s (%u bytes, %llu total):\n", conn->label, read_size, (unsigned long long)conn->bytes_read);
+		}
+
+		if (conn->server->verbose)
+			printf("To %s (%u bytes, %llu total)\n", conn->label, read_size, (unsigned long long)conn->bytes_read);
+		
+		if (conn->server->verbose > 1) {
+			buffer[read_size] = '\0';
 			printf("----------------------------------------------------------------------------------------\n");
 			skipped = 0;
 			printable = 0;
@@ -342,9 +348,9 @@ create_passive(struct ev_loop *loop, struct server_config *cfg)
 	if ((error = uinet_sosetsockopt(listener, UINET_IPPROTO_TCP, UINET_TCP_KEEPINIT, &optval, optlen)))
 		goto fail;
 
-	/* Begin counting down to close after 1 second of idle */
+	/* Begin counting down to close after 10 seconds of idle */
 	optlen = sizeof(optval);
-	optval = 1;
+	optval = 10;
 	if ((error = uinet_sosetsockopt(listener, UINET_IPPROTO_TCP, UINET_TCP_KEEPIDLE, &optval, optlen)))
 		goto fail;
 
@@ -354,15 +360,15 @@ create_passive(struct ev_loop *loop, struct server_config *cfg)
 	if ((error = uinet_sosetsockopt(listener, UINET_IPPROTO_TCP, UINET_TCP_KEEPINTVL, &optval, optlen)))
 		goto fail;
 
-	/* Close after idle for 5 counts */
+	/* Close after idle for 3 counts */
 	optlen = sizeof(optval);
-	optval = 5;
+	optval = 3;
 	if ((error = uinet_sosetsockopt(listener, UINET_IPPROTO_TCP, UINET_TCP_KEEPCNT, &optval, optlen)))
 		goto fail;
 
-	/* Wait 2 seconds for missing TCP segments */
+	/* Wait 100 milliseconds for missing TCP segments */
 	optlen = sizeof(optval);
-	optval = 2;
+	optval = 100;
 	if ((error = uinet_sosetsockopt(listener, UINET_IPPROTO_TCP, UINET_TCP_REASSDL, &optval, optlen)))
 		goto fail;
 
@@ -467,7 +473,6 @@ int main (int argc, char **argv)
 		interfaces[i].thread = NULL;
 		interfaces[i].promisc = 0;
 		interfaces[i].type = UINET_IFTYPE_NETMAP;
-		interfaces[i].alias_prefix = "netmap";
 	}
 
 	for (i = 0; i < MAX_SERVERS; i++) {
@@ -528,12 +533,8 @@ int main (int argc, char **argv)
 				return (1);
 			} else if (0 == strcmp(optarg, "netmap")) {
 				interfaces[num_interfaces - 1].type = UINET_IFTYPE_NETMAP;
-				interfaces[num_interfaces - 1].instance = ifnetmap_count++;
-				interfaces[num_interfaces - 1].alias_prefix = "netmap";
 			} else if (0 == strcmp(optarg, "pcap")) {
 				interfaces[num_interfaces - 1].type = UINET_IFTYPE_PCAP;
-				interfaces[num_interfaces - 1].instance = ifpcap_count++;
-				interfaces[num_interfaces - 1].alias_prefix = "pcap";
 			} else {
 				printf("Unknown interface type %s\n", optarg);
 				return (1);
@@ -593,6 +594,23 @@ int main (int argc, char **argv)
 	uinet_init(1, 128*1024, 0);
 
 	for (i = 0; i < num_interfaces; i++) {
+		switch (interfaces[i].type) {
+		case UINET_IFTYPE_NETMAP:
+			interfaces[i].alias_prefix = "netmap";
+			interfaces[i].instance = ifnetmap_count;
+			ifnetmap_count++;
+			break;
+		case UINET_IFTYPE_PCAP:
+			interfaces[i].alias_prefix = "pcap";
+			interfaces[i].instance = ifpcap_count;
+			ifpcap_count++;
+			break;
+		default:
+			printf("Unknown interface type %d\n", interfaces[i].type);
+			return (1);
+			break;
+		}
+
 		snprintf(interfaces[i].alias, UINET_IF_NAMESIZE, "%s%d", interfaces[i].alias_prefix, interfaces[i].instance);
 
 		if (verbose) {
