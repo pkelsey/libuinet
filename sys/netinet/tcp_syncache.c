@@ -1234,6 +1234,14 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	 */
 	tcp_mss(tp, sc->sc_peer_mss);
 
+	/*
+	 * Copy timers.
+	 */
+	tp->t_keepinit = sototcpcb(lso)->t_keepinit;
+	tp->t_keepidle = sototcpcb(lso)->t_keepidle;
+	tp->t_keepintvl = sototcpcb(lso)->t_keepintvl;
+	tp->t_keepcnt = sototcpcb(lso)->t_keepcnt;
+
 	m1 = syncache_synthesize_synack(sc, &th);
 
 	/* tcp_fields_to_host(th); */
@@ -1310,8 +1318,12 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	mac_socketpeer_set_from_mbuf(m, so);
 #endif
 	
-	so->so_passive_peer = client_so;
-	client_so->so_passive_peer = so;
+#ifdef PASSIVE_INET
+	if (sotoinpcb(lso)->inp_flags2 & INP_PASSIVE) {
+		so->so_passive_peer = client_so;
+		client_so->so_passive_peer = so;
+	}
+#endif
 
 	inp = sotoinpcb(so);
 	inp->inp_inc.inc_fibnum = so->so_fibnum;
