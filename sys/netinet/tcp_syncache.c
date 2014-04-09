@@ -821,6 +821,7 @@ syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
 #endif
 	}
 	/* XXX else report out-of-sequence handshake failure? could just be syncookies here... */
+	/* or this is a SYN|ACK unrelated to a passive syncache entry */
 
 	SCH_UNLOCK(sch);
 }
@@ -1997,7 +1998,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 #endif
 	sc->sc_irs = th->th_seq;
 	sc->sc_iss = arc4random();
+#ifdef PASSIVE_INET
+	sc->sc_flags = passive ? SCF_PASSIVE : 0;
+#else
 	sc->sc_flags = 0;
+#endif
 	sc->sc_flowlabel = 0;
 
 	/*
@@ -2098,11 +2103,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	/*
 	 * Do a standard 3-way handshake.
 	 */
-#ifdef PASSIVE_INET
-	if (passive || TOEPCB_ISSET(sc) || syncache_respond(sc) == 0) {
-#else
 	if (TOEPCB_ISSET(sc) || syncache_respond(sc) == 0) {
-#endif
 		if (V_tcp_syncookies && V_tcp_syncookiesonly && sc != &scs)
 			syncache_free(sc);
 		else if (sc != &scs)
@@ -2140,6 +2141,11 @@ syncache_respond(struct syncache *sc)
 	struct tcpopt to;
 #ifdef INET6
 	struct ip6_hdr *ip6 = NULL;
+#endif
+
+#ifdef PASSIVE_INET
+	if (sc->sc_flags & SCF_PASSIVE)
+		return (0);
 #endif
 
 	hlen =

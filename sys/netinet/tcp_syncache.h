@@ -115,7 +115,8 @@ struct syncache {
 #define SCF_SIGNATURE		0x20			/* send MD5 digests */
 #define SCF_SACK		0x80			/* send SACK option */
 #define SCF_ECN			0x100			/* send ECN setup packet */
-#define SCF_PASSIVE_SYNACK	0x200			/* SYN|ACK captured in passive mode */
+#define SCF_PASSIVE		0x200			/* connection is in passive mode */
+#define SCF_PASSIVE_SYNACK	0x400			/* SYN|ACK captured in passive mode */
 
 #define	SYNCOOKIE_SECRET_SIZE	8	/* dwords */
 #define	SYNCOOKIE_LIFETIME	16	/* seconds */
