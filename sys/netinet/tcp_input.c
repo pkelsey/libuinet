@@ -887,14 +887,26 @@ findpcb:
 		    INPLOOKUP_WILDCARD | INPLOOKUP_WLOCKPCB,
 		    m->m_pkthdr.rcvif, m);
 
-		if (inp &&
-		    (inp->inp_socket->so_options & (SO_ACCEPTCONN|SO_PASSIVE))) {
-			passive_reverse_syn_ack = 1;
-		} else if (inp) {
+		if (inp && 
+		    ((inp->inp_socket->so_options & (SO_ACCEPTCONN|SO_PASSIVE)) !=
+		     (SO_ACCEPTCONN|SO_PASSIVE))) {
 			INP_WUNLOCK(inp);
 			inp = NULL;
 		}
 	}
+
+	if (inp &&
+	    ((inp->inp_socket->so_options & (SO_ACCEPTCONN|SO_PASSIVE)) ==
+	     (SO_ACCEPTCONN|SO_PASSIVE)) &&
+	    ((thflags & (TH_SYN|TH_ACK)) == (TH_SYN|TH_ACK))) {
+		/*
+		 * This could be a SYN|ACK for a connection we are passively
+		 * reconstructing, so arrange for it to be passed to
+		 * syncache_passive_synack() below.
+		 */
+		passive_reverse_syn_ack = 1;
+	}
+
 #endif /* PASSIVE_INET */
 #endif /* INET */
 
@@ -3136,6 +3148,11 @@ tcp_dropwithreset(struct mbuf *m, struct tcphdr *th, struct tcpcb *tp,
 
 	if (tp != NULL) {
 		INP_WLOCK_ASSERT(tp->t_inpcb);
+
+#ifdef PASSIVE_INET
+		if (tp->t_inpcb->inp_flags2 & INP_PASSIVE)
+			goto drop;
+#endif
 	}
 
 	/* Don't bother if destination was broadcast/multicast. */
