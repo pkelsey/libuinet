@@ -255,7 +255,7 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 		uinet_sogetpeeraddr(newso, (struct uinet_sockaddr **)&sin2);
 		snprintf(conn->label, sizeof(conn->label), "SERVER (%s:%u <- %s:%u)",
 			 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
-			 uinet_inet_ntoa(sin2->sin_addr, buf1, sizeof(buf2)), ntohs(sin2->sin_port));
+			 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
 		uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
 		uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
 
@@ -269,7 +269,7 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 		uinet_sogetpeeraddr(newpeerso, (struct uinet_sockaddr **)&sin2);
 		snprintf(peerconn->label, sizeof(peerconn->label), "CLIENT (%s:%u <- %s:%u)",
 			 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
-			 uinet_inet_ntoa(sin2->sin_addr, buf1, sizeof(buf2)), ntohs(sin2->sin_port));
+			 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
 		uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
 		uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
 
