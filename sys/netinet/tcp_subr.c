@@ -516,6 +516,10 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 		inp = tp->t_inpcb;
 		KASSERT(inp != NULL, ("tcp control block w/o inpcb"));
 		INP_WLOCK_ASSERT(inp);
+#ifdef PASSIVE_INET
+		if (inp->inp_flags2 & INP_PASSIVE)
+			return;
+#endif
 	} else
 		inp = NULL;
 
