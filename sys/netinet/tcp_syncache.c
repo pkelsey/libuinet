@@ -1021,7 +1021,7 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	struct mbuf *m1;
 	struct tcphdr *th;
 
-	so = sonewconn_passive_client(lso, SS_ISCONNECTING);
+	so = sonewconn_passive_client(lso, 0);
 	if (so == NULL) {
 		/*
 		 * Drop the connection; we will either send a RST or
