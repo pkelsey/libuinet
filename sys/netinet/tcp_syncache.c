@@ -1242,6 +1242,7 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	tp->t_keepidle = sototcpcb(lso)->t_keepidle;
 	tp->t_keepintvl = sototcpcb(lso)->t_keepintvl;
 	tp->t_keepcnt = sototcpcb(lso)->t_keepcnt;
+	tp->t_reassdl = sototcpcb(lso)->t_reassdl;
 
 	m1 = syncache_synthesize_synack(sc, &th);
 
@@ -1538,11 +1539,15 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	tp->t_keepidle = sototcpcb(lso)->t_keepidle;
 	tp->t_keepintvl = sototcpcb(lso)->t_keepintvl;
 	tp->t_keepcnt = sototcpcb(lso)->t_keepcnt;
+#ifdef PASSIVE_INET
+	tp->t_reassdl = sototcpcb(lso)->t_reassdl;
+#endif
 	tcp_timer_activate(tp, TT_KEEP, TP_KEEPINIT(tp));
 
 	INP_WUNLOCK(inp);
 #ifdef PASSIVE_INET
-	INP_WUNLOCK(client_inp);
+	if (client_inp)
+		INP_WUNLOCK(client_inp);
 #endif
 
 	TCPSTAT_INC(tcps_accepts);
