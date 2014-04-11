@@ -721,10 +721,10 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	struct uinet_in_l2info l2i;
 	struct uinet_in_conninfo inc;
 	struct ev_uinet_ctx *soctx;
+	int error;
 
-
-	if (-1 == uinet_soaccept(w->so, NULL, &newso)) {
-		printf("accept failed\n");
+	if (0 != (error = uinet_soaccept(w->so, NULL, &newso))) {
+		printf("accept failed (%d)\n", error);
 	} else {
 		uinet_getl2info(newso, &l2i);
 		uinet_sogetconninfo(newso, &inc);

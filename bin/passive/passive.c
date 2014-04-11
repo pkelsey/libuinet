@@ -219,9 +219,10 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	struct ev_uinet_ctx *peersoctx = NULL;
 	struct uinet_sockaddr_in *sin1, *sin2;
 	char buf1[32], buf2[32];
+	int error;
 
-	if (-1 == uinet_soaccept(w->so, NULL, &newso)) {
-		printf("accept failed\n");
+	if (0 != (error = uinet_soaccept(w->so, NULL, &newso))) {
+		printf("accept failed (%d)\n", error);
 	} else {
 		printf("accept succeeded\n");
 		

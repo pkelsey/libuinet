@@ -309,9 +309,10 @@ void
 EchoServer::accept(ev::uinet &w, int revents)
 {
 	struct uinet_socket *newso = NULL;
+	int error;
 
-	if (-1 == uinet_soaccept(w.so, NULL, &newso)) {
-		printf("accept failed\n");
+	if (0 != (error = uinet_soaccept(w.so, NULL, &newso))) {
+		printf("accept failed (%d)\n", error);
 	} else {
 		printf("accept succeeded\n");
 		
