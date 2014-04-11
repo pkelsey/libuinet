@@ -2319,7 +2319,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				tp->t_flags |= TF_ACKNOW;
 				TCPSTAT_INC(tcps_rcvwinprobe);
 			} else {
-				printf(">>>>>>. drop after ack (2)\n");
+				printf(">>>>>>. drop after ack (2) wnd=%lu seq=%u next=%u\n", tp->rcv_wnd, th->th_seq, tp->rcv_nxt);
 				goto dropafterack;
 			}
 		} else {
@@ -3102,6 +3102,11 @@ dropwithreset:
 	if (tp != NULL) {
 		tcp_dropwithreset(m, th, tp, tlen, rstreason);
 		INP_WUNLOCK(tp->t_inpcb);
+#ifdef PASSIVE_INET
+	} else if (so->so_options & SO_PASSIVE) {
+		m_freem(m);
+		return;
+#endif
 	} else
 		tcp_dropwithreset(m, th, NULL, tlen, rstreason);
 	return;
