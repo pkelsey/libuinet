@@ -1548,7 +1548,7 @@ soreceive_generic(struct socket *so, struct sockaddr **psa, struct uio *uio,
 	ssize_t len;
 	struct protosw *pr = so->so_proto;
 	struct mbuf *nextrecord;
-	int moff, type = 0;
+	int moff, type = 0, last_m_flags, hole_break = 0;
 	ssize_t orig_resid = uio->uio_resid;
 
 	mp = mp0;
@@ -1556,9 +1556,11 @@ soreceive_generic(struct socket *so, struct sockaddr **psa, struct uio *uio,
 		*psa = NULL;
 	if (controlp != NULL)
 		*controlp = NULL;
-	if (flagsp != NULL)
+	if (flagsp != NULL) {
+		hole_break = *flagsp & MSG_HOLE_BREAK;
+		*flagsp &= ~MSG_HOLE_BREAK;
 		flags = *flagsp &~ MSG_EOR;
-	else
+	} else
 		flags = 0;
 	if (flags & MSG_OOB)
 		return (soreceive_rcvoob(so, uio, flags));
@@ -1755,6 +1757,9 @@ dontblock:
 		type = m->m_type;
 		if (type == MT_OOBDATA)
 			flags |= MSG_OOB;
+		last_m_flags = m->m_flags;
+		if (hole_break && (m->m_flags & M_HOLE))
+			flags |= MSG_HOLE_BREAK;
 	} else {
 		if ((flags & MSG_PEEK) == 0) {
 			KASSERT(so->so_rcv.sb_mb == nextrecord,
@@ -1785,6 +1790,10 @@ dontblock:
 		 * examined ('type'), end the receive operation.
 	 	 */
 		SOCKBUF_LOCK_ASSERT(&so->so_rcv);
+		if (hole_break && 
+		    ((m->m_flags ^ last_m_flags) & M_HOLE))
+			break;
+		last_m_flags = m->m_flags;
 		if (m->m_type == MT_OOBDATA) {
 			if (type != MT_OOBDATA)
 				break;
@@ -1826,7 +1835,10 @@ dontblock:
 						  disposable);
 			} else
 #endif /* ZERO_COPY_SOCKETS */
-			error = uiomove(mtod(m, char *) + moff, (int)len, uio);
+			if (m->m_flags & M_HOLE)
+				error = uiofill(0, (int)len, uio);
+			else
+				error = uiomove(mtod(m, char *) + moff, (int)len, uio);
 			SOCKBUF_LOCK(&so->so_rcv);
 			if (error) {
 				/*
@@ -1881,7 +1893,8 @@ dontblock:
 						copy_flag = M_WAIT;
 					if (copy_flag == M_WAIT)
 						SOCKBUF_UNLOCK(&so->so_rcv);
-					*mp = m_copym(m, 0, len, copy_flag);
+					*mp = m_copym2(m, 0, len, copy_flag,
+						       hole_break);
 					if (copy_flag == M_WAIT)
 						SOCKBUF_LOCK(&so->so_rcv);
  					if (*mp == NULL) {
@@ -1897,7 +1910,8 @@ dontblock:
  						break;
  					}
 				}
-				m->m_data += len;
+				if ((m->m_flags & M_HOLE) == 0)
+					m->m_data += len;
 				m->m_len -= len;
 				so->so_rcv.sb_cc -= len;
 			}
@@ -2025,7 +2039,7 @@ int
 soreceive_stream(struct socket *so, struct sockaddr **psa, struct uio *uio,
     struct mbuf **mp0, struct mbuf **controlp, int *flagsp)
 {
-	int len = 0, error = 0, flags, oresid;
+	int len = 0, error = 0, flags, oresid, hole_break = 0;
 	struct sockbuf *sb;
 	struct mbuf *m, *n = NULL;
 
@@ -2036,9 +2050,11 @@ soreceive_stream(struct socket *so, struct sockaddr **psa, struct uio *uio,
 		*psa = NULL;
 	if (controlp != NULL)
 		return (EINVAL);
-	if (flagsp != NULL)
+	if (flagsp != NULL) {
+		hole_break = *flagsp & MSG_HOLE_BREAK;
+		*flagsp &= ~MSG_HOLE_BREAK;
 		flags = *flagsp &~ MSG_EOR;
-	else
+	} else
 		flags = 0;
 	if (flags & MSG_OOB)
 		return (soreceive_rcvoob(so, uio, flags));
@@ -2131,6 +2147,8 @@ deliver:
 
 	/* Fill uio until full or current end of socket buffer is reached. */
 	len = min(uio->uio_resid, sb->sb_cc);
+	if (hole_break && (sb->sb_mb->m_flags & M_HOLE))
+		flags |= MSG_HOLE_BREAK;
 	if (mp0 != NULL) {
 		/* Dequeue as many mbufs as possible. */
 		if (!(flags & MSG_PEEK) && len >= sb->sb_mb->m_len) {
@@ -2152,7 +2170,7 @@ deliver:
 			KASSERT(sb->sb_mb != NULL,
 			    ("%s: len > 0 && sb->sb_mb empty", __func__));
 
-			m = m_copym(sb->sb_mb, 0, len, M_DONTWAIT);
+			m = m_copym2(sb->sb_mb, 0, len, M_DONTWAIT, hole_break);
 			if (m == NULL)
 				len = 0;	/* Don't flush data from sockbuf. */
 			else
@@ -2169,7 +2187,7 @@ deliver:
 	} else {
 		/* NB: Must unlock socket buffer as uiomove may sleep. */
 		SOCKBUF_UNLOCK(sb);
-		error = m_mbuftouio(uio, sb->sb_mb, len);
+		error = m_mbuftouio(uio, sb->sb_mb, len, hole_break);
 		SOCKBUF_LOCK(sb);
 		if (error)
 			goto out;
@@ -2203,6 +2221,9 @@ deliver:
 	if ((flags & MSG_WAITALL) && uio->uio_resid > 0)
 		goto restart;
 out:
+	if (flagsp != NULL)
+		*flagsp |= flags;
+
 	SOCKBUF_LOCK_ASSERT(sb);
 	SBLASTRECORDCHK(sb);
 	SBLASTMBUFCHK(sb);

@@ -454,6 +454,9 @@ struct msghdr {
 #if __BSD_VISIBLE
 #define	MSG_NOSIGNAL	0x20000		/* do not generate SIGPIPE on EOF */
 #endif
+#ifdef _KERNEL
+#define	MSG_HOLE_BREAK	0x40000		/* stop at and indicate hole boundary */
+#endif
 
 /*
  * Header for ancillary data objects in msg_control buffer.

@@ -199,6 +199,7 @@ struct uinet_uio {
 
 #define	UINET_MSG_DONTWAIT	0x80		/* this message should be nonblocking */
 #define	UINET_MSG_NBIO		0x4000		/* FIONBIO mode, used by fifofs */
+#define	UINET_MSG_HOLE_BREAK	0x40000		/* break at and indicate hole boundary */
 
 #define	UINET_SHUT_RD		0		/* shut down the reading side */
 #define	UINET_SHUT_WR		1		/* shut down the writing side */

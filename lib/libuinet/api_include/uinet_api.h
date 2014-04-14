@@ -88,7 +88,7 @@ int   uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *
 int   uinet_sogetstate(struct uinet_socket *so);
 void *uinet_sogetuserctx(struct uinet_socket *so, int key);
 int   uinet_solisten(struct uinet_socket *so, int backlog);
-	int   uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall);
+int   uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall);
 int   uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall);
 int   uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uinet_uio *uio, int *flagsp);
 void  uinet_sosetnonblocking(struct uinet_socket *so, unsigned int nonblocking);

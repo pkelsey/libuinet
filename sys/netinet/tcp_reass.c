@@ -198,7 +198,7 @@ tcp_reass_deliver_holes(struct tcpcb *tp)
 	struct tseg_qent *q, *p, *qtmp;
 	int delta;
 	int hole_size;
-	struct mbuf *m_hole, *m_tmp;
+	struct mbuf *m_hole;
 	int contiguous;
 
 	INP_WLOCK_ASSERT(tp->t_inpcb);
@@ -222,21 +222,11 @@ tcp_reass_deliver_holes(struct tcpcb *tp)
 			if (!(so->so_rcv.sb_state & SBS_CANTRCVMORE)) {
 				hole_size = q->tqe_th->th_seq - tp->rcv_nxt;
 				if (hole_size) {
-					m_hole = m_getm(NULL, hole_size, M_NOWAIT, MT_DATA);
-
+					m_hole = m_gethole(M_NOWAIT, MT_DATA);
+					m_hole->m_len = hole_size;
+					
 					/* XXX any reasonable way to ensure this doesn't happen or have a better outcome if it does? */
 					KASSERT(m_hole != NULL, ("%s: mbuf allocation for hole failed", __func__));
-					m_tmp = m_hole;
-					while (m_tmp) {
-						int clear_size;
-						m_tmp->m_len = (m_tmp->m_flags & M_EXT) ? m_tmp->m_ext.ext_size :
-						    ((m_tmp->m_flags & M_PKTHDR) ? MHLEN : MLEN);
-						clear_size = imin(hole_size, m_tmp->m_len);
-						m_tmp->m_len = clear_size;
-						memset(m_tmp->m_data, 0, clear_size);
-						hole_size -= clear_size;
-						m_tmp = m_tmp->m_next;
-					}
 
 					sbappendstream_locked(&so->so_rcv, m_hole);
 				}
@@ -284,7 +274,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	int replace_tqs_in_list = 0;
 	int passive;
 	int hole_size;
-	struct mbuf *m_hole, *m_tmp;
+	struct mbuf *m_hole;
 	struct tseg_qent *reclaimed_tqe = NULL;
 #endif
 
@@ -322,6 +312,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	 * Investigate why and re-evaluate the below limit after the behaviour
 	 * is understood.
 	 */
+
 	if (th->th_seq != tp->rcv_nxt &&
 	    tp->t_segqlen >= (so->so_rcv.sb_hiwat / tp->t_maxseg) + 1) {
 		V_tcp_reass_overflows++;
@@ -504,7 +495,7 @@ present:
 	q = LIST_FIRST(&tp->t_segq);
 #ifdef PASSIVE_INET
 	if (!q || (q->tqe_th->th_seq != tp->rcv_nxt && !deliver_leading_hole)) {
-		if (q && q->tqe_th->th_seq != tp->rcv_nxt) {
+		if (passive && q && q->tqe_th->th_seq != tp->rcv_nxt) {
 			tcp_timer_activate(tp, TT_REASSDL, tcp_reass_next_hole_deadline(tp));
 		}
 		return (0);
@@ -518,21 +509,12 @@ present:
 	if (deliver_leading_hole) {
 		if (!(so->so_rcv.sb_state & SBS_CANTRCVMORE)) {
 			hole_size = q->tqe_th->th_seq - tp->rcv_nxt;
-			m_hole = m_getm(NULL, hole_size, M_NOWAIT, MT_DATA);
+
+			m_hole = m_gethole(M_NOWAIT, MT_DATA);
+			m_hole->m_len = hole_size;
 
 			/* XXX any reasonable way to ensure this doesn't happen or have a better outcome if it does? */
 			KASSERT(m_hole != NULL, ("%s: mbuf allocation for hole failed", __func__));
-			m_tmp = m_hole;
-			while (m_tmp) {
-				int clear_size;
-				m_tmp->m_len = (m_tmp->m_flags & M_EXT) ? m_tmp->m_ext.ext_size :
-				    ((m_tmp->m_flags & M_PKTHDR) ? MHLEN : MLEN);
-				clear_size = imin(hole_size, m_tmp->m_len);
-				m_tmp->m_len = clear_size;
-				memset(m_tmp->m_data, 0, clear_size);
-				hole_size -= clear_size;
-				m_tmp = m_tmp->m_next;
-			}
 
 			sbappendstream_locked(&so->so_rcv, m_hole);
 		}
@@ -576,7 +558,9 @@ present:
 		TAILQ_REMOVE(&tp->t_segageq, &tqs, tqe_ageq);
 	}
 
-	tcp_timer_activate(tp, TT_REASSDL, tcp_reass_next_hole_deadline(tp));
+	int next_deadline = tcp_reass_next_hole_deadline(tp);
+	if (!tcp_timer_active(tp, TT_REASSDL) || next_deadline == 0)
+		tcp_timer_activate(tp, TT_REASSDL, next_deadline);
 #endif
 	ND6_HINT(tp);
 	sorwakeup_locked(so);

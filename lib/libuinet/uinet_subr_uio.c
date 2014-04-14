@@ -53,6 +53,71 @@ uio_yield(void)
 }
 
 int
+uiofill(uint8_t val, int n, struct uio *uio)
+{
+	struct thread *td;
+	struct iovec *iov;
+	size_t cnt;
+	int error, save;
+#define UIOFILL_MAXBUF	256
+	uint8_t buf[UIOFILL_MAXBUF];
+
+	td = curthread;
+	error = 0;
+
+	KASSERT(uio->uio_rw == UIO_READ, ("uiofill: mode"));
+	KASSERT(uio->uio_segflg != UIO_USERSPACE || uio->uio_td == td,
+	    ("uiofill proc"));
+
+	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
+		     "Calling uiofill()");
+
+	save = td->td_pflags & TDP_DEADLKTREAT;
+	td->td_pflags |= TDP_DEADLKTREAT;
+
+	if (uio->uio_segflg == UIO_USERSPACE)
+		memset(buf, val, imax(UIOFILL_MAXBUF, n));
+
+	while (n > 0 && uio->uio_resid) {
+		iov = uio->uio_iov;
+		cnt = iov->iov_len;
+		if (cnt == 0) {
+			uio->uio_iov++;
+			uio->uio_iovcnt--;
+			continue;
+		}
+		if (cnt > n)
+			cnt = n;
+
+		switch (uio->uio_segflg) {
+
+		case UIO_USERSPACE:
+			uio_yield();
+			error = copyout(buf, iov->iov_base, cnt);
+			if (error)
+				goto out;
+			break;
+
+		case UIO_SYSSPACE:
+			memset(iov->iov_base, val, cnt);
+			break;
+		case UIO_NOCOPY:
+			break;
+		}
+		iov->iov_base = (char *)iov->iov_base + cnt;
+		iov->iov_len -= cnt;
+		uio->uio_resid -= cnt;
+		uio->uio_offset += cnt;
+		n -= cnt;
+	}
+out:
+	if (save == 0)
+		td->td_pflags &= ~TDP_DEADLKTREAT;
+	return (error);
+}
+
+
+int
 uiomove(void *cp, int n, struct uio *uio)
 {
 	struct thread *td = curthread;

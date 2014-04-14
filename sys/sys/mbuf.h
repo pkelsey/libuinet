@@ -37,6 +37,7 @@
 /* XXX: These includes suck. Sorry! */
 #include <sys/queue.h>
 #ifdef _KERNEL
+#include <sys/limits.h>
 #include <sys/systm.h>
 #include <vm/uma.h>
 #ifdef WITNESS
@@ -200,6 +201,7 @@ struct mbuf {
 #define	M_PROTO7	0x00100000 /* protocol-specific */
 #define	M_PROTO8	0x00200000 /* protocol-specific */
 #define	M_FLOWID	0x00400000 /* deprecated: flowid is valid */
+#define	M_HOLE		0x00800000 /* hole - no actual data present */
 #define	M_HASHTYPEBITS	0x0F000000 /* mask of bits holding flowid hash type */
 
 /*
@@ -408,6 +410,7 @@ extern uma_zone_t	zone_ext_refcnt;
 static __inline struct mbuf	*m_getcl(int how, short type, int flags);
 static __inline struct mbuf	*m_get(int how, short type);
 static __inline struct mbuf	*m_gethdr(int how, short type);
+static __inline struct mbuf	*m_gethole(int how, short type);
 static __inline struct mbuf	*m_getjcl(int how, short type, int flags,
 				    int size);
 static __inline struct mbuf	*m_getclr(int how, short type);	/* XXX */
@@ -541,6 +544,16 @@ m_gethdr(int how, short type)
 	struct mb_args args;
 
 	args.flags = M_PKTHDR;
+	args.type = type;
+	return ((struct mbuf *)(uma_zalloc_arg(zone_mbuf, &args, how)));
+}
+
+static __inline struct mbuf *
+m_gethole(int how, short type)
+{
+	struct mb_args args;
+
+	args.flags = M_HOLE;
 	args.type = type;
 	return ((struct mbuf *)(uma_zalloc_arg(zone_mbuf, &args, how)));
 }
@@ -784,8 +797,9 @@ m_addr_changed(struct mbuf *m)
 #define	M_LEADINGSPACE(m)						\
 	((m)->m_flags & M_EXT ?						\
 	    (M_WRITABLE(m) ? (m)->m_data - (m)->m_ext.ext_buf : 0):	\
-	    (m)->m_flags & M_PKTHDR ? (m)->m_data - (m)->m_pktdat :	\
-	    (m)->m_data - (m)->m_dat)
+	    ((m)->m_flags & M_PKTHDR ? (m)->m_data - (m)->m_pktdat :	\
+		((m)->m_flags & M_HOLE ? INT_MAX - (m)->m_len :		\
+		    (m)->m_data - (m)->m_dat)))
 
 /*
  * Compute the amount of space available after the end of data in an mbuf.
@@ -797,7 +811,8 @@ m_addr_changed(struct mbuf *m)
 	((m)->m_flags & M_EXT ?						\
 	    (M_WRITABLE(m) ? (m)->m_ext.ext_buf + (m)->m_ext.ext_size	\
 		- ((m)->m_data + (m)->m_len) : 0) :			\
-	    &(m)->m_dat[MLEN] - ((m)->m_data + (m)->m_len))
+	    ((m)->m_flags & M_HOLE ? INT_MAX - (m)->m_len :		\
+		&(m)->m_dat[MLEN] - ((m)->m_data + (m)->m_len)))
 
 /*
  * Arrange to prepend space of size plen to mbuf m.  If a new mbuf must be
@@ -854,6 +869,7 @@ struct mbuf	*m_collapse(struct mbuf *, int, int);
 void		 m_copyback(struct mbuf *, int, int, c_caddr_t);
 void		 m_copydata(const struct mbuf *, int, int, caddr_t);
 struct mbuf	*m_copym(struct mbuf *, int, int, int);
+struct mbuf	*m_copym2(struct mbuf *, int, int, int, int);
 struct mbuf	*m_copymdata(struct mbuf *, struct mbuf *,
 		    int, int, int, int);
 struct mbuf	*m_copypacket(struct mbuf *, int);
@@ -871,7 +887,7 @@ void		 m_freem(struct mbuf *);
 struct mbuf	*m_getm2(struct mbuf *, int, int, short, int);
 struct mbuf	*m_getptr(struct mbuf *, int, int *);
 u_int		 m_length(struct mbuf *, struct mbuf **);
-int		 m_mbuftouio(struct uio *, struct mbuf *, int);
+int		 m_mbuftouio(struct uio *, struct mbuf *, int, int);
 void		 m_move_pkthdr(struct mbuf *, struct mbuf *);
 struct mbuf	*m_prepend(struct mbuf *, int, int);
 void		 m_print(const struct mbuf *, int);

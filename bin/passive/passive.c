@@ -119,6 +119,7 @@ passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	int max_read;
 	int read_size;
 	int error;
+	int flags;
 	int i;
 	int print_threshold = 10;
 	int printable;
@@ -139,8 +140,9 @@ passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 		uio.uio_iovcnt = 1;
 		uio.uio_offset = 0;
 		uio.uio_resid = read_size;
-	
-		error = uinet_soreceive(w->so, NULL, &uio, NULL);
+		flags = UINET_MSG_HOLE_BREAK;
+
+		error = uinet_soreceive(w->so, NULL, &uio, &flags);
 		if (0 != error) {
 			printf("%s: read error (%d), closing\n", conn->label, error);
 			goto err;
@@ -159,7 +161,8 @@ passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 		}
 
 		if (conn->server->verbose)
-			printf("To %s (%u bytes, %llu total)\n", conn->label, read_size, (unsigned long long)conn->bytes_read);
+			printf("To %s (%u bytes, %llu total, %s)\n", conn->label, read_size,
+			       (unsigned long long)conn->bytes_read, flags & UINET_MSG_HOLE_BREAK ? "HOLE" : "normal");
 		
 		if (conn->server->verbose > 1) {
 			buffer[read_size] = '\0';

@@ -327,7 +327,7 @@ m_demote(struct mbuf *m0, int all)
 			m_freem(m->m_nextpkt);
 			m->m_nextpkt = NULL;
 		}
-		m->m_flags = m->m_flags & (M_EXT|M_RDONLY|M_FREELIST|M_NOFREE);
+		m->m_flags = m->m_flags & (M_EXT|M_RDONLY|M_FREELIST|M_NOFREE|M_HOLE);
 	}
 }
 
@@ -361,7 +361,8 @@ m_sanity(struct mbuf *m0, int sanitize)
 			((m->m_flags & M_PKTHDR) ? (caddr_t)(&m->m_pktdat) :
 			 (caddr_t)(&m->m_dat)) );
 		b = (caddr_t)(a + (m->m_flags & M_EXT ? m->m_ext.ext_size :
-			((m->m_flags & M_PKTHDR) ? MHLEN : MLEN)));
+				   ((m->m_flags & M_PKTHDR) ? MHLEN : 
+				    ((m->m_flags & M_HOLE) ? 0 : MLEN))));
 		if ((caddr_t)m->m_data < a)
 			M_SANITY_ACTION("m_data outside mbuf data range left");
 		if ((caddr_t)m->m_data > b)
@@ -527,10 +528,16 @@ m_prepend(struct mbuf *m, int len, int how)
 struct mbuf *
 m_copym(struct mbuf *m, int off0, int len, int wait)
 {
+	return (m_copym2(m, off0, len, wait, 0));
+}
+
+struct mbuf *
+m_copym2(struct mbuf *m, int off0, int len, int wait, int hole_break)
+{
 	struct mbuf *n, **np;
 	int off = off0;
 	struct mbuf *top;
-	int copyhdr = 0;
+	int copyhdr = 0, last_m_flags;
 
 	KASSERT(off >= 0, ("m_copym, negative off %d", off));
 	KASSERT(len >= 0, ("m_copym, negative len %d", len));
@@ -546,12 +553,18 @@ m_copym(struct mbuf *m, int off0, int len, int wait)
 	}
 	np = &top;
 	top = 0;
+	if (m != NULL)
+		last_m_flags = m->m_flags;
 	while (len > 0) {
 		if (m == NULL) {
 			KASSERT(len == M_COPYALL, 
 			    ("m_copym, length > size of mbuf chain"));
 			break;
 		}
+		if (hole_break &&
+		    ((m->m_flags ^ last_m_flags) & M_HOLE))
+			break;
+		last_m_flags = m->m_flags;
 		if (copyhdr)
 			MGETHDR(n, wait, m->m_type);
 		else
@@ -572,7 +585,9 @@ m_copym(struct mbuf *m, int off0, int len, int wait)
 		if (m->m_flags & M_EXT) {
 			n->m_data = m->m_data + off;
 			mb_dupcl(n, m);
-		} else
+		} else if (m->m_flags & M_HOLE)
+			n->m_flags |= M_HOLE;
+		else
 			bcopy(mtod(m, caddr_t)+off, mtod(n, caddr_t),
 			    (u_int)n->m_len);
 		if (len != M_COPYALL)
@@ -630,8 +645,10 @@ m_copymdata(struct mbuf *m, struct mbuf *n, int off, int len,
 			mm = mm->m_next;
 		}
 	}
-	for (z = n; z != NULL; z = z->m_next)
+	for (z = n; z != NULL; z = z->m_next) {
+		KASSERT(!(z->m_flags & M_HOLE), ("m_copymdata, source has holes"));
 		nlen += z->m_len;
+	}
 	if (len == M_COPYALL)
 		len = nlen - off;
 	if (off + len > nlen || len < 1)
@@ -765,7 +782,9 @@ m_copypacket(struct mbuf *m, int how)
 	if (m->m_flags & M_EXT) {
 		n->m_data = m->m_data;
 		mb_dupcl(n, m);
-	} else {
+	} else if (m->m_flags & M_HOLE)
+		n->m_flags |= M_HOLE;
+	else {
 		n->m_data = n->m_pktdat + (m->m_data - m->m_pktdat );
 		bcopy(mtod(m, char *), mtod(n, char *), n->m_len);
 	}
@@ -783,7 +802,9 @@ m_copypacket(struct mbuf *m, int how)
 		if (m->m_flags & M_EXT) {
 			n->m_data = m->m_data;
 			mb_dupcl(n, m);
-		} else {
+		} else if (m->m_flags & M_HOLE)
+			n->m_flags |= M_HOLE;
+		else {
 			bcopy(mtod(m, char *), mtod(n, char *), n->m_len);
 		}
 
@@ -817,7 +838,10 @@ m_copydata(const struct mbuf *m, int off, int len, caddr_t cp)
 	while (len > 0) {
 		KASSERT(m != NULL, ("m_copydata, length > size of mbuf chain"));
 		count = min(m->m_len - off, len);
-		bcopy(mtod(m, caddr_t) + off, cp, count);
+		if (m->m_flags & M_HOLE)
+			memset(cp, 0, count);
+		else
+			bcopy(mtod(m, caddr_t) + off, cp, count);
 		len -= count;
 		cp += count;
 		off = 0;
@@ -850,7 +874,9 @@ m_dup(struct mbuf *m, int how)
 		struct mbuf *n;
 
 		/* Get the next new mbuf */
-		if (remain >= MINCLSIZE) {
+		if (m->m_flags & M_HOLE) {
+			n = m_get(how, m->m_type);
+		} else if (remain >= MINCLSIZE) {
 			n = m_getcl(how, m->m_type, 0);
 			nsize = MCLBYTES;
 		} else {
@@ -865,26 +891,32 @@ m_dup(struct mbuf *m, int how)
 				m_free(n);
 				goto nospace;
 			}
-			if ((n->m_flags & M_EXT) == 0)
+			if ((n->m_flags & M_EXT) == 0 && (m->m_flags & M_HOLE) == 0)
 				nsize = MHLEN;
 		}
-		n->m_len = 0;
 
 		/* Link it into the new chain */
 		*p = n;
 		p = &n->m_next;
 
-		/* Copy data from original mbuf(s) into new mbuf */
-		while (n->m_len < nsize && m != NULL) {
-			int chunk = min(nsize - n->m_len, m->m_len - moff);
+		if (m->m_flags & M_HOLE) {
+			n->m_flags |= M_HOLE;
+			n->m_len = m->m_len;
+		} else {
+			n->m_len = 0;
 
-			bcopy(m->m_data + moff, n->m_data + n->m_len, chunk);
-			moff += chunk;
-			n->m_len += chunk;
-			remain -= chunk;
-			if (moff == m->m_len) {
-				m = m->m_next;
-				moff = 0;
+			/* Copy data from original mbuf(s) into new mbuf */
+			while (n->m_len < nsize && m != NULL) {
+				int chunk = min(nsize - n->m_len, m->m_len - moff);
+
+				bcopy(m->m_data + moff, n->m_data + n->m_len, chunk);
+				moff += chunk;
+				n->m_len += chunk;
+				remain -= chunk;
+				if (moff == m->m_len) {
+					m = m->m_next;
+					moff = 0;
+				}
 			}
 		}
 
@@ -912,6 +944,8 @@ m_cat(struct mbuf *m, struct mbuf *n)
 		m = m->m_next;
 	while (n) {
 		if (m->m_flags & M_EXT ||
+		    m->m_flags & M_HOLE ||
+		    n->m_flags & M_HOLE ||
 		    m->m_data + m->m_len + n->m_len >= &m->m_dat[MLEN]) {
 			/* just join the two chains */
 			m->m_next = n;
@@ -945,7 +979,8 @@ m_adj(struct mbuf *mp, int req_len)
 				m = m->m_next;
 			} else {
 				m->m_len -= len;
-				m->m_data += len;
+				if ((m->m_flags & M_HOLE) == 0)
+					m->m_data += len;
 				len = 0;
 			}
 		}
@@ -1036,7 +1071,9 @@ m_pullup(struct mbuf *n, int len)
 			M_MOVE_PKTHDR(m, n);
 	}
 	space = &m->m_dat[MLEN] - (m->m_data + m->m_len);
+	KASSERT(!(m->m_flags & M_HOLE), ("m_pullup, trying to pull up into hole"));
 	do {
+		KASSERT(!(n->m_flags & M_HOLE), ("m_pullup, trying to pull hole up"));
 		count = min(min(max(len, max_protohdr), space), n->m_len);
 		bcopy(mtod(n, caddr_t), mtod(m, caddr_t) + m->m_len,
 		  (u_int)count);
@@ -1312,7 +1349,7 @@ m_append(struct mbuf *m0, int len, c_caddr_t cp)
 	for (m = m0; m->m_next != NULL; m = m->m_next)
 		;
 	remainder = len;
-	space = M_TRAILINGSPACE(m);
+	space = (m->m_flags & M_HOLE) ? 0 : M_TRAILINGSPACE(m);
 	if (space > 0) {
 		/*
 		 * Copy into available space.
@@ -1423,7 +1460,7 @@ m_print(const struct mbuf *m, int maxlen)
 		len = -1;
 	m2 = m;
 	while (m2 != NULL && (len == -1 || len)) {
-		pdata = m2->m_len;
+		pdata = (m2->m_flags & M_HOLE) ? 0 : m2->m_len;
 		if (maxlen != -1 && pdata > maxlen)
 			pdata = maxlen;
 
@@ -1785,21 +1822,32 @@ m_uiotombuf(struct uio *uio, int how, int len, int align, int flags)
  * Copy an mbuf chain into a uio limited by len if set.
  */
 int
-m_mbuftouio(struct uio *uio, struct mbuf *m, int len)
+m_mbuftouio(struct uio *uio, struct mbuf *m, int len, int hole_break)
 {
 	int error, length, total;
-	int progress = 0;
+	int progress = 0, last_m_flags;
 
 	if (len > 0)
 		total = min(uio->uio_resid, len);
 	else
 		total = uio->uio_resid;
 
+	if (m != NULL)
+		last_m_flags = m->m_flags;
+
 	/* Fill the uio with data from the mbufs. */
 	for (; m != NULL; m = m->m_next) {
 		length = min(m->m_len, total - progress);
 
-		error = uiomove(mtod(m, void *), length, uio);
+		if (hole_break &&
+		    ((m->m_flags ^ last_m_flags) & M_HOLE))
+			break;
+		last_m_flags = m->m_flags;
+
+		if (m->m_flags & M_HOLE)
+			error = uiofill(0, length, uio);
+		else
+			error = uiomove(mtod(m, void *), length, uio);
 		if (error)
 			return (error);
 

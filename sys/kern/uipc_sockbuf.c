@@ -770,18 +770,26 @@ sbcompress(struct sockbuf *sb, struct mbuf *m, struct mbuf *n)
 		if (n && (n->m_flags & M_EOR) == 0 &&
 		    M_WRITABLE(n) &&
 		    ((sb->sb_flags & SB_NOCOALESCE) == 0) &&
-		    m->m_len <= MCLBYTES / 4 && /* XXX: Don't copy too much */
 		    m->m_len <= M_TRAILINGSPACE(n) &&
 		    n->m_type == m->m_type) {
-			bcopy(mtod(m, caddr_t), mtod(n, caddr_t) + n->m_len,
-			    (unsigned)m->m_len);
-			n->m_len += m->m_len;
-			sb->sb_cc += m->m_len;
-			if (m->m_type != MT_DATA && m->m_type != MT_OOBDATA)
+			if (n->m_flags & M_HOLE) {
+				n->m_len += m->m_len;
+				sb->sb_cc += m->m_len;
+				m = m_free(m);
+				continue;
+			} else if (m->m_len <= MCLBYTES / 4) { /* XXX: Don't copy too much */
+				bcopy(mtod(m, caddr_t),
+				      mtod(n, caddr_t) + n->m_len,
+				      (unsigned)m->m_len);
+				n->m_len += m->m_len;
+				sb->sb_cc += m->m_len;
+				if (m->m_type != MT_DATA &&
+				    m->m_type != MT_OOBDATA)
 				/* XXX: Probably don't need.*/
-				sb->sb_ctl += m->m_len;
-			m = m_free(m);
-			continue;
+					sb->sb_ctl += m->m_len;
+				m = m_free(m);
+				continue;
+			}
 		}
 		if (n)
 			n->m_next = m;
@@ -859,7 +867,8 @@ sbdrop_internal(struct sockbuf *sb, int len)
 		}
 		if (m->m_len > len) {
 			m->m_len -= len;
-			m->m_data += len;
+			if (!(m->m_flags & M_HOLE))
+				m->m_data += len;
 			sb->sb_cc -= len;
 			if (sb->sb_sndptroff != 0)
 				sb->sb_sndptroff -= len;
