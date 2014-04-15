@@ -65,3 +65,4 @@ uinet_synfilter_deferral_get_cookie
 uinet_synfilter_getconninfo
 uinet_synfilter_getl2info
 uinet_synfilter_install
+uinet_sysctl

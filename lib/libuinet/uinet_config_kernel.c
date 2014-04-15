@@ -30,7 +30,6 @@
 #include "uinet_config.h"
 #include "uinet_config_internal.h"
 
-
 int
 uinet_config_blackhole(uinet_blackhole_t action)
 {
@@ -65,5 +64,16 @@ uinet_config_blackhole(uinet_blackhole_t action)
 
 	error = kernel_sysctlbyname(curthread, name, NULL, NULL,
 				    &val, sizeof(int), NULL, 0);
+	return (error);
+}
+
+int
+uinet_sysctl(char *name, char *oldp, size_t *oldplen,
+    char *newp, size_t newplen, size_t *retval, int flags)
+{
+	int error;
+
+	error = kernel_sysctlbyname(curthread, name, oldp, oldplen,
+	    newp, newplen, retval, flags);
 	return (error);
 }
