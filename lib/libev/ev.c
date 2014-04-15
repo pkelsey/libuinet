@@ -4973,7 +4973,9 @@ ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
    */
   if ((NULL == soctx->head) && (soctx->pend_flags & EV_UINET_PENDING)) {
     soctx->pend_flags = EV_NONE;
+    pthread_mutex_lock (&uinet_pend_lock);
     UINET_LIST_REMOVE (soctx, pend_list);
+    pthread_mutex_unlock (&uinet_pend_lock);
   }
 
 #if EV_WALK_ENABLE
