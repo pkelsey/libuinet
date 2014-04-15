@@ -212,12 +212,12 @@ tcp_reass_deliver_holes(struct tcpcb *tp)
 	}
 
 	if (p) {
-		SOCKBUF_LOCK(&so->so_rcv);
-
 		contiguous = 0;
 		LIST_FOREACH_SAFE(q, &tp->t_segq, tqe_q, qtmp) {
 			if (contiguous && q->tqe_th->th_seq != tp->rcv_nxt)
 				break;
+
+			SOCKBUF_LOCK(&so->so_rcv);
 
 			if (!(so->so_rcv.sb_state & SBS_CANTRCVMORE)) {
 				hole_size = q->tqe_th->th_seq - tp->rcv_nxt;
@@ -242,18 +242,51 @@ tcp_reass_deliver_holes(struct tcpcb *tp)
 			else
 				sbappendstream_locked(&so->so_rcv, q->tqe_m);
 
-			uma_zfree(V_tcp_reass_zone, q);
+			SOCKBUF_UNLOCK(&so->so_rcv);
+
+			if (q->tqe_th->th_flags & TH_FIN) {
+				socantrcvmore(so);
+				tp->rcv_nxt++;
+
+				switch (tp->t_state) {
+				case TCPS_SYN_RECEIVED:
+					tp->t_starttime = ticks;
+					/* FALLTHROUGH */
+				case TCPS_ESTABLISHED:
+					tp->t_state = TCPS_CLOSE_WAIT;
+					break;
+				case TCPS_FIN_WAIT_1:
+					tp->t_state = TCPS_CLOSING;
+					break;
+				case TCPS_FIN_WAIT_2:
+#if 0
+					INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
+					KASSERT(ti_locked == TI_WLOCKED,
+						("%s: dodata "
+						 "TCP_FIN_WAIT_2 ti_locked: %d", __func__,
+						 ti_locked));
+					
+					tcp_twstart(tp);
+					INP_INFO_WUNLOCK(&V_tcbinfo);
+#else
+					printf(">>>>>>>>>>>>>>>> enter TIME WAIT\n");
+#endif
+					break;
+				}
+			}
 
 			tp->t_segqlen--;
 			if (q == p) {
 				contiguous = 1;
 			}
+
+			uma_zfree(V_tcp_reass_zone, q);
 		}
 
 		tcp_timer_activate(tp, TT_REASSDL, tcp_reass_next_hole_deadline(tp));
 
 		ND6_HINT(tp);
-		sorwakeup_locked(so);
+		sorwakeup(so);  /* XXX should we only wakeup if we delivered data and didn't determine cantrcvmore? */
 	}
 }
 #endif /* PASSIVE_INET */
