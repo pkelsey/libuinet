@@ -465,11 +465,12 @@ proc0_init(void *dummy __unused)
 
 #ifndef UINET
 	p->p_osrel = osreldate;
-
+#endif
 	/*
 	 * Initialize thread and process structures.
 	 */
 	procinit();	/* set up proc zone */
+#ifndef UINET
 	threadinit();	/* set up UMA zones */
 
 	/*

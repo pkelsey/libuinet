@@ -42,6 +42,13 @@ struct sx proctree_lock;
 
 SYSCTL_NODE(_kern, KERN_PROC, proc, CTLFLAG_RD,  0, "Process table");
 
+void
+procinit()
+{
+	sx_init(&allproc_lock, "allproc");
+	LIST_INIT(&allproc);
+}
+
 struct proc *
 pfind(pid_t pid)
 {
