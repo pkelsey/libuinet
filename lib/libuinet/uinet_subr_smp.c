@@ -63,8 +63,7 @@ mp_start(void *dummy)
 	for (i = 0; i < mp_ncpus; i++) {
 		CPU_SET(i, &all_cpus);
 
-		pcpu_init(pcpup, i, sizeof(struct pcpu));
-		pcpup++;
+		pcpu_init(&pcpup[i], i, sizeof(struct pcpu));
 
 		dpcpu = malloc(DPCPU_SIZE, M_DEVBUF, M_WAITOK);
 		if (NULL == dpcpu)
