@@ -92,6 +92,11 @@ uinet_finalize_thread(void)
 	free(td, M_TEMP);
 }
 
+void
+uinet_gettcpstat(struct uinet_tcpstat *stat)
+{
+	*((struct tcpstat *)stat) = tcpstat;
+}
 
 char *
 uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size)

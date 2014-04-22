@@ -289,6 +289,121 @@ struct uinet_tcp_info {
 };
 
 
+struct	uinet_tcpstat {
+	unsigned long	tcps_connattempt;	/* connections initiated */
+	unsigned long	tcps_accepts;		/* connections accepted */
+	unsigned long	tcps_connects;		/* connections established */
+	unsigned long	tcps_drops;		/* connections dropped */
+	unsigned long	tcps_conndrops;		/* embryonic connections dropped */
+	unsigned long	tcps_minmssdrops;	/* average minmss too low drops */
+	unsigned long	tcps_closed;		/* conn. closed (includes drops) */
+	unsigned long	tcps_segstimed;		/* segs where we tried to get rtt */
+	unsigned long	tcps_rttupdated;	/* times we succeeded */
+	unsigned long	tcps_delack;		/* delayed acks sent */
+	unsigned long	tcps_timeoutdrop;	/* conn. dropped in rxmt timeout */
+	unsigned long	tcps_rexmttimeo;	/* retransmit timeouts */
+	unsigned long	tcps_persisttimeo;	/* persist timeouts */
+	unsigned long	tcps_keeptimeo;		/* keepalive timeouts */
+	unsigned long	tcps_keepprobe;		/* keepalive probes sent */
+	unsigned long	tcps_keepdrops;		/* connections dropped in keepalive */
+
+	unsigned long	tcps_sndtotal;		/* total packets sent */
+	unsigned long	tcps_sndpack;		/* data packets sent */
+	unsigned long	tcps_sndbyte;		/* data bytes sent */
+	unsigned long	tcps_sndrexmitpack;	/* data packets retransmitted */
+	unsigned long	tcps_sndrexmitbyte;	/* data bytes retransmitted */
+	unsigned long	tcps_sndrexmitbad;	/* unnecessary packet retransmissions */
+	unsigned long	tcps_sndacks;		/* ack-only packets sent */
+	unsigned long	tcps_sndprobe;		/* window probes sent */
+	unsigned long	tcps_sndurg;		/* packets sent with URG only */
+	unsigned long	tcps_sndwinup;		/* window update-only packets sent */
+	unsigned long	tcps_sndctrl;		/* control (SYN|FIN|RST) packets sent */
+
+	unsigned long	tcps_rcvtotal;		/* total packets received */
+	unsigned long	tcps_rcvpack;		/* packets received in sequence */
+	unsigned long	tcps_rcvbyte;		/* bytes received in sequence */
+	unsigned long	tcps_rcvbadsum;		/* packets received with ccksum errs */
+	unsigned long	tcps_rcvbadoff;		/* packets received with bad offset */
+	unsigned long	tcps_rcvmemdrop;	/* packets dropped for lack of memory */
+	unsigned long	tcps_rcvshort;		/* packets received too short */
+	unsigned long	tcps_rcvduppack;	/* duplicate-only packets received */
+	unsigned long	tcps_rcvdupbyte;	/* duplicate-only bytes received */
+	unsigned long	tcps_rcvpartduppack;	/* packets with some duplicate data */
+	unsigned long	tcps_rcvpartdupbyte;	/* dup. bytes in part-dup. packets */
+	unsigned long	tcps_rcvoopack;		/* out-of-order packets received */
+	unsigned long	tcps_rcvoobyte;		/* out-of-order bytes received */
+	unsigned long	tcps_rcvpackafterwin;	/* packets with data after window */
+	unsigned long	tcps_rcvbyteafterwin;	/* bytes rcvd after window */
+	unsigned long	tcps_rcvafterclose;	/* packets rcvd after "close" */
+	unsigned long	tcps_rcvwinprobe;	/* rcvd window probe packets */
+	unsigned long	tcps_rcvdupack;		/* rcvd duplicate acks */
+	unsigned long	tcps_rcvacktoomuch;	/* rcvd acks for unsent data */
+	unsigned long	tcps_rcvackpack;	/* rcvd ack packets */
+	unsigned long	tcps_rcvackbyte;	/* bytes acked by rcvd acks */
+	unsigned long	tcps_rcvwinupd;		/* rcvd window update packets */
+	unsigned long	tcps_pawsdrop;		/* segments dropped due to PAWS */
+	unsigned long	tcps_predack;		/* times hdr predict ok for acks */
+	unsigned long	tcps_preddat;		/* times hdr predict ok for data pkts */
+	unsigned long	tcps_pcbcachemiss;
+	unsigned long	tcps_cachedrtt;		/* times cached RTT in route updated */
+	unsigned long	tcps_cachedrttvar;	/* times cached rttvar updated */
+	unsigned long	tcps_cachedssthresh;	/* times cached ssthresh updated */
+	unsigned long	tcps_usedrtt;		/* times RTT initialized from route */
+	unsigned long	tcps_usedrttvar;	/* times RTTVAR initialized from rt */
+	unsigned long	tcps_usedssthresh;	/* times ssthresh initialized from rt*/
+	unsigned long	tcps_persistdrop;	/* timeout in persist state */
+	unsigned long	tcps_badsyn;		/* bogus SYN, e.g. premature ACK */
+	unsigned long	tcps_mturesent;		/* resends due to MTU discovery */
+	unsigned long	tcps_listendrop;	/* listen queue overflows */
+	unsigned long	tcps_badrst;		/* ignored RSTs in the window */
+
+	unsigned long	tcps_sc_added;		/* entry added to syncache */
+	unsigned long	tcps_sc_retransmitted;	/* syncache entry was retransmitted */
+	unsigned long	tcps_sc_dupsyn;		/* duplicate SYN packet */
+	unsigned long	tcps_sc_dropped;	/* could not reply to packet */
+	unsigned long	tcps_sc_completed;	/* successful extraction of entry */
+	unsigned long	tcps_sc_bucketoverflow;	/* syncache per-bucket limit hit */
+	unsigned long	tcps_sc_cacheoverflow;	/* syncache cache limit hit */
+	unsigned long	tcps_sc_reset;		/* RST removed entry from syncache */
+	unsigned long	tcps_sc_stale;		/* timed out or listen socket gone */
+	unsigned long	tcps_sc_aborted;	/* syncache entry aborted */
+	unsigned long	tcps_sc_badack;		/* removed due to bad ACK */
+	unsigned long	tcps_sc_unreach;	/* ICMP unreachable received */
+	unsigned long	tcps_sc_zonefail;	/* zalloc() failed */
+	unsigned long	tcps_sc_sendcookie;	/* SYN cookie sent */
+	unsigned long	tcps_sc_recvcookie;	/* SYN cookie received */
+
+	unsigned long	tcps_hc_added;		/* entry added to hostcache */
+	unsigned long	tcps_hc_bucketoverflow;	/* hostcache per bucket limit hit */
+
+	unsigned long	tcps_finwait2_drops;    /* Drop FIN_WAIT_2 connection after time limit */
+
+	/* SACK related stats */
+	unsigned long	tcps_sack_recovery_episode; /* SACK recovery episodes */
+	unsigned long	tcps_sack_rexmits;	    /* SACK rexmit segments   */
+	unsigned long	tcps_sack_rexmit_bytes;	    /* SACK rexmit bytes      */
+	unsigned long	tcps_sack_rcv_blocks;	    /* SACK blocks (options) received */
+	unsigned long	tcps_sack_send_blocks;	    /* SACK blocks (options) sent     */
+	unsigned long	tcps_sack_sboverflow;	    /* times scoreboard overflowed */
+	
+	/* ECN related stats */
+	unsigned long	tcps_ecn_ce;		/* ECN Congestion Experienced */
+	unsigned long	tcps_ecn_ect0;		/* ECN Capable Transport */
+	unsigned long	tcps_ecn_ect1;		/* ECN Capable Transport */
+	unsigned long	tcps_ecn_shs;		/* ECN successful handshakes */
+	unsigned long	tcps_ecn_rcwnd;		/* # times ECN reduced the cwnd */
+
+	/* TCP_SIGNATURE related stats */
+	unsigned long	tcps_sig_rcvgoodsig;	/* Total matching signature received */
+	unsigned long	tcps_sig_rcvbadsig;	/* Total bad signature received */
+	unsigned long	tcps_sig_err_buildsig;	/* Mismatching signature received */
+	unsigned long	tcps_sig_err_sigopt;	/* No signature expected by socket */
+	unsigned long	tcps_sig_err_nosigopt;	/* No signature provided by segment */
+
+	unsigned long	_pad[12];		/* 6 UTO, 6 TBD */
+};
+
+
 #define UINET_IN_L2INFO_MAX_TAGS	16
 #define UINET_IN_L2INFO_ADDR_MAX	6
 
