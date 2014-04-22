@@ -1607,7 +1607,11 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		 *  B. check that the syncookie is valid.  If it is, then
 		 *     cobble up a fake syncache entry, and return.
 		 */
+#ifdef PASSIVE_INET
+		if (!V_tcp_syncookies || (inc->inc_flags & INC_PASSIVE)) {
+#else
 		if (!V_tcp_syncookies) {
+#endif
 			SCH_UNLOCK(sch);
 			if ((s = tcp_log_addrs(inc, th, NULL, NULL)))
 				log(LOG_DEBUG, "%s; %s: Spurious ACK, "
@@ -1968,7 +1972,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 			syncache_drop(sc, sch);
 		sc = uma_zalloc(V_tcp_syncache.zone, M_NOWAIT | M_ZERO);
 		if (sc == NULL) {
+#ifdef PASSIVE_INET
+			if (V_tcp_syncookies && !passive) {
+#else
 			if (V_tcp_syncookies) {
+#endif
 				bzero(&scs, sizeof(scs));
 				sc = &scs;
 			} else {
@@ -2080,7 +2088,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	if ((th->th_flags & (TH_ECE|TH_CWR)) && V_tcp_do_ecn)
 		sc->sc_flags |= SCF_ECN;
 
+#ifdef PASSIVE_INET
+	if (V_tcp_syncookies && !passive) {
+#else
 	if (V_tcp_syncookies) {
+#endif
 		syncookie_generate(sch, sc, &flowtmp);
 #ifdef INET6
 		if (autoflowlabel)
@@ -2109,7 +2121,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	 * Do a standard 3-way handshake.
 	 */
 	if (TOEPCB_ISSET(sc) || syncache_respond(sc) == 0) {
+#ifdef PASSIVE_INET
+		if (V_tcp_syncookies && V_tcp_syncookiesonly && sc != &scs && !passive)
+#else
 		if (V_tcp_syncookies && V_tcp_syncookiesonly && sc != &scs)
+#endif
 			syncache_free(sc);
 		else if (sc != &scs)
 			syncache_insert(sc, sch);   /* locks and unlocks sch */
