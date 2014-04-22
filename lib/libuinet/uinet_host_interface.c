@@ -137,7 +137,10 @@ uhi_calloc(uint64_t number, uint64_t size)
 void *
 uhi_realloc(void *p, uint64_t size)
 {
-	return (realloc(p, size));
+	if (size)
+		return (realloc(p, size));
+
+	return (p);
 }
 
 
