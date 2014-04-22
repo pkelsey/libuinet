@@ -385,6 +385,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 		goto fail;
 	}
 
+	cfg->ifindex = sc->ifp->if_index;
 	cfg->ifdata = sc;
 
 	return (0);
@@ -477,10 +478,14 @@ if_netmap_send(void *arg)
 			cur = if_netmap_txcur(sc->nm_host_ctx);
 
 			while (avail) {
+				ifp->if_opackets++;
+
 				IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
 				avail--;
 
 				pktlen = m_length(m, NULL);
+				ifp->if_obytes += pktlen;
+
 #pragma GCC diagnostic ignored "-Wformat"
 #pragma GCC diagnostic ignored "-Wformat-extra-args"
 				printf(">>>>>>>>>>>>>> sending packet, len=%u %48D\n", pktlen, mtod(m, unsigned char *), " ");
@@ -581,6 +586,7 @@ static void
 if_netmap_receive(void *arg)
 {
 	struct if_netmap_softc *sc;
+	struct ifnet *ifp;
 	struct uhi_pollfd pfd;
 	struct mbuf *m;
 	struct if_netmap_bufinfo *bi;
@@ -620,6 +626,7 @@ if_netmap_receive(void *arg)
 	 */
 
 	sc = (struct if_netmap_softc *)arg;
+	ifp = sc->ifp;
 
 	if (sc->cfg->cpu >= 0)
 		sched_bind(sc->rx_thread, sc->cfg->cpu);
@@ -648,6 +655,9 @@ if_netmap_receive(void *arg)
 		for (n = 0; n < avail; n++) {
 			slotbuf = if_netmap_rxslot(sc->nm_host_ctx, &cur, &pktlen, &slotindex);
 
+			ifp->if_ipackets++;
+			ifp->if_ibytes += pktlen;
+
 			bi = if_netmap_bufinfo_alloc(&sc->rx_bufinfo);
 			if (NULL == bi) {
 				/* copy receive */
@@ -657,11 +667,6 @@ if_netmap_receive(void *arg)
 				 * cluster
 				 */
 				m = m_devget(slotbuf, pktlen, ETHER_ALIGN, sc->ifp, NULL);
-
-				if (NULL == m) {
-					/* XXX dropped. should count this */
-					printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>NO MBUFS (1)\n");
-				}
 
 				/* Recover this buffer at the far end of the
 				 * reserved trail from prior zero-copy
@@ -674,9 +679,6 @@ if_netmap_receive(void *arg)
 				m = m_gethdr(M_DONTWAIT, MT_DATA);
 				if (NULL == m) {
 					if_netmap_bufinfo_unalloc(&sc->rx_bufinfo);
-					printf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>NO MBUFS (2)\n");
-					/* XXX dropped. should count this */
-
 					if_netmap_rxsetslot(sc->nm_host_ctx, &sc->hw_rx_rsvd_begin, slotindex);
 				} else {
 					/* XXX presumably in this path the
@@ -705,6 +707,8 @@ if_netmap_receive(void *arg)
 
 			if (m) {
 				sc->ifp->if_input(sc->ifp, m);
+			} else {
+				ifp->if_iqdrops++;				
 			}
 		}
 
@@ -747,7 +751,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	ifp->if_fib = sc->cfg->cdom;
 
 	ether_ifattach(ifp, sc->addr);
-	ifp->if_capabilities = ifp->if_capenable = 0;
+	ifp->if_capabilities = ifp->if_capenable = IFCAP_HWSTATS;
 
 
 	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);

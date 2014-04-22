@@ -158,6 +158,7 @@ if_pcap_attach(struct uinet_config_if *cfg)
 		goto fail;
 	}
 
+	cfg->ifindex = sc->ifp->if_index;
 	cfg->ifdata = sc;
 
 	return (0);
@@ -280,9 +281,16 @@ static void
 if_pcap_receive_handler(void *ctx, const uint8_t *buf, unsigned int size)
 {
 	struct if_pcap_softc *sc = (struct if_pcap_softc *)ctx;
+	struct ifnet *ifp = sc->ifp;
 	struct mbuf *m;
 
-	m = m_getcl(M_WAITOK, MT_DATA, M_PKTHDR);
+	m = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
+
+	if (m == NULL) {
+		ifp->if_iqdrops++;
+		return;
+	}
+
 	m_adj(m, ETHER_ALIGN);
 
 	memcpy(mtod(m, uint8_t *), buf, size);
@@ -296,6 +304,7 @@ if_pcap_receive_handler(void *ctx, const uint8_t *buf, unsigned int size)
 #pragma GCC diagnostic error "-Wformat"
 #pragma GCC diagnostic error "-Wformat-extra-args"
 
+	ifp->if_ipackets++;
 	sc->ifp->if_input(sc->ifp, m);
 }
 
@@ -342,7 +351,7 @@ if_pcap_setup_interface(struct if_pcap_softc *sc)
 	ifp->if_fib = sc->cfg->cdom;
 
 	ether_ifattach(ifp, sc->addr);
-	ifp->if_capabilities = ifp->if_capenable = 0;
+	ifp->if_capabilities = ifp->if_capenable = IFCAP_HWSTATS;
 
 
 	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);

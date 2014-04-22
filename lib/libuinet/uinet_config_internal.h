@@ -43,6 +43,7 @@ struct uinet_config_if {
 	char alias[IF_NAMESIZE];	/* assigned by user (optional) */
 	int cpu;
 	unsigned int cdom;
+	unsigned int ifindex;
 	void *ifdata;
 };
 

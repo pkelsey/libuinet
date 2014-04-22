@@ -432,6 +432,22 @@ struct uinet_in_l2info {
 typedef void * uinet_synf_deferral_t;
 
 
+struct uinet_ifstat {
+	unsigned long	ifi_ipackets;		/* packets received on interface */
+	unsigned long	ifi_ierrors;		/* input errors on interface */
+	unsigned long	ifi_opackets;		/* packets sent on interface */
+	unsigned long	ifi_oerrors;		/* output errors on interface */
+	unsigned long	ifi_collisions;		/* collisions on csma interfaces */
+	unsigned long	ifi_ibytes;		/* total number of octets received */
+	unsigned long	ifi_obytes;		/* total number of octets sent */
+	unsigned long	ifi_imcasts;		/* packets received via multicast */
+	unsigned long	ifi_omcasts;		/* packets sent via multicast */
+	unsigned long	ifi_iqdrops;		/* dropped on input, this interface */
+	unsigned long	ifi_noproto;		/* destined for unsupported protocol */
+	unsigned long	ifi_hwassist;		/* HW offload capabilities, see IFCAP */
+	uint64_t	ifi_epoch;		/* uptime at attach or stat reset */
+};
+
 
 
 struct uinet_pool;

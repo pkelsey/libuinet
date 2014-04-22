@@ -67,7 +67,7 @@ struct interface_config {
 	int type;
 	int instance;
 	char *alias_prefix;
-	int do_stats;
+	int do_tcpstats;
 };
 
 struct server_config {
@@ -429,6 +429,42 @@ fail:
 
 
 static void
+dump_ifstat(const char *name)
+{
+	struct uinet_ifstat stat;
+	int perline = 3;
+	int index = 1;
+
+#define PRINT_IFSTAT(s) printf("%-26s= %-10lu%s", #s, stat.s, (index % perline == 0) ? "\n" : "  "); index++ 
+
+	uinet_getifstat(name, &stat);
+
+	printf("========================================================================\n");
+	printf("%s:\n", name);
+
+	PRINT_IFSTAT(ifi_ipackets);
+	PRINT_IFSTAT(ifi_ierrors);
+	PRINT_IFSTAT(ifi_opackets);
+	PRINT_IFSTAT(ifi_oerrors);
+	PRINT_IFSTAT(ifi_collisions);
+	PRINT_IFSTAT(ifi_ibytes);
+	PRINT_IFSTAT(ifi_obytes);
+	PRINT_IFSTAT(ifi_imcasts);
+	PRINT_IFSTAT(ifi_omcasts);
+	PRINT_IFSTAT(ifi_iqdrops);
+	PRINT_IFSTAT(ifi_noproto);
+	PRINT_IFSTAT(ifi_hwassist);
+	PRINT_IFSTAT(ifi_epoch);
+
+	printf("\n");
+	printf("========================================================================\n");
+
+
+#undef PRINT_IFSTAT
+}
+
+
+static void
 dump_tcpstat()
 {
 	struct uinet_tcpstat stat;
@@ -556,24 +592,28 @@ dump_tcpstat()
 
 
 static void
-stats_timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
+if_stats_timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 {
-	dump_tcpstat();
+	struct interface_config *cfg = w->data;
+
+	dump_ifstat(cfg->alias);
+	if (cfg->do_tcpstats) {
+		dump_tcpstat();
+	}
 }
 
 
 void *interface_thread_start(void *arg)
 {
 	struct interface_config *cfg = arg;
-	ev_timer stats_timer;
+	ev_timer if_stats_timer;
 
 	uinet_initialize_thread();
 
-	if (cfg->do_stats) {
-		ev_init(&stats_timer, stats_timer_cb);
-		ev_timer_set(&stats_timer, 1.0, 2.0);
-		ev_timer_start(cfg->loop, &stats_timer);
-	}
+	ev_init(&if_stats_timer, if_stats_timer_cb);
+	ev_timer_set(&if_stats_timer, 1.0, 2.0);
+	if_stats_timer.data = cfg;
+	ev_timer_start(cfg->loop, &if_stats_timer);
 
 	ev_run(cfg->loop, 0);
 
@@ -622,7 +662,7 @@ int main (int argc, char **argv)
 		interfaces[i].thread = NULL;
 		interfaces[i].promisc = 0;
 		interfaces[i].type = UINET_IFTYPE_NETMAP;
-		interfaces[i].do_stats = (i == 0);
+		interfaces[i].do_tcpstats = (i == 0);
 	}
 
 	for (i = 0; i < MAX_SERVERS; i++) {
