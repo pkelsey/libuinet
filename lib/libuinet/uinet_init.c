@@ -105,6 +105,9 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 	snprintf(tmpbuf, sizeof(tmpbuf), "%u", num_hash_buckets);	
 	setenv("net.inet.tcp.tcbhashsize", tmpbuf);
 
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", 2048);
+	setenv("net.inet.tcp.syncache.hashsize", tmpbuf);
+
 	boot_pages = 16;  /* number of pages made available for uma to bootstrap itself */
 
 	mp_ncpus = ncpus;
