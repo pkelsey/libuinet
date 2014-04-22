@@ -40,6 +40,7 @@
 #include <ev.h>
 
 struct passive_context;
+struct interface_config;
 
 struct connection_context {
 	char label[64];
@@ -54,6 +55,7 @@ struct passive_context {
 	struct uinet_socket *listener;
 	ev_uinet listen_watcher;
 	int verbose;
+	struct interface_config *interface;
 };
 
 struct interface_config {
@@ -68,6 +70,8 @@ struct interface_config {
 	int instance;
 	char *alias_prefix;
 	int do_tcpstats;
+	uint64_t num_sockets;
+	uint64_t max_accept_batch;
 };
 
 struct server_config {
@@ -210,6 +214,7 @@ err:
 	ev_uinet_stop(loop, w);
 	ev_uinet_detach(w->ctx);
 	uinet_soclose(w->so);
+	conn->server->interface->num_sockets--;
 	free(conn);
 }
 
@@ -227,76 +232,95 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	struct uinet_sockaddr_in *sin1, *sin2;
 	char buf1[32], buf2[32];
 	int error;
+	int batch_limit = 32;
+	int processed = 0;
 
-	if (0 != (error = uinet_soaccept(w->so, NULL, &newso))) {
-		printf("accept failed (%d)\n", error);
-	} else {
-		if (passive->verbose)
-			printf("accept succeeded\n");
+	while ((processed < batch_limit) &&
+	       (UINET_EWOULDBLOCK != (error = uinet_soaccept(w->so, NULL, &newso)))) {
+		processed++;
+
+		if (0 == error) {
+			newpeerso = NULL;
+			conn = NULL;
+			peerconn = NULL;
+			soctx = NULL;
+			peersoctx = NULL;
+
+			if (passive->verbose)
+				printf("accept succeeded\n");
 		
-		soctx = ev_uinet_attach(newso);
-		if (NULL == soctx) {
-			printf("Failed to alloc libev context for new connection socket\n");
-			goto fail;
+			soctx = ev_uinet_attach(newso);
+			if (NULL == soctx) {
+				printf("Failed to alloc libev context for new connection socket\n");
+				goto fail;
+			}
+
+			newpeerso = uinet_sogetpassivepeer(newso);
+			peersoctx = ev_uinet_attach(newpeerso);
+			if (NULL == peersoctx) {
+				printf("Failed to alloc libev context for new passive peer connection socket\n");
+				goto fail;
+			}
+
+			conn = calloc(1, sizeof(*conn));
+			if (NULL == conn) {
+				printf("Failed to alloc connection context for new connection\n");
+				goto fail;
+			}
+
+			peerconn = calloc(1, sizeof(*peerconn));
+			if (NULL == conn) {
+				printf("Failed to alloc connection context for new passive peer connection\n");
+				goto fail;
+			}
+
+
+			uinet_sogetsockaddr(newso, (struct uinet_sockaddr **)&sin1);
+			uinet_sogetpeeraddr(newso, (struct uinet_sockaddr **)&sin2);
+			snprintf(conn->label, sizeof(conn->label), "SERVER (%s:%u <- %s:%u)",
+				 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
+				 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
+			uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
+			uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
+
+			conn->server = passive;
+			ev_init(&conn->watcher, passive_receive_cb);
+			ev_uinet_set(&conn->watcher, soctx, EV_READ);
+			conn->watcher.data = conn;
+			ev_uinet_start(loop, &conn->watcher);
+
+			uinet_sogetsockaddr(newpeerso, (struct uinet_sockaddr **)&sin1);
+			uinet_sogetpeeraddr(newpeerso, (struct uinet_sockaddr **)&sin2);
+			snprintf(peerconn->label, sizeof(peerconn->label), "CLIENT (%s:%u <- %s:%u)",
+				 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
+				 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
+			uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
+			uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
+
+			peerconn->server = passive;
+			ev_init(&peerconn->watcher, passive_receive_cb);
+			ev_uinet_set(&peerconn->watcher, peersoctx, EV_READ);
+			peerconn->watcher.data = peerconn;
+			ev_uinet_start(loop, &peerconn->watcher);
+
+			passive->interface->num_sockets += 2;
+
+			continue;
+		fail:
+			if (conn) free(conn);
+			if (peerconn) free(peerconn);
+			if (soctx) ev_uinet_detach(soctx);
+			if (peersoctx) ev_uinet_detach(peersoctx);
+			if (newso) uinet_soclose(newso);
+			if (newpeerso) uinet_soclose(newpeerso);
+
 		}
 
-		newpeerso = uinet_sogetpassivepeer(newso);
-		peersoctx = ev_uinet_attach(newpeerso);
-		if (NULL == peersoctx) {
-			printf("Failed to alloc libev context for new passive peer connection socket\n");
-			goto fail;
-		}
-
-		conn = calloc(1, sizeof(*conn));
-		if (NULL == conn) {
-			printf("Failed to alloc connection context for new connection\n");
-			goto fail;
-		}
-
-		peerconn = calloc(1, sizeof(*peerconn));
-		if (NULL == conn) {
-			printf("Failed to alloc connection context for new passive peer connection\n");
-			goto fail;
-		}
-
-
-		uinet_sogetsockaddr(newso, (struct uinet_sockaddr **)&sin1);
-		uinet_sogetpeeraddr(newso, (struct uinet_sockaddr **)&sin2);
-		snprintf(conn->label, sizeof(conn->label), "SERVER (%s:%u <- %s:%u)",
-			 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
-			 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
-		uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
-		uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
-
-		conn->server = passive;
-		ev_init(&conn->watcher, passive_receive_cb);
-		ev_uinet_set(&conn->watcher, soctx, EV_READ);
-		conn->watcher.data = conn;
-		ev_uinet_start(loop, &conn->watcher);
-
-		uinet_sogetsockaddr(newpeerso, (struct uinet_sockaddr **)&sin1);
-		uinet_sogetpeeraddr(newpeerso, (struct uinet_sockaddr **)&sin2);
-		snprintf(peerconn->label, sizeof(peerconn->label), "CLIENT (%s:%u <- %s:%u)",
-			 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
-			 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
-		uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
-		uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
-
-		peerconn->server = passive;
-		ev_init(&peerconn->watcher, passive_receive_cb);
-		ev_uinet_set(&peerconn->watcher, peersoctx, EV_READ);
-		peerconn->watcher.data = peerconn;
-		ev_uinet_start(loop, &peerconn->watcher);
+		newso = NULL;
 	}
 
-	return;
-fail:
-	if (conn) free(conn);
-	if (peerconn) free(peerconn);
-	if (soctx) ev_uinet_detach(soctx);
-	if (peersoctx) ev_uinet_detach(peersoctx);
-	if (newso) uinet_soclose(newso);
-	if (newpeerso) uinet_soclose(newpeerso);
+	if (processed > passive->interface->max_accept_batch)
+		passive->interface->max_accept_batch = processed;
 }
 
 
@@ -383,7 +407,7 @@ create_passive(struct ev_loop *loop, struct server_config *cfg)
 
 
 
-	passive = malloc(sizeof(struct passive_context));
+	passive = calloc(1, sizeof(struct passive_context));
 	if (NULL == passive) {
 		goto fail;
 	}
@@ -391,6 +415,7 @@ create_passive(struct ev_loop *loop, struct server_config *cfg)
 	passive->loop = loop;
 	passive->listener = listener;
 	passive->verbose = cfg->verbose;
+	passive->interface = cfg->interface;
 
 	memset(&sin, 0, sizeof(struct uinet_sockaddr_in));
 	sin.sin_len = sizeof(struct uinet_sockaddr_in);
@@ -598,6 +623,7 @@ if_stats_timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 	struct interface_config *cfg = w->data;
 
 	dump_ifstat(cfg->alias);
+	printf("num_sockets=%llu  max_accept_batch=%llu\n", (unsigned long long)cfg->num_sockets, (unsigned long long)cfg->max_accept_batch);
 	if (cfg->do_tcpstats) {
 		dump_tcpstat();
 	}
@@ -657,6 +683,9 @@ int main (int argc, char **argv)
 	struct uinet_in_addr tmpinaddr;
 	int ifnetmap_count = 0;
 	int ifpcap_count = 0;
+
+	memset(interfaces, 0, sizeof(interfaces));
+	memset(servers, 0, sizeof(servers));
 
 	for (i = 0; i < MAX_INTERFACES; i++) {
 		interfaces[i].loop = NULL;
