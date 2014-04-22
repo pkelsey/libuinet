@@ -208,6 +208,12 @@ SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, recvbuf_max, CTLFLAG_RW,
     &VNET_NAME(tcp_autorcvbuf_max), 0,
     "Max size of automatic receive buffer");
 
+VNET_DEFINE(int, tcp_passive_trace) = 0;
+#define	V_tcp_passive_trace	VNET(tcp_passive_trace)
+SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, passive_trace, CTLFLAG_RW,
+    &VNET_NAME(tcp_passive_trace), 0,
+    "Enable temporary passive debug traces");
+
 VNET_DEFINE(struct inpcbhead, tcb);
 #define	tcb6	tcb  /* for KAME src sync over BSD*'s */
 VNET_DEFINE(struct inpcbinfo, tcbinfo);
@@ -2206,7 +2212,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 			TCPSTAT_ADD(tcps_rcvdupbyte, tlen);
 			TCPSTAT_INC(tcps_pawsdrop);
 			if (tlen) {
-				printf(">>>>>>. drop after ack (1)\n");
+				if (V_tcp_passive_trace)
+					printf(">>>>>>. drop after ack (1)\n");
 				goto dropafterack;
 			}
 			goto drop;
@@ -2319,11 +2326,13 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 				tp->t_flags |= TF_ACKNOW;
 				TCPSTAT_INC(tcps_rcvwinprobe);
 			} else {
-				printf(">>>>>>. drop after ack (2) wnd=%lu seq=%u next=%u\n", tp->rcv_wnd, th->th_seq, tp->rcv_nxt);
+				if (V_tcp_passive_trace)
+					printf(">>>>>>. drop after ack (2) wnd=%lu seq=%u next=%u\n", tp->rcv_wnd, th->th_seq, tp->rcv_nxt);
 				goto dropafterack;
 			}
 		} else {
-			printf(">>>>>>>>>>>>>>>>>. dropping %u bytes after window\n", todrop);
+			if (V_tcp_passive_trace)
+				printf(">>>>>>>>>>>>>>>>>. dropping %u bytes after window\n", todrop);
 			TCPSTAT_ADD(tcps_rcvbyteafterwin, todrop);
 		}
 		m_adj(m, -todrop);
@@ -2381,7 +2390,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 		    (tp->t_flags & TF_NEEDSYN))
 			goto step6;
 		else if (tp->t_flags & TF_ACKNOW) {
-			printf(">>>>>>. drop after ack (3)\n");
+			if (V_tcp_passive_trace)
+				printf(">>>>>>. drop after ack (3)\n");
 			goto dropafterack;
 		} else
 			goto drop;
@@ -2453,7 +2463,8 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 #endif
 		if (SEQ_GT(th->th_ack, tp->snd_max)) {
 			TCPSTAT_INC(tcps_rcvacktoomuch);
-			printf(">>>>>>. drop after ack (4)\n");
+			if (V_tcp_passive_trace)
+				printf(">>>>>>. drop after ack (4)\n");
 			goto dropafterack;
 		}
 		if ((tp->t_flags & TF_SACK_PERMIT) &&
@@ -2787,7 +2798,8 @@ process_ACK:
 				tcp_twstart(tp);
 				INP_INFO_WUNLOCK(&V_tcbinfo);
 				m_freem(m);
-				printf(">>>>>>>>>>>>>>>>>>> CLOSING finisacked tlen=%u\n", tlen);
+				if (V_tcp_passive_trace)
+					printf(">>>>>>>>>>>>>>>>>>> CLOSING finisacked tlen=%u\n", tlen);
 				return;
 			}
 			break;
@@ -3056,7 +3068,11 @@ check_delack:
 	return;
 
 dropafterack:
-	printf(">>>>>>. drop after ack tlen=%d\n", tlen);
+	if (V_tcp_passive_trace) {
+		printf(">>>>>>. drop after ack tlen=%d\n", tlen);
+		if (thflags & TH_FIN)
+			printf (">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>. DROPPING FIN\n");
+	}
 	/*
 	 * Generate an ACK dropping incoming segment if it occupies
 	 * sequence space, where the ACK reflects our state.
@@ -3094,7 +3110,11 @@ dropafterack:
 	return;
 
 dropwithreset:
-	printf(">>>>>>. drop with reset tlen=%d\n", tlen);
+	if (V_tcp_passive_trace) {
+		printf(">>>>>>. drop with reset tlen=%d\n", tlen);
+		if (thflags & TH_FIN)
+			printf (">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>. DROPPING FIN (2)\n");
+	}
 	if (ti_locked == TI_WLOCKED)
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 	ti_locked = TI_UNLOCKED;
@@ -3112,7 +3132,11 @@ dropwithreset:
 	return;
 
 drop:
-	printf(">>>>>>. drop tlen=%d\n", tlen);
+	if (V_tcp_passive_trace) {
+		printf(">>>>>>. drop tlen=%d\n", tlen);
+		if (thflags & TH_FIN)
+			printf (">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>. DROPPING FIN (3)\n");
+	}
 	if (ti_locked == TI_WLOCKED) {
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 		ti_locked = TI_UNLOCKED;
