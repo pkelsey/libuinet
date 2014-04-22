@@ -76,7 +76,14 @@ void *
 uinet_malloc(unsigned long size, struct malloc_type *type, int flags)
 {
 	void *alloc;
-	alloc = uhi_malloc(size);
+
+	do {
+		alloc = uhi_malloc(size);
+		if (alloc || !(flags & M_WAITOK))
+			break;
+
+		pause("malloc", hz/100);
+	} while (alloc == NULL);
 
 	if ((flags & M_ZERO) && alloc != NULL)
 		bzero(alloc, size);
