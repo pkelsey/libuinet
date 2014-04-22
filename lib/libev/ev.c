@@ -4840,7 +4840,7 @@ ev_uinet_attach (struct uinet_socket *so)
       sokey = uinet_soallocuserctx (so);
       if (-1 == sokey)
 	{
-	  free (ctx);
+	  ev_free (ctx);
 	  ctx = NULL;
 	}
       else
@@ -4857,6 +4857,8 @@ ev_uinet_attach (struct uinet_socket *so)
 void
 ev_uinet_detach (struct ev_uinet_ctx *ctx)
 {
+  assert (("libev: detaching uinet ctx that is still in use", ctx->head == NULL));
+
   ev_free (ctx);
 }
 
@@ -4971,11 +4973,21 @@ ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
    * accessing soctx->pend_flags because it will only be checked when there
    * are no watchers and thus no upcalls installed.
    */
-  if ((NULL == soctx->head) && (soctx->pend_flags & EV_UINET_PENDING)) {
-    soctx->pend_flags = EV_NONE;
-    pthread_mutex_lock (&uinet_pend_lock);
-    UINET_LIST_REMOVE (soctx, pend_list);
-    pthread_mutex_unlock (&uinet_pend_lock);
+  if (NULL == soctx->head) {
+	  if (soctx->pend_flags & EV_UINET_INHIBITED) {
+		  /* No lock necessary for the prev_pend list, as it is only
+		   * modified in-loop.
+		   */
+		  UINET_LIST_REMOVE (soctx, pend_list);
+	  } else {
+		  assert (("libev: uinet context neither pending nor inhibited in ev_uinet_stop",
+			   soctx->pend_flags & EV_UINET_PENDING));
+
+		  pthread_mutex_lock (&uinet_pend_lock);
+		  UINET_LIST_REMOVE (soctx, pend_list);
+		  pthread_mutex_unlock (&uinet_pend_lock);
+	  } 
+	  soctx->pend_flags = EV_NONE;
   }
 
 #if EV_WALK_ENABLE
