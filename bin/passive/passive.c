@@ -208,6 +208,7 @@ passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 
 err:
 	ev_uinet_stop(loop, w);
+	ev_uinet_detach(w->ctx);
 	uinet_soclose(w->so);
 	free(conn);
 }
