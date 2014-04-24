@@ -107,6 +107,10 @@ void  uinet_soupcall_clear_locked(struct uinet_socket *so, int which);
 void  uinet_soupcall_set(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_set_locked(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_unlock(struct uinet_socket *so, int which);
+int   uinet_sysctlbyname(char *name, char *oldp, size_t *oldplen,
+			 char *newp, size_t newplen, size_t *retval, int flags);
+int   uinet_sysctl(int *name, u_int namelen, void *oid, size_t *oldlenp,
+		   void *new, size_t newlen, size_t *retval, int flags);
 void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
 void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
 int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);
@@ -114,6 +118,7 @@ uinet_synf_deferral_t uinet_synfilter_deferral_alloc(struct uinet_socket *so, ui
 int   uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_deferral_t deferral, int decision);
 void  uinet_synfilter_deferral_free(uinet_synf_deferral_t deferral);
 uinet_api_synfilter_cookie_t uinet_synfilter_deferral_get_cookie(uinet_synf_deferral_t deferral);
+
 
 #ifdef __cplusplus
 }
