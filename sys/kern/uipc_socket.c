@@ -569,7 +569,7 @@ sonewconn_passive_client(struct socket *head, int connstatus)
 	so->so_type = head->so_type;
 	so->so_options = head->so_options &~ SO_ACCEPTCONN;
 	so->so_linger = head->so_linger;
-	so->so_state = head->so_state | SS_NOFDREF | (head->so_state & SS_NBIO);
+	so->so_state = head->so_state | SS_NOFDREF;
 	so->so_fibnum = head->so_fibnum;
 	so->so_proto = head->so_proto;
 	so->so_cred = crhold(head->so_cred);
@@ -594,8 +594,6 @@ sonewconn_passive_client(struct socket *head, int connstatus)
 	so->so_rcv.sb_flags |= head->so_rcv.sb_flags & SB_AUTOSIZE;
 	so->so_snd.sb_flags |= head->so_snd.sb_flags & SB_AUTOSIZE;
 	so->so_state |= connstatus;
-
-	so->so_count = 1;
 
 	return (so);
 }

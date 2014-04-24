@@ -42,6 +42,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_usrreq.c 241133 2012-10-02 13:
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_tcpdebug.h"
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 
 #include <sys/param.h>
@@ -1700,7 +1701,9 @@ tcp_usrclosed(struct tcpcb *tp)
 
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
 	INP_WLOCK_ASSERT(tp->t_inpcb);
-
+#ifdef PASSIVE_INET
+again:
+#endif
 	switch (tp->t_state) {
 	case TCPS_LISTEN:
 		tcp_offload_listen_close(tp);
@@ -1726,6 +1729,13 @@ tcp_usrclosed(struct tcpcb *tp)
 		break;
 
 	case TCPS_CLOSE_WAIT:
+#ifdef PASSIVE_INET
+		/* Passive sockets don't wait for an ack. */
+		if (tp->t_inpcb->inp_flags2 & INP_PASSIVE) {
+			tp->t_state = TCPS_CLOSED;
+			goto again;
+		}
+#endif
 		tp->t_state = TCPS_LAST_ACK;
 		break;
 	}

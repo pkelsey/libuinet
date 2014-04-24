@@ -23,6 +23,7 @@
  * SUCH DAMAGE.
  */
 
+#include "opt_passiveinet.h"
 
 #include <sys/param.h>
 #include <sys/kernel.h>
@@ -540,10 +541,23 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 	so->so_head = NULL;
 
 	SOCK_UNLOCK(so);
+
+#ifdef PASSIVE_INET
+	if (so->so_passive_peer) {
+		SOCK_LOCK(so->so_passive_peer);
+		soref(so->so_passive_peer);
+		so->so_passive_peer->so_state |= (head->so_state & SS_NBIO);
+		SOCK_UNLOCK(so->so_passive_peer);
+	}
+#endif
 	ACCEPT_UNLOCK();
 
 	error = soaccept(so, &sa);
 	if (error) {
+#ifdef PASSIVE_INET
+		if (so->so_passive_peer)
+			soclose(so->so_passive_peer);
+#endif
 		soclose(so);
 		return (error);
 	}
