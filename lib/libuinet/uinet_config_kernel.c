@@ -30,7 +30,6 @@
 #include "uinet_config.h"
 #include "uinet_config_internal.h"
 
-
 int
 uinet_config_blackhole(uinet_blackhole_t action)
 {
@@ -67,3 +66,4 @@ uinet_config_blackhole(uinet_blackhole_t action)
 				    &val, sizeof(int), NULL, 0);
 	return (error);
 }
+
