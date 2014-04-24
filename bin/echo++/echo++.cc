@@ -332,6 +332,8 @@ void *interface_thread_start(void *arg)
 
 	cfg->loop->run();
 
+	uinet_finalize_thread();
+
 	return (NULL);
 }
 

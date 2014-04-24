@@ -644,6 +644,8 @@ void *interface_thread_start(void *arg)
 
 	ev_run(cfg->loop, 0);
 
+	uinet_finalize_thread();
+
 	return (NULL);
 }
 

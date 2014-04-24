@@ -49,9 +49,6 @@
 #include "opt_inet6.h"
 
 
-extern struct thread *uinet_thread_alloc(struct proc *p);
-
-
 int
 uinet_inet6_enabled(void)
 {
@@ -66,19 +63,20 @@ uinet_inet6_enabled(void)
 int
 uinet_initialize_thread(void)
 {
+	struct uinet_thread *utd;
 	struct thread *td;
 
-	if (NULL == uhi_thread_get_kern_thread()) {
-		td = uinet_thread_alloc(NULL);
-		if (NULL == td)
+	if (NULL == uhi_thread_get_thread_specific_data()) {
+		utd = uinet_thread_alloc(NULL);
+		if (NULL == utd)
 			return (ENOMEM);
 		
-		td->td_proc = &proc0;
+		td = utd->td;
 
 		KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_initialize_thread: can't safely store host thread id"));
 		td->td_wchan = (void *)uhi_thread_self();
 
-		uhi_thread_set_kern_thread(td);
+		uhi_thread_set_thread_specific_data(utd);
 	}
 
 	return (0);
@@ -88,9 +86,14 @@ uinet_initialize_thread(void)
 void
 uinet_finalize_thread(void)
 {
-	struct thread *td = curthread;
-	
-	free(td, M_TEMP);
+	struct uinet_thread *utd;
+
+	utd = uhi_thread_get_thread_specific_data();
+
+	if (utd != NULL) {
+		uinet_thread_free(utd);
+		uhi_thread_set_thread_specific_data(NULL);
+	}
 }
 
 

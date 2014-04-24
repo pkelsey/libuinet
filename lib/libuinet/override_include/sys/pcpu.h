@@ -1,6 +1,7 @@
 /*-
  * Copyright (c) 2010 Kip Macy
  * All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -170,9 +171,10 @@ struct pcpu *uinet_pcpu_get(void);
 
 
 #include "uinet_host_interface.h"
+#include <sys/proc.h>
 
 #undef curthread
-#define curthread ((struct thread *)uhi_thread_get_kern_thread())
+#define curthread (((struct uinet_thread *)uhi_thread_get_thread_specific_data())->td)
 
 
 #endif	/* _UINET_SYS_PCPU_H_ */
