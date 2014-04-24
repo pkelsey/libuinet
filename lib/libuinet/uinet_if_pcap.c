@@ -221,15 +221,20 @@ if_pcap_send(void *arg)
 	
 		while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
 			IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
-
 			pktlen = m_length(m, NULL);
-			if (!sc->isfile && (pktlen <= sizeof(copybuf))) {
+
+			ifp->if_opackets++;
+			ifp->if_obytes += pktlen;
+
+			if (!sc->isfile && (pktlen <= sizeof(copybuf))) {			
 				if (NULL == m->m_next) {
 					/* all in one piece - avoid copy */
 					pkt = mtod(m, uint8_t *);
+					ifp->if_ozcopies++;
 				} else {
 					pkt = copybuf;
 					m_copydata(m, 0, pktlen, pkt);
+					ifp->if_ocopies++;
 				}
 
 				if (0 != if_pcap_sendpacket(sc->pcap_host_ctx, pkt, pktlen))
@@ -305,6 +310,7 @@ if_pcap_receive_handler(void *ctx, const uint8_t *buf, unsigned int size)
 #pragma GCC diagnostic error "-Wformat-extra-args"
 
 	ifp->if_ipackets++;
+	ifp->if_icopies++;
 	sc->ifp->if_input(sc->ifp, m);
 }
 

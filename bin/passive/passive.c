@@ -481,6 +481,10 @@ dump_ifstat(const char *name)
 	PRINT_IFSTAT(ifi_noproto);
 	PRINT_IFSTAT(ifi_hwassist);
 	PRINT_IFSTAT(ifi_epoch);
+	PRINT_IFSTAT(ifi_icopies);
+	PRINT_IFSTAT(ifi_izcopies);
+	PRINT_IFSTAT(ifi_ocopies);
+	PRINT_IFSTAT(ifi_ozcopies);
 
 	printf("\n");
 	printf("========================================================================\n");

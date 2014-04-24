@@ -236,6 +236,12 @@ typedef void if_init_f_t(void *);
 #define	if_iqdrops	if_data.ifi_iqdrops
 #define	if_noproto	if_data.ifi_noproto
 #define	if_lastchange	if_data.ifi_lastchange
+#ifdef UINET
+#define	if_icopies	if_data.ifi_icopies
+#define	if_izcopies	if_data.ifi_izcopies
+#define	if_ocopies	if_data.ifi_ocopies
+#define	if_ozcopies	if_data.ifi_ozcopies
+#endif
 
 /* for compatibility with other BSDs */
 #define	if_addrlist	if_addrhead

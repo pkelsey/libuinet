@@ -478,6 +478,7 @@ if_netmap_send(void *arg)
 			cur = if_netmap_txcur(sc->nm_host_ctx);
 
 			while (avail) {
+				ifp->if_ocopies++;
 				ifp->if_opackets++;
 
 				IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
@@ -661,6 +662,7 @@ if_netmap_receive(void *arg)
 			bi = if_netmap_bufinfo_alloc(&sc->rx_bufinfo);
 			if (NULL == bi) {
 				/* copy receive */
+				ifp->if_icopies++;
 
 				/* could streamline this a little since we
 				 * know the data is going to fit in a
@@ -675,6 +677,7 @@ if_netmap_receive(void *arg)
 				if_netmap_rxsetslot(sc->nm_host_ctx, &sc->hw_rx_rsvd_begin, slotindex);
 			} else {
 				/* zero-copy receive */
+				ifp->if_izcopies++;
 
 				m = m_gethdr(M_DONTWAIT, MT_DATA);
 				if (NULL == m) {

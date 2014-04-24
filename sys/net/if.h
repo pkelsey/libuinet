@@ -106,6 +106,12 @@ struct if_data {
 	u_long	ifi_hwassist;		/* HW offload capabilities, see IFCAP */
 	time_t	ifi_epoch;		/* uptime at attach or stat reset */
 	struct	timeval ifi_lastchange;	/* time of last administrative change */
+#ifdef UINET
+	u_long  ifi_icopies;		/* input packets copied from interface */
+	u_long  ifi_izcopies;		/* input packets zero-copied from interface */
+	u_long  ifi_ocopies;		/* output packets copied to interface */
+	u_long  ifi_ozcopies;		/* output packets zero-copied to interface */
+#endif
 };
 
 /*-

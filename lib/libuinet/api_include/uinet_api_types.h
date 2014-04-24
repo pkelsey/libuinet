@@ -446,6 +446,10 @@ struct uinet_ifstat {
 	unsigned long	ifi_noproto;		/* destined for unsupported protocol */
 	unsigned long	ifi_hwassist;		/* HW offload capabilities, see IFCAP */
 	uint64_t	ifi_epoch;		/* uptime at attach or stat reset */
+	unsigned long  ifi_icopies;		/* input packets copied from interface */
+	unsigned long  ifi_izcopies;		/* input packets zero-copied from interface */
+	unsigned long  ifi_ocopies;		/* output packets copied to interface */
+	unsigned long  ifi_ozcopies;		/* output packets zero-copied to interface */
 };
 
 

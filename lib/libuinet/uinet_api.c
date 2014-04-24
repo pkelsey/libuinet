@@ -135,6 +135,10 @@ uinet_getifstat(const char *name, struct uinet_ifstat *stat)
 	stat->ifi_noproto    = ifp->if_data.ifi_noproto;
 	stat->ifi_hwassist   = ifp->if_data.ifi_hwassist;
 	stat->ifi_epoch      = ifp->if_data.ifi_epoch;
+	stat->ifi_icopies    = ifp->if_data.ifi_icopies;
+	stat->ifi_izcopies   = ifp->if_data.ifi_izcopies;
+	stat->ifi_ocopies    = ifp->if_data.ifi_ocopies;
+	stat->ifi_ozcopies   = ifp->if_data.ifi_ozcopies;
 
 	if_rele(ifp);
 
