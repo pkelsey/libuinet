@@ -432,6 +432,7 @@ uhi_thread_create(uhi_thread_t *new_thread, struct uhi_thread_start_args *start_
 	}
 
 	error = pthread_create(&thread, &attr, pthread_start_routine, start_args);
+	pthread_attr_destroy(&attr);
 
 	if (new_thread)
 		*new_thread = (uhi_thread_t)thread;
@@ -531,7 +532,8 @@ uhi_cond_init(uhi_cond_t *c)
 {
 	pthread_condattr_t attr;
 	pthread_cond_t *pc;
-    
+	int error;
+
 	
 	pc = malloc(sizeof(pthread_cond_t));
 	if (NULL == pc)
@@ -546,7 +548,10 @@ uhi_cond_init(uhi_cond_t *c)
 		printf("Warning: condition variable timed wait using CLOCK_REALTIME");
 #endif /* __APPLE__ */
 
-	return (pthread_cond_init(pc, &attr));
+	error = pthread_cond_init(pc, &attr);
+	pthread_condattr_destroy(&attr);
+
+	return (error);
 }
 
 
@@ -600,7 +605,8 @@ uhi_mutex_init(uhi_mutex_t *m, int opts)
 {
 	pthread_mutexattr_t attr;
 	pthread_mutex_t *pm;
-	
+	int error;
+
 	pm = malloc(sizeof(pthread_mutex_t));
 	if (NULL == pm)
 		return (ENOMEM);
@@ -618,8 +624,11 @@ uhi_mutex_init(uhi_mutex_t *m, int opts)
 #endif /* __APPLE__ */
 			pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_NORMAL);
 	}
+	
+	error = pthread_mutex_init(pm, &attr);
+	pthread_mutexattr_destroy(&attr);	    
 
-	return (pthread_mutex_init(pm, &attr));
+	return (error);
 }
 
 
@@ -664,6 +673,7 @@ uhi_rwlock_init(uhi_rwlock_t *rw, int opts)
 {
 	pthread_mutexattr_t attr;
 	pthread_mutex_t *pm;
+	int error;
 	
 	pm = malloc(sizeof(pthread_mutex_t));
 	if (NULL == pm)
@@ -696,7 +706,10 @@ uhi_rwlock_init(uhi_rwlock_t *rw, int opts)
 		printf("Warning: priority will not propagate to rwlock holder\n");
 	}
 
-	return(pthread_mutex_init(pm, &attr));
+	error = pthread_mutex_init(pm, &attr);
+	pthread_mutexattr_destroy(&attr);
+
+	return (error);
 }
 
 
