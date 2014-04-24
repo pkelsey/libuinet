@@ -68,7 +68,7 @@ uinet_initialize_thread(void)
 {
 	struct thread *td;
 
-	if (NULL == uhi_thread_get_thread_specific_data()) {
+	if (NULL == uhi_thread_get_kern_thread()) {
 		td = uinet_thread_alloc(NULL);
 		if (NULL == td)
 			return (ENOMEM);
@@ -78,7 +78,7 @@ uinet_initialize_thread(void)
 		KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_initialize_thread: can't safely store host thread id"));
 		td->td_wchan = (void *)uhi_thread_self();
 
-		uhi_thread_set_thread_specific_data(td);
+		uhi_thread_set_kern_thread(td);
 	}
 
 	return (0);

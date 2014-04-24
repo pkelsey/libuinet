@@ -213,7 +213,7 @@ uinet_init_thread0(void)
 	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_init_thread0: can't safely store host thread id"));
 	td->td_wchan = (void *)uhi_thread_self();
 
-	uhi_thread_set_thread_specific_data(td);
+	uhi_thread_set_kern_thread(td);
 }
 
 

@@ -172,7 +172,7 @@ struct pcpu *uinet_pcpu_get(void);
 #include "uinet_host_interface.h"
 
 #undef curthread
-#define curthread ((struct thread *)uhi_thread_get_thread_specific_data())
+#define curthread ((struct thread *)uhi_thread_get_kern_thread())
 
 
 #endif	/* _UINET_SYS_PCPU_H_ */

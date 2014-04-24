@@ -450,14 +450,14 @@ uhi_thread_exit(void)
 
 
 void *
-uhi_thread_get_thread_specific_data(void)
+uhi_thread_get_kern_thread(void)
 {
 	return (pthread_getspecific(curthread_key));
 }
 
 
 int
-uhi_thread_set_thread_specific_data(void *data)
+uhi_thread_set_kern_thread(void *data)
 {
 	return (pthread_setspecific(curthread_key, data));
 }
