@@ -34,6 +34,7 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sockio.h>
+#include <sys/sysctl.h>
 #include <sys/uio.h>
 
 #include <net/if.h>
@@ -1073,6 +1074,28 @@ uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t 
 }
 
 
+int
+uinet_sysctlbyname(char *name, char *oldp, size_t *oldplen,
+    char *newp, size_t newplen, size_t *retval, int flags)
+{
+	int error;
+
+	error = kernel_sysctlbyname(curthread, name, oldp, oldplen,
+	    newp, newplen, retval, flags);
+	return (error);
+}
+
+
+int
+uinet_sysctl(int *name, u_int namelen, void *old, size_t *oldlenp,
+    void *new, size_t newlen, size_t *retval, int flags)
+{
+	int error;
+
+	error = kernel_sysctl(curthread, name, namelen, old, oldlenp,
+	    new, newlen, retval, flags);
+	return (error);
+}
 
 
 
