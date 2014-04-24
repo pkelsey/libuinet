@@ -82,6 +82,7 @@ struct uhi_thread_start_args {
 	void (*end_routine)(struct uhi_thread_start_args *);
 	void *thread_specific_data;  /* will be freed when thread exits */
 	uhi_thread_t *host_thread_id;
+	unsigned char *oncpu;
 };
 
 
@@ -98,6 +99,7 @@ typedef void * uhi_rwlock_t;
 
 
 void uhi_init(void) __attribute__((constructor));
+void uhi_set_num_cpus(unsigned int n);
 
 void *uhi_malloc(uint64_t size);
 void *uhi_calloc(uint64_t number, uint64_t size);
@@ -115,7 +117,7 @@ int   uhi_munmap(void *addr, uint64_t len);
 int   uhi_poll(struct uhi_pollfd *fds, unsigned int nfds, int timeout);
 
 void  uhi_thread_bind(unsigned int cpu);
-int   uhi_thread_bound_cpu(unsigned int ncpus);
+int   uhi_thread_bound_cpu(void);
 int   uhi_thread_create(uhi_thread_t *new_thread, struct uhi_thread_start_args *start_args, unsigned int stack_bytes);
 void  uhi_thread_exit(void) __attribute__((__noreturn__));
 void *uhi_thread_get_thread_specific_data(void);

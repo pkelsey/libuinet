@@ -61,14 +61,5 @@ uinet_dpcpu_init(void)
 struct pcpu *
 uinet_pcpu_get(void)
 {
-	int bound_cpu;
-
-	/*
-	 * If the CPU binding is unknown, use PCPU data for CPU 0.
-	 */
-	bound_cpu = uhi_thread_bound_cpu(mp_ncpus);
-	if (-1 == bound_cpu)
-		return (&pcpup[0]);
-	else
-		return (&pcpup[bound_cpu]);
+	return (&pcpup[curthread->td_oncpu]);
 }

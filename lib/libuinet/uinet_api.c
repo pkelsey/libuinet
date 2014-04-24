@@ -65,8 +65,10 @@ uinet_initialize_thread(void)
 {
 	struct uinet_thread *utd;
 	struct thread *td;
+	int cpuid;
 
-	if (NULL == uhi_thread_get_thread_specific_data()) {
+	utd = uhi_thread_get_thread_specific_data();
+	if (NULL == utd) {
 		utd = uinet_thread_alloc(NULL);
 		if (NULL == utd)
 			return (ENOMEM);
@@ -77,7 +79,12 @@ uinet_initialize_thread(void)
 		td->td_wchan = (void *)uhi_thread_self();
 
 		uhi_thread_set_thread_specific_data(utd);
+	} else {
+		td = utd->td;
 	}
+
+	cpuid = uhi_thread_bound_cpu();
+	td->td_oncpu = (cpuid == -1) ? 0 : cpuid;
 
 	return (0);
 }

@@ -113,6 +113,8 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 	mp_ncpus = ncpus;
 	mp_maxid = mp_ncpus - 1;
 
+	uhi_set_num_cpus(mp_ncpus);
+
         /* vm_init bits */
 	
 	/* first get size required, then alloc memory, then give that memory to the second call */

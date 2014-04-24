@@ -162,6 +162,7 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	/* Have uhi_thread_create() store the host thread ID in td_wchan */
 	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("kthread_add: can't safely store host thread id"));
 	tsa->host_thread_id = &td->td_wchan;
+	tsa->oncpu = &td->td_oncpu;
 
 	va_start(ap, str);
 	vsnprintf(tsa->name, sizeof(tsa->name), str, ap);
@@ -218,6 +219,7 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	/* Have uhi_thread_create() store the host thread ID in td_wchan */
 	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("kproc_kthread_add: can't safely store host thread id"));
 	tsa->host_thread_id = &td->td_wchan;
+	tsa->oncpu = &td->td_oncpu;
 
 	va_start(ap, str);
 	vsnprintf(tsa->name, sizeof(tsa->name), str, ap);
@@ -238,6 +240,7 @@ void
 uinet_init_thread0(void)
 {
 	struct thread *td;
+	int cpuid;
 
 	td = &thread0;
 	td->td_proc = &proc0;
@@ -245,6 +248,9 @@ uinet_init_thread0(void)
 	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_init_thread0: can't safely store host thread id"));
 	td->td_wchan = (void *)uhi_thread_self();
 
+	cpuid = uhi_thread_bound_cpu();
+	td->td_oncpu = (cpuid == -1) ? 0 : cpuid;
+	
 	uinet_thread0.td = td;
 
 	uhi_thread_set_thread_specific_data(&uinet_thread0);

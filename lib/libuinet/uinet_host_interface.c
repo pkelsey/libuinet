@@ -91,7 +91,7 @@ static struct itimerval prof_itimer;
 #endif /* UINET_PROFILE */
 
 static pthread_key_t thread_specific_data_key;
-
+static unsigned int uhi_num_cpus;
 
 void
 uhi_init(void)
@@ -117,6 +117,13 @@ uhi_init(void)
 	getitimer(ITIMER_PROF, &prof_itimer);
 #endif /* UINET_PROFILE */
 
+}
+
+
+void
+uhi_set_num_cpus(unsigned int n)
+{
+	uhi_num_cpus = n;
 }
 
 
@@ -325,7 +332,7 @@ void uhi_thread_bind(unsigned int cpu)
 }
 
 
-int uhi_thread_bound_cpu(unsigned int ncpus)
+int uhi_thread_bound_cpu()
 {
 #if defined(__APPLE__)
 	mach_port_t mach_thread = pthread_mach_thread_np(pthread_self());
@@ -345,7 +352,7 @@ int uhi_thread_bound_cpu(unsigned int ncpus)
 	 * of course, but we can detect if it's out of bounds and at least
 	 * treat that case as an unknown binding.
 	 */
-	if (bound_cpu >= ncpus)
+	if (bound_cpu >= uhi_num_cpus)
 		bound_cpu = -1;
 
 	return (bound_cpu);
@@ -361,7 +368,7 @@ int uhi_thread_bound_cpu(unsigned int ncpus)
 	 * all other cpuset contents, we treat the binding as unknown.
 	 */
 	bound_cpu = -1;
-	for (i = 0; i < ncpus; i++) {
+	for (i = 0; i < uhi_num_cpus; i++) {
 		if (CPU_ISSET(i, &cpuset)) {
 			if (-1 == bound_cpu) {
 				bound_cpu = i;
@@ -383,6 +390,7 @@ pthread_start_routine(void *arg)
 {
 	struct uhi_thread_start_args *tsa = arg;
 	int error;
+	int cpuid;
 
 #if defined(UINET_PROFILE)
 	setitimer(ITIMER_PROF, &prof_itimer, NULL);
@@ -401,6 +409,11 @@ pthread_start_routine(void *arg)
 		 */
 		assert(sizeof(uhi_thread_t) >= sizeof(pthread_t));
 		*tsa->host_thread_id = (uhi_thread_t)pthread_self();
+	}
+
+	if (tsa->oncpu) {
+		cpuid = uhi_thread_bound_cpu();
+		*(tsa->oncpu) = (cpuid == -1) ? 0 : cpuid;
 	}
 
 #if defined(__FreeBSD__)

@@ -42,5 +42,6 @@ sched_bind(struct thread *td, int cpu)
 	
 	if (cpu >= 0) {
 		uhi_thread_bind(cpu);
+		td->td_oncpu = cpu;
 	}
 }
