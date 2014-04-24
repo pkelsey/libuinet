@@ -623,7 +623,7 @@ if_stats_timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 	struct interface_config *cfg = w->data;
 
 	dump_ifstat(cfg->alias);
-	printf("num_sockets=%llu  max_accept_batch=%llu\n", (unsigned long long)cfg->num_sockets, (unsigned long long)cfg->max_accept_batch);
+	printf("num_sockets=%llu max_accept_batch=%llu\n", (unsigned long long)cfg->num_sockets, (unsigned long long)cfg->max_accept_batch);
 	if (cfg->do_tcpstats) {
 		dump_tcpstat();
 	}
@@ -739,6 +739,7 @@ int main (int argc, char **argv)
 			} else {
 				interfaces[num_interfaces - 1].promisc = 1;
 			}
+			break;
 		case 'p':
 			if (0 == interface_server_count) {
 				printf("No listen address specified\n");
