@@ -302,12 +302,14 @@ if_pcap_receive_handler(void *ctx, const uint8_t *buf, unsigned int size)
 	m->m_len = m->m_pkthdr.len = size;
 	m->m_pkthdr.rcvif = sc->ifp;
 
+#if 0
 #pragma GCC diagnostic ignored "-Wformat"
 #pragma GCC diagnostic ignored "-Wformat-extra-args"
 	if (sc->isfile)
 		printf("injecting packet from file: %48D\n", mtod(m, unsigned char *), " ");
 #pragma GCC diagnostic error "-Wformat"
 #pragma GCC diagnostic error "-Wformat-extra-args"
+#endif
 
 	ifp->if_ipackets++;
 	ifp->if_icopies++;

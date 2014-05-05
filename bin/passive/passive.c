@@ -24,16 +24,20 @@
  */
 
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <zlib.h>
 
 #include <netinet/in.h>
 
 #include "uinet_api.h"
+#include "http_parser.h"
 
 #define EV_STANDALONE 1
 #define EV_UINET_ENABLE 1
@@ -42,11 +46,50 @@
 struct passive_context;
 struct interface_config;
 
+
+struct content_type {
+	const char *type;
+	const char *file_ext;
+};
+
+struct value_buffer {
+#define MAX_VALUE_LENGTH 127
+	char data[MAX_VALUE_LENGTH + 1];
+	int index;
+};
+
 struct connection_context {
 	char label[64];
 	ev_uinet watcher;
 	struct passive_context *server;
 	uint64_t bytes_read;
+	int verbose;
+	struct connection_context *peer;
+
+	http_parser *parser;
+	http_parser_settings *parser_settings;
+	uint8_t *buffer;
+	size_t buffer_size;
+	size_t buffer_count;
+	size_t buffer_index;
+	int ishead;
+
+	int parsing_field;
+	int skip_field;
+	struct value_buffer *value;
+	int skip_value;
+#define MAX_FIELD_LENGTH 32
+	char field[MAX_FIELD_LENGTH + 1];
+	int field_index;
+	struct value_buffer content_type;
+	struct value_buffer content_encoding;
+	int extract_body;
+	int fd;
+	int file_counter;
+	char filename_prefix[64];
+	int unknown_encoding;
+	int inflate;
+	z_stream zstrm;
 };
 
 
@@ -56,6 +99,9 @@ struct passive_context {
 	ev_uinet listen_watcher;
 	int verbose;
 	struct interface_config *interface;
+	int extract;
+#define MAX_CONTENT_TYPES 16
+	struct content_type *content_types[MAX_CONTENT_TYPES + 1];
 };
 
 struct interface_config {
@@ -72,6 +118,7 @@ struct interface_config {
 	int do_tcpstats;
 	uint64_t num_sockets;
 	uint64_t max_accept_batch;
+	int stats;
 };
 
 struct server_config {
@@ -81,10 +128,29 @@ struct server_config {
 	int verbose;
 	struct passive_context *passive;
 	int addrany;
+	int extract;
+	struct content_type *content_types[MAX_CONTENT_TYPES + 1];
+	int num_content_types;
 };
 
 
 static __inline int imin(int a, int b) { return (a < b ? a : b); }
+
+
+static struct content_type *known_content_types[] = {
+	&(struct content_type){ "application/gzip", ".gz" },
+	&(struct content_type){ "application/json", ".json" },
+	&(struct content_type){ "application/octet-stream", ".bin" },
+	&(struct content_type){ "application/pdf", ".pdf" },
+	&(struct content_type){ "application/zip", ".zip" },
+	&(struct content_type){ "image/gif", ".gif" },
+	&(struct content_type){ "image/jpeg", ".jpg" },
+	&(struct content_type){ "image/png", ".png" },
+	&(struct content_type){ "text/html", ".html" },
+	&(struct content_type){ "text/plain", ".txt" },
+	&(struct content_type){ "text/xml", ".xml" },
+	NULL
+};
 
 
 static void
@@ -114,6 +180,23 @@ print_tcp_state(struct uinet_socket *so, const char *label)
 
 
 static void
+destroy_conn(struct connection_context *conn)
+{
+	ev_uinet *w  = &conn->watcher;
+
+	ev_uinet_stop(conn->server->loop, w);
+	ev_uinet_detach(w->ctx);
+	uinet_soclose(w->so);
+	if (conn->buffer)
+		free(conn->buffer);
+	if (conn->parser)
+		free(conn->parser);
+	conn->server->interface->num_sockets--;
+	free(conn);
+}
+
+
+static void
 passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 {
 	struct connection_context *conn = (struct connection_context *)w->data;
@@ -135,7 +218,7 @@ passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	if (max_read <= 0) {
 		/* the watcher should never be invoked if there is no error and there no bytes to be read */
 		assert(max_read != 0);
-		if (conn->server->verbose)
+		if (conn->verbose)
 			printf("%s: can't read, closing\n", conn->label);
 		goto err;
 	} else {
@@ -159,19 +242,19 @@ passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 
 		conn->bytes_read += bytes_read;
 
-		if (conn->server->verbose > 2)
+		if (conn->verbose > 2)
 			print_tcp_state(w->so, conn->label);
 
-		if (conn->server->verbose > 1) {
+		if (conn->verbose > 1) {
 
 			printf("========================================================================================\n");
 		}
 
-		if (conn->server->verbose)
+		if (conn->verbose)
 			printf("To %s (%u bytes, %llu total, %s)\n", conn->label, bytes_read,
 			       (unsigned long long)conn->bytes_read, flags & UINET_MSG_HOLE_BREAK ? "HOLE" : "normal");
 		
-		if (conn->server->verbose > 1) {
+		if (conn->verbose > 1) {
 			buffer[bytes_read] = '\0';
 			printf("----------------------------------------------------------------------------------------\n");
 			skipped = 0;
@@ -211,11 +294,506 @@ passive_receive_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	return;
 
 err:
-	ev_uinet_stop(loop, w);
-	ev_uinet_detach(w->ctx);
-	uinet_soclose(w->so);
-	conn->server->interface->num_sockets--;
-	free(conn);
+	destroy_conn(conn);
+}
+
+
+static void
+passive_extract_parse_buffer(struct connection_context *conn)
+{
+	size_t bytes_to_end_of_buffer;
+	size_t nparsed;
+
+	while (conn->buffer_count && (HTTP_PARSER_ERRNO(conn->parser) == HPE_OK)) {
+		bytes_to_end_of_buffer = conn->buffer_size - conn->buffer_index;
+		nparsed = http_parser_execute(conn->parser, conn->parser_settings,
+					      (char *)&conn->buffer[conn->buffer_index],
+					      imin(conn->buffer_count, bytes_to_end_of_buffer));
+		conn->buffer_count -= nparsed;
+		conn->buffer_index += nparsed;
+		if (conn->buffer_index == conn->buffer_size)
+			conn->buffer_index = 0;
+	}
+}
+
+
+/*
+ * The passive http extraction code works by alternately parsing the
+ * passively reconstructed request and response streams.  The same callback
+ * (below) is used to drive the parsing of each stream.  Parsing begins with
+ * the request stream, and once a complete request has been parsed, the
+ * parser and read watcher for the request stream are paused and the parser
+ * and read watcher for the response stream are activated.  Once an entire
+ * response is parsed, the parser and read watcher for the response stream
+ * are paused, and the parser and read watcher for the request stream are
+ * activated.  Along the way, response bodies that match the supplied list
+ * of content types are extracted to files.
+ *
+ * This is example code whose purpose is to demonstrate upper layer protocol
+ * processing using libuinet passive sockets functionality.  Little to no
+ * attempt is made to deal with a number of ugly realities involved in
+ * robustly parsing http streams in the wild.
+ */
+static void
+passive_extract_cb(struct ev_loop *loop, ev_uinet *w, int revents)
+{
+	struct connection_context *conn = (struct connection_context *)w->data;
+	struct uinet_iovec iov;
+	struct uinet_uio uio;
+	int max_read;
+	int read_size;
+	int bytes_read;
+	int error;
+	int flags;
+	size_t nparsed;
+
+	max_read = uinet_soreadable(w->so, 0);
+	if (max_read <= 0) {
+		/* the watcher should never be invoked if there is no error and there no bytes to be read */
+		assert(max_read != 0);
+
+		/*
+		 * There are no more complete requests/responses to be had, shut everything down.
+		 */
+		if (conn->verbose)
+			printf("%s: can't read, closing\n", conn->label);
+		goto err;
+	} else {
+		read_size = imin(max_read, conn->buffer_size - conn->buffer_index);
+
+		uio.uio_iov = &iov;
+		iov.iov_base = &conn->buffer[conn->buffer_index];
+		iov.iov_len = read_size;
+		uio.uio_iovcnt = 1;
+		uio.uio_offset = 0;
+		uio.uio_resid = read_size;
+		flags = UINET_MSG_HOLE_BREAK;
+
+		error = uinet_soreceive(w->so, NULL, &uio, &flags);
+		if (0 != error) {
+			printf("%s: read error (%d), closing\n", conn->label, error);
+			goto err;
+		}
+
+		if (flags & UINET_MSG_HOLE_BREAK) {
+			printf("%s: hole in data, closing connections\n", conn->label);
+			goto err;
+		}
+
+		bytes_read = read_size - uio.uio_resid;
+		conn->buffer_count += bytes_read;
+		conn->bytes_read += bytes_read;
+		
+		do {
+			passive_extract_parse_buffer(conn);
+
+			if (HTTP_PARSER_ERRNO(conn->parser) != HPE_OK) {
+				if (HTTP_PARSER_ERRNO(conn->parser) == HPE_PAUSED) {
+					if (conn->verbose > 1)
+						printf("%s: completed parsing request or response\n", conn->label);
+					http_parser_pause(conn->peer->parser, 0);
+					passive_extract_parse_buffer(conn->peer);
+					if (HTTP_PARSER_ERRNO(conn->peer->parser) == HPE_OK) {
+						if (conn->verbose > 1)
+							printf("%s: peer needs more data\n", conn->label);
+						/* Peer parser needs more data */
+						ev_uinet_stop(conn->server->loop, &conn->watcher);
+						ev_uinet_start(conn->server->loop, &conn->peer->watcher);
+						break;
+					} else if (HTTP_PARSER_ERRNO(conn->peer->parser) != HPE_PAUSED) {
+						printf("Peer parse failure %s, closing connections\n",
+						       http_errno_name(HTTP_PARSER_ERRNO(conn->peer->parser)));
+						goto err;
+					} else {
+						if (conn->verbose > 1)
+							printf("%s: peer completed parsing request or response\n", conn->label);
+						/*
+						 * The other parser has paused, so it's time for us to continue
+						 * parsing/receiving.
+						 */
+						http_parser_pause(conn->parser, 0);
+					}
+				} else {
+					printf("Parse failure %s, closing connections\n",
+					       http_errno_name(HTTP_PARSER_ERRNO(conn->parser)));
+					goto err;
+				}
+			}
+		} while (conn->buffer_count);
+	}
+
+	return;
+err:
+	/*
+	 * Deliver EOS to each parser.  If a parser is paused or otherwise
+	 * in an error state, no work will be done.  The main reason for
+	 * doing this is to correctly handle the case where response parsing
+	 * requires an EOS to complete.  Under such circumstances, one of
+	 * the calls below will complete the work.
+	 */
+	http_parser_execute(conn->parser, conn->parser_settings, NULL, 0);
+	http_parser_execute(conn->peer->parser, conn->peer->parser_settings, NULL, 0);
+
+	destroy_conn(conn->peer);
+	destroy_conn(conn);
+}
+
+
+static int
+on_http_req_message_begin(http_parser *parser)
+{
+	struct connection_context *conn = parser->data;
+
+	conn->ishead = 0;
+
+	return (0);
+}
+
+
+static int
+on_http_req_message_complete(http_parser *parser)
+{
+	struct connection_context *conn = parser->data;
+
+	if (conn->verbose)
+		printf("%s: request type: %s\n", conn->label, http_method_str(parser->method));
+
+	conn->ishead = (HTTP_HEAD == parser->method);
+
+	/* 
+	 * Exit the request parser so the response can be processed.  This
+	 * protects the request state needed by the response parser from
+	 * being overwritten early.
+	 */
+	http_parser_pause(parser, 1);
+
+	return (0);
+}
+
+
+static int
+on_http_resp_message_begin(http_parser *parser)
+{
+	struct connection_context *conn = parser->data;
+
+	conn->extract_body = 0;
+	conn->content_type.data[0] = '\0';
+	conn->content_type.index = 0;
+	conn->content_encoding.data[0] = '\0';
+	conn->content_encoding.index = 0;
+
+	return (0);
+}
+
+
+static int
+on_http_resp_header_field(http_parser *parser, const char *at, size_t length)
+{
+	struct connection_context *conn = parser->data;
+
+	if (!conn->parsing_field) {
+		conn->parsing_field = 1;
+		conn->skip_field = 0;
+		conn->field_index = 0;
+		if (conn->value) {
+			conn->value->data[conn->value->index] = '\0';
+		}
+	}
+	
+	if (!conn->skip_field) {
+		if (length <= (MAX_FIELD_LENGTH - conn->field_index)) {
+			memcpy(&conn->field[conn->field_index], at, length);
+			conn->field_index += length;
+		} else {
+			conn->skip_field = 1;
+		}
+	}
+	return (0);
+}
+
+
+static int
+on_http_resp_header_value(http_parser *parser, const char *at, size_t length)
+{
+	struct connection_context *conn = parser->data;
+
+	if (conn->parsing_field) {
+		conn->parsing_field = 0;
+		conn->skip_value = 1;
+		if (!conn->skip_field) {
+			conn->field[conn->field_index] = '\0';
+			if (strcasecmp(conn->field, "content-type") == 0) {
+				conn->value = &conn->content_type;
+				conn->value->index = 0;
+				conn->skip_value = 0;
+			} else if (strcasecmp(conn->field, "content-encoding") == 0) {
+				conn->value = &conn->content_encoding;
+				conn->value->index = 0;
+				conn->skip_value = 0;
+			}  
+		}
+	}
+
+	if (!conn->skip_value) {
+		if (length <= (MAX_VALUE_LENGTH - conn->value->index)) {
+			memcpy(&conn->value->data[conn->value->index], at, length);
+			conn->value->index += length;
+		} else {
+			conn->skip_value = 1;
+		}
+	}
+	return (0);
+}
+
+static struct content_type *
+find_content_type(const char *str, struct content_type *list[])
+{
+	while (*list) {
+		if (strncasecmp(str, (*list)->type, strlen((*list)->type)) == 0)
+			return *list;
+		list++;
+	}
+	return (NULL);
+}
+
+
+static int
+on_http_resp_headers_complete(http_parser *parser)
+{
+	struct connection_context *conn = parser->data;
+	struct content_type *type;
+	char filename[80];
+	int offset;
+
+	/* Ensure the last value stored is nul-terminated */
+	if (conn->value)
+		conn->value->data[conn->value->index] = '\0';
+
+	if (conn->verbose) {
+		    printf("%s: content type: %s\n", conn->label,
+			   conn->content_type.index ? conn->content_type.data : "<unknown>");
+		    printf("%s: content encoding: %s\n", conn->label,
+			   conn->content_encoding.index ? conn->content_encoding.data : "identity");
+	}
+
+	type = find_content_type(conn->content_type.data, conn->server->content_types);
+	if (type)
+		conn->extract_body = 1;
+
+	if (conn->extract_body) {
+		conn->unknown_encoding = 0;
+		conn->inflate = 0;
+		if ((strcasecmp(conn->content_encoding.data, "x-gzip") == 0) ||
+		    (strcasecmp(conn->content_encoding.data, "gzip") == 0) ||
+		    (strcasecmp(conn->content_encoding.data, "deflate") == 0)) {
+			conn->inflate = 1;
+		} else if (conn->content_encoding.index > 0) {
+			conn->unknown_encoding = 1;
+		}
+
+		if (conn->inflate) {
+			conn->zstrm.zalloc = Z_NULL;
+			conn->zstrm.zfree = Z_NULL;
+			conn->zstrm.opaque = Z_NULL;
+			conn->zstrm.avail_in = 0;
+			conn->zstrm.next_in = Z_NULL;
+			if (Z_OK != inflateInit2(&conn->zstrm, 32 + MAX_WBITS)) {
+				conn->inflate = 0;
+				conn->unknown_encoding = 1;
+			}
+		}
+
+		snprintf(filename, sizeof(filename), "%s-%06d%s%s%s", conn->filename_prefix,
+			 conn->file_counter, type->file_ext, conn->unknown_encoding ? "." : "",
+			 conn->unknown_encoding ? conn->content_encoding.data : "");
+		conn->file_counter++;
+		conn->fd = open(filename, O_CREAT|O_TRUNC|O_WRONLY, S_IRUSR|S_IWUSR);
+		if (-1 == conn->fd) {
+			printf("%s: Failed to open %s for writing\n", conn->label, filename);
+			conn->extract_body = 0;
+			inflateEnd(&conn->zstrm);
+		}
+	}
+
+	if (conn->ishead ||
+	    parser->status_code / 100 == 1 || 
+	    parser->status_code == 204 ||
+	    parser->status_code == 304) {
+		/* tell the parser there is no response body */
+		return (1);
+	} else {
+		return (0);
+	}
+}
+
+
+static int
+on_http_resp_body(http_parser *parser, const char *at, size_t length)
+{
+	struct connection_context *conn = parser->data;
+	uint8_t inflate_buffer[1024];
+	int error;
+
+	if (conn->verbose > 2)
+		printf("%s: received %zu body bytes\n", conn->label, length);
+
+	if (conn->extract_body) {
+		if (conn->inflate) {
+			conn->zstrm.avail_in = length;
+			conn->zstrm.next_in = (unsigned char *)at;
+
+			do {
+				conn->zstrm.avail_out = sizeof(inflate_buffer);
+				conn->zstrm.next_out = inflate_buffer;
+
+				error = inflate(&conn->zstrm, Z_NO_FLUSH);
+				if (error != Z_OK && error != Z_STREAM_END) {
+					printf("%s: error while inflating %d, skipping rest of body\n", conn->label, error);
+					inflateEnd(&conn->zstrm);
+					conn->inflate = 0;
+					conn->extract_body = 0;
+					break;
+				} else {
+					write(conn->fd, inflate_buffer, sizeof(inflate_buffer) - conn->zstrm.avail_out);
+				}
+			} while (0 == conn->zstrm.avail_out);
+		} else {
+			write(conn->fd, at, length);
+		}
+	}
+
+	return (0);
+}
+
+
+static int
+on_http_resp_message_complete(http_parser *parser)
+{
+	struct connection_context *conn = parser->data;
+
+	if (conn->verbose > 1)
+		printf("%s: response complete\n", conn->label);
+
+	if (conn->extract_body) {
+		if (conn->inflate) {
+			inflateEnd(&conn->zstrm);	
+		}
+		close(conn->fd);
+	}
+
+	/* 
+	 * Exit the response parser so the next request can be processed.
+	 */
+	http_parser_pause(parser, 1);
+
+	return (0);
+}
+
+
+static int
+parser_init(struct connection_context *conn, enum http_parser_type type)
+{
+	http_parser *parser;
+	http_parser_settings *parser_settings;
+
+	parser = malloc(sizeof(*parser));
+	if (NULL == parser)
+		return (1);
+
+	http_parser_init(parser, type);
+
+	parser_settings = calloc(1, sizeof(*parser_settings));
+	if (NULL == parser_settings) {
+		free(parser);
+		return (1);
+	}
+
+	if (HTTP_REQUEST == type) {
+		parser_settings->on_message_begin = on_http_req_message_begin;
+		parser_settings->on_message_complete = on_http_req_message_complete;
+	} else {
+		parser_settings->on_message_begin = on_http_resp_message_begin;
+		parser_settings->on_header_field = on_http_resp_header_field;
+		parser_settings->on_header_value = on_http_resp_header_value;
+		parser_settings->on_headers_complete = on_http_resp_headers_complete;
+		parser_settings->on_body = on_http_resp_body;
+		parser_settings->on_message_complete = on_http_resp_message_complete;
+	}
+
+	parser->data = conn;
+	conn->parser = parser;
+	conn->parser_settings = parser_settings;
+
+	return (0);
+}
+
+
+static struct connection_context *
+create_conn(struct passive_context *passive, struct uinet_socket *so, int server)
+{
+	struct connection_context *conn = NULL;
+	struct ev_uinet_ctx *soctx = NULL;
+	struct uinet_sockaddr_in *sin1, *sin2;
+	char buf1[32], buf2[32];
+	time_t now_timet;
+	struct tm now;
+#define EXTRACT_BUFFER_SIZE 1024
+
+	conn = calloc(1, sizeof(*conn));
+	if (NULL == conn) {
+		printf("Failed to alloc connection context for new connection\n");
+		goto fail;
+	}
+
+	soctx = ev_uinet_attach(so);
+	if (NULL == soctx) {
+		printf("Failed to alloc libev context for new connection socket\n");
+		goto fail;
+	}
+
+	uinet_sogetsockaddr(so, (struct uinet_sockaddr **)&sin1);
+	uinet_sogetpeeraddr(so, (struct uinet_sockaddr **)&sin2);
+	snprintf(conn->label, sizeof(conn->label), "%s (%s:%u <- %s:%u)",
+		 server ? "SERVER" : "CLIENT",
+		 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
+		 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
+	if (passive->extract && !server) {
+		time(&now_timet);
+		localtime_r(&now_timet, &now);
+		snprintf(conn->filename_prefix, sizeof(conn->filename_prefix),
+			 "extract-%04d%02d%02d-%02d%02d.%02d-%s:%u-%s:%u",
+			 now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, now.tm_hour, now.tm_min, now.tm_sec,
+			 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
+			 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
+	}
+	uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
+	uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
+
+	conn->verbose = passive->verbose;
+	conn->server = passive;
+	if (passive->extract) {
+		if (0 != parser_init(conn, server ? HTTP_REQUEST : HTTP_RESPONSE))
+			goto fail;
+		conn->buffer_size = EXTRACT_BUFFER_SIZE;
+		conn->buffer = malloc(conn->buffer_size);
+		if (NULL == conn->buffer)
+			goto fail;
+		ev_init(&conn->watcher, passive_extract_cb);
+	} else {
+		ev_init(&conn->watcher, passive_receive_cb);
+	}
+	ev_uinet_set(&conn->watcher, soctx, EV_READ);
+	conn->watcher.data = conn;
+
+	return (conn);
+
+fail:
+	if (conn->buffer) free(conn->buffer);
+	if (conn->parser) free(conn->parser);
+	if (conn) free(conn);
+	if (soctx) ev_uinet_detach(soctx);
+
+	return (NULL);
 }
 
 
@@ -227,10 +805,6 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	struct uinet_socket *newpeerso = NULL;
 	struct connection_context *conn = NULL;
 	struct connection_context *peerconn = NULL;
-	struct ev_uinet_ctx *soctx = NULL;
-	struct ev_uinet_ctx *peersoctx = NULL;
-	struct uinet_sockaddr_in *sin1, *sin2;
-	char buf1[32], buf2[32];
 	int error;
 	int batch_limit = 32;
 	int processed = 0;
@@ -243,80 +817,35 @@ accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 			newpeerso = NULL;
 			conn = NULL;
 			peerconn = NULL;
-			soctx = NULL;
-			peersoctx = NULL;
 
 			if (passive->verbose)
 				printf("accept succeeded\n");
-		
-			soctx = ev_uinet_attach(newso);
-			if (NULL == soctx) {
-				printf("Failed to alloc libev context for new connection socket\n");
+
+			conn = create_conn(passive, newso, 1);
+			if (NULL == conn)
 				goto fail;
-			}
 
 			newpeerso = uinet_sogetpassivepeer(newso);
-			peersoctx = ev_uinet_attach(newpeerso);
-			if (NULL == peersoctx) {
-				printf("Failed to alloc libev context for new passive peer connection socket\n");
+			peerconn = create_conn(passive, newpeerso, 0);
+			if (NULL == peerconn)
 				goto fail;
-			}
 
-			conn = calloc(1, sizeof(*conn));
-			if (NULL == conn) {
-				printf("Failed to alloc connection context for new connection\n");
-				goto fail;
-			}
-
-			peerconn = calloc(1, sizeof(*peerconn));
-			if (NULL == conn) {
-				printf("Failed to alloc connection context for new passive peer connection\n");
-				goto fail;
-			}
-
-
-			uinet_sogetsockaddr(newso, (struct uinet_sockaddr **)&sin1);
-			uinet_sogetpeeraddr(newso, (struct uinet_sockaddr **)&sin2);
-			snprintf(conn->label, sizeof(conn->label), "SERVER (%s:%u <- %s:%u)",
-				 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
-				 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
-			uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
-			uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
-
-			conn->server = passive;
-			ev_init(&conn->watcher, passive_receive_cb);
-			ev_uinet_set(&conn->watcher, soctx, EV_READ);
-			conn->watcher.data = conn;
+			conn->peer = peerconn;
+			peerconn->peer = conn;
+			
 			ev_uinet_start(loop, &conn->watcher);
 
-			uinet_sogetsockaddr(newpeerso, (struct uinet_sockaddr **)&sin1);
-			uinet_sogetpeeraddr(newpeerso, (struct uinet_sockaddr **)&sin2);
-			snprintf(peerconn->label, sizeof(peerconn->label), "CLIENT (%s:%u <- %s:%u)",
-				 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
-				 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
-			uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
-			uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
-
-			peerconn->server = passive;
-			ev_init(&peerconn->watcher, passive_receive_cb);
-			ev_uinet_set(&peerconn->watcher, peersoctx, EV_READ);
-			peerconn->watcher.data = peerconn;
-			ev_uinet_start(loop, &peerconn->watcher);
+			if (!passive->extract)
+				ev_uinet_start(loop, &peerconn->watcher);
 
 			passive->interface->num_sockets += 2;
 
 			continue;
 		fail:
-			if (conn) free(conn);
-			if (peerconn) free(peerconn);
-			if (soctx) ev_uinet_detach(soctx);
-			if (peersoctx) ev_uinet_detach(peersoctx);
+			if (conn) destroy_conn(conn);
 			if (newso) uinet_soclose(newso);
 			if (newpeerso) uinet_soclose(newpeerso);
-
 		}
-
-		newso = NULL;
 	}
 
 	if (processed > passive->interface->max_accept_batch)
@@ -368,12 +897,11 @@ create_passive(struct ev_loop *loop, struct server_config *cfg)
 	 * The following settings will be inherited by all sockets created
 	 * by this listen socket.
 	 */
-	uinet_sosetnonblocking(listener, 1);
 
-	optlen = sizeof(optval);
-	optval = 1;
-	if ((error = uinet_sosetsockopt(listener, UINET_IPPROTO_TCP, UINET_TCP_NODELAY, &optval, optlen)))
-		goto fail;
+	/*
+	 * Need to be non-blocking to work with the event system.
+	 */
+	uinet_sosetnonblocking(listener, 1);
 
 	/* Wait 5 seconds for connections to complete */
 	optlen = sizeof(optval);
@@ -416,6 +944,8 @@ create_passive(struct ev_loop *loop, struct server_config *cfg)
 	passive->listener = listener;
 	passive->verbose = cfg->verbose;
 	passive->interface = cfg->interface;
+	passive->extract = cfg->extract;
+	memcpy(passive->content_types, cfg->content_types, sizeof(passive->content_types));
 
 	memset(&sin, 0, sizeof(struct uinet_sockaddr_in));
 	sin.sin_len = sizeof(struct uinet_sockaddr_in);
@@ -641,10 +1171,12 @@ void *interface_thread_start(void *arg)
 
 	uinet_initialize_thread();
 
-	ev_init(&if_stats_timer, if_stats_timer_cb);
-	ev_timer_set(&if_stats_timer, 1.0, 2.0);
-	if_stats_timer.data = cfg;
-	ev_timer_start(cfg->loop, &if_stats_timer);
+	if (cfg->stats) {
+		ev_init(&if_stats_timer, if_stats_timer_cb);
+		ev_timer_set(&if_stats_timer, 1.0, 2.0);
+		if_stats_timer.data = cfg;
+		ev_timer_start(cfg->loop, &if_stats_timer);
+	}
 
 	ev_run(cfg->loop, 0);
 
@@ -659,11 +1191,14 @@ usage(const char *progname)
 {
 
 	printf("Usage: %s [options]\n", progname);
+	printf("    -c content_type      content type to extract from connections on current server\n");
+	printf("    -e                   extract certain http responses\n");
 	printf("    -h                   show usage\n");
 	printf("    -i ifname            specify network interface\n");
 	printf("    -l inaddr            listen address\n");
 	printf("    -P                   put interface into Promiscuous INET mode\n");
 	printf("    -p port              listen port [0, 65535]\n");
+	printf("    -s                   periodically print stats for interface\n");
 	printf("    -t iftype            interface type [netmap, pcap]\n");
 	printf("    -v                   be verbose\n");
 }
@@ -684,32 +1219,54 @@ int main (int argc, char **argv)
 	int interface_server_count = 0;
 	int verbose = 0;
 	int iftype = UINET_IFTYPE_NETMAP;
+	int stats = 0;
+	int tcp_stats_assigned = 0;
 	unsigned int i;
 	int error;
 	struct uinet_in_addr tmpinaddr;
 	int ifnetmap_count = 0;
 	int ifpcap_count = 0;
+	struct content_type *contype;
 
 	memset(interfaces, 0, sizeof(interfaces));
 	memset(servers, 0, sizeof(servers));
 
 	for (i = 0; i < MAX_INTERFACES; i++) {
-		interfaces[i].loop = NULL;
-		interfaces[i].thread = NULL;
-		interfaces[i].promisc = 0;
 		interfaces[i].type = UINET_IFTYPE_NETMAP;
-		interfaces[i].do_tcpstats = (i == 0);
 	}
 
 	for (i = 0; i < MAX_SERVERS; i++) {
-		servers[i].listen_addr = NULL;
-		servers[i].addrany = 0;
 		servers[i].listen_port = -1;
-		servers[i].passive = NULL;
 	}
 
-	while ((ch = getopt(argc, argv, "hi:l:Pp:t:v")) != -1) {
+	while ((ch = getopt(argc, argv, "c:ehi:l:Pp:st:v")) != -1) {
 		switch (ch) {
+		case 'c':
+			if (0 == interface_server_count) {
+				printf("No listen address specified\n");
+				return (1);
+			} else if (MAX_CONTENT_TYPES == servers[num_servers - 1].num_content_types) {
+				printf("Maximum number of content types per server is %u\n", MAX_CONTENT_TYPES);
+				return (1);
+			} else {
+				contype = find_content_type(optarg, known_content_types);
+				if (NULL == contype) {
+					printf("Unknown content type %s\n", optarg);
+					return (1);
+				}
+				servers[num_servers - 1].extract = 1;
+				servers[num_servers - 1].content_types[servers[num_servers - 1].num_content_types] = contype;
+				servers[num_servers - 1].num_content_types++;
+			}
+			break;
+		case 'e':
+			if (0 == num_interfaces) {
+				printf("No interface specified\n");
+				return (1);
+			} else {
+				servers[num_servers - 1].extract = 1;
+			}
+			break;
 		case 'h':
 			usage(progname);
 			return (0);
@@ -728,8 +1285,8 @@ int main (int argc, char **argv)
 			if (0 == num_interfaces) {
 				printf("No interface specified\n");
 				return (1);
-			} else if (MAX_INTERFACES == num_interfaces) {
-				printf("Maximum number of interfaces is %u\n", MAX_INTERFACES);
+			} else if (MAX_SERVERS == num_servers) {
+				printf("Maximum number of servers is %u\n", MAX_SERVERS);
 				return (1);
 			} else {
 				servers[num_servers].listen_addr = optarg;
@@ -752,6 +1309,14 @@ int main (int argc, char **argv)
 				return (1);
 			} else {
 				servers[num_servers - 1].listen_port = strtoul(optarg, NULL, 10);
+			}
+			break;
+		case 's':
+			if (0 == num_interfaces) {
+				printf("No interface specified\n");
+				return (1);
+			} else {
+				interfaces[num_interfaces - 1].stats = 1;
 			}
 			break;
 		case 't':
@@ -838,6 +1403,11 @@ int main (int argc, char **argv)
 			break;
 		}
 
+		if (interfaces[i].stats && !tcp_stats_assigned) {
+			interfaces[i].do_tcpstats = 1;
+			tcp_stats_assigned = 1;
+		}
+
 		snprintf(interfaces[i].alias, UINET_IF_NAMESIZE, "%s%d", interfaces[i].alias_prefix, interfaces[i].instance);
 
 		if (verbose) {
@@ -846,7 +1416,7 @@ int main (int argc, char **argv)
 			       interfaces[i].promisc ? interfaces[i].cdom : 0);
 		}
 
-		error = uinet_ifcreate(iftype, interfaces[i].ifname, interfaces[i].alias,
+		error = uinet_ifcreate(interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
 				       interfaces[i].promisc ? interfaces[i].cdom : 0,
 				       0, NULL);
 		if (0 != error) {
