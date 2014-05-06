@@ -564,6 +564,7 @@ on_http_resp_headers_complete(http_parser *parser)
 	struct content_type *type;
 	char filename[80];
 	int offset;
+	int thereisnobody;
 
 	/* Ensure the last value stored is nul-terminated */
 	if (conn->value)
@@ -576,9 +577,17 @@ on_http_resp_headers_complete(http_parser *parser)
 			   conn->content_encoding.index ? conn->content_encoding.data : "identity");
 	}
 
-	type = find_content_type(conn->content_type.data, conn->server->content_types);
-	if (type)
-		conn->extract_body = 1;
+	if (conn->peer->ishead ||
+	    parser->status_code / 100 == 1 || 
+	    parser->status_code == 204 ||
+	    parser->status_code == 304)  {
+		thereisnobody = 1;
+	} else {
+		thereisnobody = 0;
+		type = find_content_type(conn->content_type.data, conn->server->content_types);
+		if (type)
+			conn->extract_body = 1;
+	}
 
 	if (conn->extract_body) {
 		conn->unknown_encoding = 0;
@@ -615,10 +624,7 @@ on_http_resp_headers_complete(http_parser *parser)
 		}
 	}
 
-	if (conn->ishead ||
-	    parser->status_code / 100 == 1 || 
-	    parser->status_code == 204 ||
-	    parser->status_code == 304) {
+	if (thereisnobody) {
 		/* tell the parser there is no response body */
 		return (1);
 	} else {
