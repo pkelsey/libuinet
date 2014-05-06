@@ -32,12 +32,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifdef ENABLE_EXTRACT
 #include <zlib.h>
+#endif
 
 #include <netinet/in.h>
 
 #include "uinet_api.h"
+
+#ifdef ENABLE_EXTRACT
 #include "http_parser.h"
+#endif
 
 #define EV_STANDALONE 1
 #define EV_UINET_ENABLE 1
@@ -66,6 +71,7 @@ struct connection_context {
 	int verbose;
 	struct connection_context *peer;
 
+#ifdef ENABLE_EXTRACT
 	http_parser *parser;
 	http_parser_settings *parser_settings;
 	uint8_t *buffer;
@@ -90,6 +96,7 @@ struct connection_context {
 	int unknown_encoding;
 	int inflate;
 	z_stream zstrm;
+#endif
 };
 
 
@@ -187,10 +194,12 @@ destroy_conn(struct connection_context *conn)
 	ev_uinet_stop(conn->server->loop, w);
 	ev_uinet_detach(w->ctx);
 	uinet_soclose(w->so);
+#ifdef ENABLE_EXTRACT
 	if (conn->buffer)
 		free(conn->buffer);
 	if (conn->parser)
 		free(conn->parser);
+#endif
 	conn->server->interface->num_sockets--;
 	free(conn);
 }
@@ -297,7 +306,7 @@ err:
 	destroy_conn(conn);
 }
 
-
+#ifdef ENABLE_EXTRACT
 static void
 passive_extract_parse_buffer(struct connection_context *conn)
 {
@@ -732,7 +741,7 @@ parser_init(struct connection_context *conn, enum http_parser_type type)
 
 	return (0);
 }
-
+#endif /* ENABLE_EXTRACT */
 
 static struct connection_context *
 create_conn(struct passive_context *passive, struct uinet_socket *so, int server)
@@ -763,6 +772,7 @@ create_conn(struct passive_context *passive, struct uinet_socket *so, int server
 		 server ? "SERVER" : "CLIENT",
 		 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
 		 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
+#ifdef ENABLE_EXTRACT
 	if (passive->extract && !server) {
 		time(&now_timet);
 		localtime_r(&now_timet, &now);
@@ -772,12 +782,14 @@ create_conn(struct passive_context *passive, struct uinet_socket *so, int server
 			 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
 			 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
 	}
+#endif
 	uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
 	uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
 
 	conn->verbose = passive->verbose;
 	conn->server = passive;
 	if (passive->extract) {
+#ifdef ENABLE_EXTRACT
 		if (0 != parser_init(conn, server ? HTTP_REQUEST : HTTP_RESPONSE))
 			goto fail;
 		conn->buffer_size = EXTRACT_BUFFER_SIZE;
@@ -785,6 +797,9 @@ create_conn(struct passive_context *passive, struct uinet_socket *so, int server
 		if (NULL == conn->buffer)
 			goto fail;
 		ev_init(&conn->watcher, passive_extract_cb);
+#else
+		goto fail;
+#endif
 	} else {
 		ev_init(&conn->watcher, passive_receive_cb);
 	}
@@ -794,8 +809,10 @@ create_conn(struct passive_context *passive, struct uinet_socket *so, int server
 	return (conn);
 
 fail:
+#ifdef ENABLE_EXTRACT
 	if (conn->buffer) free(conn->buffer);
 	if (conn->parser) free(conn->parser);
+#endif
 	if (conn) free(conn);
 	if (soctx) ev_uinet_detach(soctx);
 
@@ -1197,8 +1214,10 @@ usage(const char *progname)
 {
 
 	printf("Usage: %s [options]\n", progname);
+#ifdef ENABLE_EXTRACT
 	printf("    -c content_type      content type to extract from connections on current server\n");
 	printf("    -e                   extract certain http responses\n");
+#endif
 	printf("    -h                   show usage\n");
 	printf("    -i ifname            specify network interface\n");
 	printf("    -l inaddr            listen address\n");
@@ -1248,6 +1267,7 @@ int main (int argc, char **argv)
 	while ((ch = getopt(argc, argv, "c:ehi:l:Pp:st:v")) != -1) {
 		switch (ch) {
 		case 'c':
+#ifdef ENABLE_EXTRACT
 			if (0 == interface_server_count) {
 				printf("No listen address specified\n");
 				return (1);
@@ -1264,14 +1284,23 @@ int main (int argc, char **argv)
 				servers[num_servers - 1].content_types[servers[num_servers - 1].num_content_types] = contype;
 				servers[num_servers - 1].num_content_types++;
 			}
+#else
+			printf("Extract mode not supported.\n");
+			return(1);
+#endif
 			break;
 		case 'e':
+#ifdef ENABLE_EXTRACT
 			if (0 == num_interfaces) {
 				printf("No interface specified\n");
 				return (1);
 			} else {
 				servers[num_servers - 1].extract = 1;
 			}
+#else
+			printf("Extract mode not supported.\n");
+			return(1);
+#endif
 			break;
 		case 'h':
 			usage(progname);
