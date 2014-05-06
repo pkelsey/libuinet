@@ -767,7 +767,7 @@ create_conn(struct passive_context *passive, struct uinet_socket *so, int server
 		time(&now_timet);
 		localtime_r(&now_timet, &now);
 		snprintf(conn->filename_prefix, sizeof(conn->filename_prefix),
-			 "extract-%04d%02d%02d-%02d%02d.%02d-%s:%u-%s:%u",
+			 "extract-%04d%02d%02d-%02d%02d.%02d-%s.%u-%s.%u",
 			 now.tm_year + 1900, now.tm_mon + 1, now.tm_mday, now.tm_hour, now.tm_min, now.tm_sec,
 			 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
 			 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
