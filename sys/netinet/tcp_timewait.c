@@ -35,6 +35,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_timewait.c 238247 2012-07-08 1
 #include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_tcpdebug.h"
+#include "opt_passiveinet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -205,6 +206,9 @@ tcp_twstart(struct tcpcb *tp)
 #ifdef INET6
 	int isipv6 = inp->inp_inc.inc_flags & INC_ISIPV6;
 #endif
+#ifdef PASSIVE_INET
+	int ispassive = inp->inp_flags2 & INP_PASSIVE;
+#endif
 
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);	/* tcp_tw_2msl_reset(). */
 	INP_WLOCK_ASSERT(inp);
@@ -290,11 +294,22 @@ tcp_twstart(struct tcpcb *tp)
 	SOCK_LOCK(so);
 	tw->tw_so_options = so->so_options;
 	SOCK_UNLOCK(so);
+#ifdef PASSIVE_INET
+	if (!ispassive)
+#endif
 	if (acknow)
 		tcp_twrespond(tw, TH_ACK);
 	inp->inp_ppcb = tw;
 	inp->inp_flags |= INP_TIMEWAIT;
 	tcp_tw_2msl_reset(tw, 0);
+#ifdef PASSIVE_INET
+	/* XXX can we avoid entering timewait altogether for passive sockets? */
+	if (ispassive) {
+		tcp_twclose(tw, 0);
+		/* inp is no longer */
+		return;
+	}
+#endif
 
 	/*
 	 * If the inpcb owns the sole reference to the socket, then we can
