@@ -48,7 +48,6 @@
 #include <sys/types.h>
 
 #if defined(__linux__)
-#include <linux/if.h>
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #include <linux/version.h>
@@ -57,11 +56,21 @@
 #if defined(__FreeBSD__)
 #include <net/if.h>
 #endif /*  __FreeBSD__ */
+
+
+#if defined(__linux__)
+#include <net/if.h>
+#ifndef IFNAMSIZ
+#define IFNAMSIZ IF_NAMESIZE
+#endif
+#endif /* __linux__ */
+
 #include <net/netmap.h>
 #include <net/netmap_user.h>
 
 #include "uinet_if_netmap_host.h"
 #include "uinet_host_interface.h"
+
 
 /* XXX The netmap host interface should be converted to NETMAP_API >= 10
  * semantics and internally translate to NETMAP_API < 10.  Currently it is
@@ -317,7 +326,7 @@ if_netmap_ethtool_set_flag(struct if_netmap_host_context *ctx, struct ifreq *ifr
 {
 	struct ethtool_value etv;
 
-	ifr->ifr_data = &etv;
+	ifr->ifr_data = (void *)&etv;
 
 	etv.cmd = ETHTOOL_GFLAGS;
 	if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
@@ -350,7 +359,7 @@ if_netmap_ethtool_set_discrete(struct if_netmap_host_context *ctx, struct ifreq 
 {
 	struct ethtool_value etv;
 
-	ifr->ifr_data = &etv;
+	ifr->ifr_data = (void *)&etv;
 
 	etv.cmd = getcmd;
 	if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
