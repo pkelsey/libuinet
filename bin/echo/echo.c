@@ -340,7 +340,6 @@ int main (int argc, char **argv)
 
 	for (i = 0; i < MAX_INTERFACES; i++) {
 		interfaces[i].loop = NULL;
-		interfaces[i].thread = NULL;
 	}
 
 	for (i = 0; i < MAX_SERVERS; i++) {
@@ -432,7 +431,7 @@ int main (int argc, char **argv)
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", interfaces[i].ifname, error);
 		} else {
-			error = uinet_interface_up(interfaces[i].ifname, 1);
+			error = uinet_interface_up(interfaces[i].ifname, 1, 1);
 			if (0 != error) {
 				printf("Failed to bring up interface %s (%d)\n", interfaces[i].ifname, error);
 			}

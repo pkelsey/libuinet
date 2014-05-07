@@ -944,7 +944,7 @@ int main (int argc, char **argv)
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", ifnames[i], error);
 		} else {
-			error = uinet_interface_up(ifnames[i], 1);
+			error = uinet_interface_up(ifnames[i], 1, 1);
 			if (0 != error) {
 				printf("Failed to bring up interface %s (%d)\n", ifnames[i], error);
 			}
