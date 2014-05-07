@@ -48,13 +48,12 @@ UINET_LDADD:= $(foreach lib,${UINET_LIBS}, -L${TOPDIR}/lib/lib$(lib) -l$(lib))
 
 CFLAGS+= ${UINET_CFLAGS}
 CXXFLAGS+= ${UINET_CFLAGS}
-LDADD+= ${UINET_LDADD}
 
 ${PROG}: ${OBJS}
 ifdef PROG_CXX
-	${CXX} ${CXXFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
+	${CXX} ${CXXFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${UINET_LDADD} ${LDADD} 
 else
-	${CC} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${LDADD}
+	${CC} ${CFLAGS} ${LDFLAGS} -o $@ ${OBJS} ${UINET_LDADD} ${LDADD}
 endif
 
 

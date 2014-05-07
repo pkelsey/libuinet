@@ -11,6 +11,8 @@ COMPILER_TYPE:=	clang
 _COMPILER_VERSION:= $(shell ${CC} --version)
    ifneq ($(filter gcc (GCC),${_COMPILER_VERSION}),)
 COMPILER_TYPE:=	gcc
+   else ifneq ($(filter Free Software Foundation,${_COMPILER_VERSION}),)
+COMPILER_TYPE:=	gcc
    else ifneq ($(findstring clang,${_COMPILER_VERSION}),)
 COMPILER_TYPE:=	clang
    else
