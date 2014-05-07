@@ -23,8 +23,15 @@
  * SUCH DAMAGE.
  */
 
+#if defined(__linux__)
+/*
+ * To expose required facilities in net/if.h.
+ */
+#define _GNU_SOURCE
+#endif /* __linux__ */
 
 #include <poll.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
