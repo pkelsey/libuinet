@@ -113,8 +113,8 @@ void  uinet_soupcall_set_locked(struct uinet_socket *so, int which, int (*func)(
 void  uinet_soupcall_unlock(struct uinet_socket *so, int which);
 int   uinet_sysctlbyname(char *name, char *oldp, size_t *oldplen,
 			 char *newp, size_t newplen, size_t *retval, int flags);
-int   uinet_sysctl(int *name, u_int namelen, void *oid, size_t *oldlenp,
-		   void *new, size_t newlen, size_t *retval, int flags);
+int   uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
+		   void *newp, size_t newplen, size_t *retval, int flags);
 void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
 void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
 int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);

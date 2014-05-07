@@ -1207,13 +1207,13 @@ uinet_sysctlbyname(char *name, char *oldp, size_t *oldplen,
 
 
 int
-uinet_sysctl(int *name, u_int namelen, void *old, size_t *oldlenp,
-    void *new, size_t newlen, size_t *retval, int flags)
+uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
+    void *newp, size_t newplen, size_t *retval, int flags)
 {
 	int error;
 
-	error = kernel_sysctl(curthread, name, namelen, old, oldlenp,
-	    new, newlen, retval, flags);
+	error = kernel_sysctl(curthread, name, namelen, oldp, oldplen,
+	    newp, newplen, retval, flags);
 	return (error);
 }
 
