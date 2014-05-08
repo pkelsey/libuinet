@@ -48,7 +48,7 @@ vm_offset_t
 kmem_malloc(void * map, int bytes, int wait)
 {
 
-	return ((vm_offset_t)uhi_mmap(NULL, bytes, UHI_PROT_READ|UHI_PROT_WRITE, UHI_MAP_ANON, -1, 0));
+	return ((vm_offset_t)uhi_mmap(NULL, bytes, UHI_PROT_READ|UHI_PROT_WRITE, UHI_MAP_ANON|UHI_MAP_PRIVATE, -1, 0));
 }
 
 
