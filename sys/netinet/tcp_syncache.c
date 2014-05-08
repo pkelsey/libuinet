@@ -1059,6 +1059,8 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 		inp_l2i = inp->inp_l2info;
 
 		in_promisc_l2info_copy_swap(inp_l2i, l2i);
+		/* XXX the so copy of l2info needs to go away */
+		in_promisc_l2info_copy_swap(so->so_l2info, l2i);
 	}
 #endif /* PROMISCUOUS_INET */
 
@@ -1348,6 +1350,9 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 		inp_l2i = inp->inp_l2info;
 
 		in_promisc_l2info_copy(inp_l2i, l2i);
+		/* XXX the so copy of l2info needs to go away */
+		in_promisc_l2info_copy(so->so_l2info, l2i);
+
 	}
 #endif /* PROMISCUOUS_INET */
 
