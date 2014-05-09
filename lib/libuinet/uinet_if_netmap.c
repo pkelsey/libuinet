@@ -487,9 +487,6 @@ if_netmap_send(void *arg)
 				pktlen = m_length(m, NULL);
 				ifp->if_obytes += pktlen;
 
-#pragma GCC diagnostic ignored "-Wformat"
-#pragma GCC diagnostic ignored "-Wformat-extra-args"
-				printf(">>>>>>>>>>>>>> sending packet, len=%u %48D\n", pktlen, mtod(m, unsigned char *), " ");
 				m_copydata(m, 0, pktlen,
 					   if_netmap_txslot(sc->nm_host_ctx, &cur, pktlen)); 
 				m_freem(m);
