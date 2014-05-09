@@ -37,6 +37,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__linux__)
+#include <unistd.h>
+#endif /* __linux__ */
 
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -51,6 +54,7 @@
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #include <linux/version.h>
+#include <netinet/in.h>
 #endif /* __linux__ */
 
 #if defined(__FreeBSD__)
@@ -82,6 +86,7 @@
 
 struct if_netmap_host_context {
 	int fd;
+	int cfgfd;
 	int isvale;
 	const char *ifname;
 	struct nmreq req;
@@ -101,6 +106,13 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 		return (NULL);
 	
 	ctx->fd = nmfd;
+#if defined(__linux__)
+	ctx->cfgfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
+	if (-1 == ctx->cfgfd)
+		goto fail;
+#else
+	ctx->cfgfd = ctx->fd;
+#endif
 	ctx->isvale = isvale;
 	ctx->ifname = ifname;
 
@@ -166,7 +178,10 @@ if_netmap_deregister_if(struct if_netmap_host_context *ctx)
 		if_netmap_set_promisc(ctx, 0);
 
 	munmap(ctx->mem, ctx->req.nr_memsize);
-	
+
+#if defined(__linux__)
+	close (ctx->cfgfd);
+#endif	
 	free(ctx);
 }
 
@@ -329,8 +344,8 @@ if_netmap_ethtool_set_flag(struct if_netmap_host_context *ctx, struct ifreq *ifr
 	ifr->ifr_data = (void *)&etv;
 
 	etv.cmd = ETHTOOL_GFLAGS;
-	if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
-		printf("ethtool get flags failed\n");
+	if (-1 == ioctl(ctx->cfgfd, SIOCETHTOOL, ifr)) {
+		printf("ethtool get flags failed (%d)\n", errno);
 		return (-1);
 	}
 
@@ -342,7 +357,7 @@ if_netmap_ethtool_set_flag(struct if_netmap_host_context *ctx, struct ifreq *ifr
 			etv.data &= ~flag;
 
 		etv.cmd = ETHTOOL_SFLAGS;
-		if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
+		if (-1 == ioctl(ctx->cfgfd, SIOCETHTOOL, ifr)) {
 			if (EOPNOTSUPP != errno) {
 				printf("ethtool set flag 0x%08x failed (%d)\n", flag, errno);
 				return (-1);
@@ -362,7 +377,7 @@ if_netmap_ethtool_set_discrete(struct if_netmap_host_context *ctx, struct ifreq 
 	ifr->ifr_data = (void *)&etv;
 
 	etv.cmd = getcmd;
-	if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
+	if (-1 == ioctl(ctx->cfgfd, SIOCETHTOOL, ifr)) {
 		printf("ethtool discrete get 0x%08x failed (%d)\n", getcmd, errno);
 		return (-1);
 	}
@@ -371,7 +386,7 @@ if_netmap_ethtool_set_discrete(struct if_netmap_host_context *ctx, struct ifreq 
 		etv.data = on;
 
 		etv.cmd = setcmd;
-		if (-1 == ioctl(ctx->fd, SIOCETHTOOL, &ifr)) {
+		if (-1 == ioctl(ctx->cfgfd, SIOCETHTOOL, ifr)) {
 			if (EOPNOTSUPP != errno) {
 				printf("ethtool discrete set 0x%08x failed %d\n", setcmd, errno);
 				return (-1);
@@ -394,7 +409,7 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 
 #if defined(__FreeBSD__)
 	
-	if (-1 == ioctl(ctx->fd, SIOCGIFCAP, &ifr)) {
+	if (-1 == ioctl(ctx->cfgfd, SIOCGIFCAP, &ifr)) {
 		perror("get interface capabilities failed");
 		return (-1);
 	}
@@ -406,7 +421,7 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 	else
 		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
 
-	if (-1 == ioctl(ctx->fd, SIOCSIFCAP, &ifr)) {
+	if (-1 == ioctl(ctx->cfgfd, SIOCSIFCAP, &ifr)) {
 		perror("set interface capabilities failed");
 		return (-1);
 	}
@@ -443,7 +458,7 @@ if_netmap_set_promisc(struct if_netmap_host_context *ctx, int on)
 
 	memset(&ifr, 0, sizeof ifr);
 	snprintf(ifr.ifr_name, sizeof(ifr.ifr_name), "%s", ctx->ifname);
-	rv = ioctl(ctx->fd, SIOCGIFFLAGS, &ifr);
+	rv = ioctl(ctx->cfgfd, SIOCGIFFLAGS, &ifr);
 	if (rv == -1) {
 		perror("get interface flags failed");
 		return (-1);
@@ -465,7 +480,7 @@ if_netmap_set_promisc(struct if_netmap_host_context *ctx, int on)
 #error  Add support for putting an interface into promiscuous mode on this platform.
 #endif /* __FreeBSD__ */
 
-	rv = ioctl(ctx->fd, SIOCSIFFLAGS, &ifr);
+	rv = ioctl(ctx->cfgfd, SIOCSIFFLAGS, &ifr);
 	if (rv == -1) {
 		perror("set interface flags failed");
 		return (-1);
