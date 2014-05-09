@@ -1243,7 +1243,6 @@ int main (int argc, char **argv)
 	int num_servers = 0;
 	int interface_server_count = 0;
 	int verbose = 0;
-	int iftype = UINET_IFTYPE_NETMAP;
 	int stats = 0;
 	int tcp_stats_assigned = 0;
 	unsigned int i;
