@@ -4979,14 +4979,14 @@ ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
 		   * modified in-loop.
 		   */
 		  UINET_LIST_REMOVE (soctx, pend_list);
-	  } else {
-		  assert (("libev: uinet context neither pending nor inhibited in ev_uinet_stop",
-			   soctx->pend_flags & EV_UINET_PENDING));
-
+	  } else if (soctx->pend_flags & EV_UINET_PENDING) {
 		  pthread_mutex_lock (&uinet_pend_lock);
 		  UINET_LIST_REMOVE (soctx, pend_list);
 		  pthread_mutex_unlock (&uinet_pend_lock);
-	  } 
+	  } /* else 
+	     * This watcher is being stopped by some other watcher during an
+	     * event loop iteration where this watcher had no events.
+	     */
 	  soctx->pend_flags = EV_NONE;
   }
 
