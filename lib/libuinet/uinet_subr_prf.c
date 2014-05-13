@@ -95,6 +95,7 @@ int     puts(const char *str);
 
 
 static char *ksprintn(char *nbuf, uintmax_t num, int base, int *len, int upper);
+static void  snprintf_func(int ch, void *arg);
 
 /*
  * Put a NUL-terminated ASCII number (base <= 36) in a buffer in reverse
@@ -180,6 +181,95 @@ kputchar(int c, void *arg)
 	if ((flags & TOLOG) && (putbuf_done == 0)) {
 		if (c != '\0')
 			putbuf(c, ap);
+	}
+}
+
+/*
+ * Scaled down version of sprintf(3).
+ */
+int
+sprintf(char *buf, const char *cfmt, ...)
+{
+	int retval;
+	va_list ap;
+
+	va_start(ap, cfmt);
+	retval = kvprintf(cfmt, NULL, (void *)buf, 10, ap);
+	buf[retval] = '\0';
+	va_end(ap);
+	return (retval);
+}
+
+/*
+ * Scaled down version of vsprintf(3).
+ */
+int
+vsprintf(char *buf, const char *cfmt, va_list ap)
+{
+	int retval;
+
+	retval = kvprintf(cfmt, NULL, (void *)buf, 10, ap);
+	buf[retval] = '\0';
+	return (retval);
+}
+
+/*
+ * Scaled down version of snprintf(3).
+ */
+int
+snprintf(char *str, size_t size, const char *format, ...)
+{
+	int retval;
+	va_list ap;
+
+	va_start(ap, format);
+	retval = vsnprintf(str, size, format, ap);
+	va_end(ap);
+	return(retval);
+}
+
+/*
+ * Scaled down version of vsnprintf(3).
+ */
+int
+vsnprintf(char *str, size_t size, const char *format, va_list ap)
+{
+	struct snprintf_arg info;
+	int retval;
+
+	info.str = str;
+	info.remain = size;
+	retval = kvprintf(format, snprintf_func, &info, 10, ap);
+	if (info.remain >= 1)
+		*info.str++ = '\0';
+	return (retval);
+}
+
+/*
+ * Kernel version which takes radix argument vsnprintf(3).
+ */
+int
+vsnrprintf(char *str, size_t size, int radix, const char *format, va_list ap)
+{
+	struct snprintf_arg info;
+	int retval;
+
+	info.str = str;
+	info.remain = size;
+	retval = kvprintf(format, snprintf_func, &info, radix, ap);
+	if (info.remain >= 1)
+		*info.str++ = '\0';
+	return (retval);
+}
+
+static void
+snprintf_func(int ch, void *arg)
+{
+	struct snprintf_arg *const info = arg;
+
+	if (info->remain >= 2) {
+		*info->str++ = ch;
+		info->remain--;
 	}
 }
 
