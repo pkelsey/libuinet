@@ -31,7 +31,9 @@
 
 #include <sys/param.h>
 #include <sys/kernel.h>
+#include <sys/lock.h>
 #include <sys/malloc.h>
+#include <sys/mutex.h>
 #include <sys/pcpu.h>
 #include <sys/smp.h>
 #include <sys/systm.h>
@@ -47,6 +49,9 @@ int mp_maxcpus = MAXCPU;
 volatile int smp_started;
 u_int mp_maxid;
 
+
+/* XXX temporary until final pcpu approach is determined */
+struct mtx uinet_pcpu_locks[MAXCPU];
 
 static void
 mp_start(void *dummy)
@@ -70,6 +75,8 @@ mp_start(void *dummy)
 			panic("Failed to allocate DPCPU area for cpu %d\n", i);
 
 		dpcpu_init(dpcpu, i);
+
+		mtx_init(&uinet_pcpu_locks[i], "uipcpu", NULL, MTX_DEF | MTX_RECURSE);
 	}
 
 	printf("UINET multiprocessor subsystem configured with %d CPUs\n", mp_ncpus);

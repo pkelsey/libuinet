@@ -87,15 +87,23 @@ struct	intr_entropy {
 };
 
 
+extern struct mtx uinet_pcpu_locks[MAXCPU];
+
 void
 critical_enter(void)
 {
-/* XXX grab per-cpu mutex */
+	/* XXX grab per-cpu mutex 
+	   The best performing reimplementation is TBD.  For now, a per-cpu
+	   mutex is used to prevent another thread from entering the same
+	   critical section on the current cpu.
+	 */
+	mtx_lock(&uinet_pcpu_locks[curthread->td_oncpu]);
 }
 
 void
 critical_exit(void)
 {
+	mtx_unlock(&uinet_pcpu_locks[curthread->td_oncpu]);
 }
 
 #undef thread_lock
