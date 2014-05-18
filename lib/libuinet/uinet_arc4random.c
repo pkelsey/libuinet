@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,50 +24,22 @@
  */
 
 
-#if !defined(__APPLE__)
-#include <openssl/rand.h>
-#else
-#include <stdlib.h>
-#endif
+#include <sys/param.h>
+#include <sys/libkern.h>
 
-#include <stdint.h>
-
-/*
- * Reproduced from sys/libkern.h, which is not included directly in order to
- * avoid massive definition conflict between it and std*.h below.
- */
-void	 arc4rand(void *ptr, unsigned int len, int reseed);
-uint32_t arc4random(void);
+#include "uinet_host_interface.h"
 
 
-/* 
- * Redirect to the user-space library version.
- */
 void
 arc4rand(void *ptr, unsigned int len, int reseed)
 {
-
-#if !defined(__APPLE__)
-	(void)reseed;
-
-	/* XXX assuming that we don't have to manually seed this */
-
-	RAND_pseudo_bytes(ptr, len);
-#else
-	if (reseed)
-		arc4random_stir();
-
-	arc4random_buf(ptr, len);
-#endif
+	uhi_arc4rand(ptr, len, reseed);
 }
 
 
 uint32_t
 arc4random(void)
 {
-        uint32_t ret;
-
-        arc4rand(&ret, sizeof ret, 0);
-        return ret;
+	return uhi_arc4random();
 }
 

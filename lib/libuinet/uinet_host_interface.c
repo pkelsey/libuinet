@@ -56,6 +56,8 @@
 #include <mach/clock.h>
 #include <mach/mach.h>
 #include <mach/thread_policy.h>
+#else
+#include <openssl/rand.h>
 #endif
 
 #include <net/ethernet.h>
@@ -848,4 +850,33 @@ uhi_get_ifaddr(const char *ifname, uint8_t *ethaddr)
 	freeifaddrs(ifa);
 
 	return (error);
+}
+
+
+void
+uhi_arc4rand(void *ptr, unsigned int len, int reseed)
+{
+
+#if !defined(__APPLE__)
+	(void)reseed;
+
+	/* XXX assuming that we don't have to manually seed this */
+
+	RAND_pseudo_bytes(ptr, len);
+#else
+	if (reseed)
+		arc4random_stir();
+
+	arc4random_buf(ptr, len);
+#endif
+}
+
+
+uint32_t
+uhi_arc4random(void)
+{
+        uint32_t ret;
+
+        uhi_arc4rand(&ret, sizeof ret, 0);
+        return ret;
 }

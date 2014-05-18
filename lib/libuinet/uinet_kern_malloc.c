@@ -55,14 +55,14 @@ MALLOC_DEFINE(M_IP6NDP, "ip6ndp", "IPv6 Neighbor Discovery");
 
 
 void
-uinet_malloc_init(void *data)
+malloc_init(void *data)
 {
 	/* Nothing to do here */
 }
 
 
 void
-uinet_malloc_uninit(void *data)
+malloc_uninit(void *data)
 {
 	/* Nothing to do here */
 }
@@ -73,7 +73,7 @@ uinet_malloc_uninit(void *data)
  * these routines for users of sys/malloc.h.
  */
 void *
-uinet_malloc(unsigned long size, struct malloc_type *type, int flags)
+malloc(unsigned long size, struct malloc_type *type, int flags)
 {
 	void *alloc;
 
@@ -92,7 +92,7 @@ uinet_malloc(unsigned long size, struct malloc_type *type, int flags)
 
 
 void
-uinet_free(void *addr, struct malloc_type *type)
+free(void *addr, struct malloc_type *type)
 {
 
 	uhi_free(addr);
@@ -100,16 +100,16 @@ uinet_free(void *addr, struct malloc_type *type)
 
 
 void *
-uinet_realloc(void *addr, unsigned long size, struct malloc_type *type,
-	      int flags)
+realloc(void *addr, unsigned long size, struct malloc_type *type,
+	int flags)
 {
 	return (uhi_realloc(addr, size));
 }
 
 
 void *
-uinet_reallocf(void *addr, unsigned long size, struct malloc_type *type,
-	      int flags)
+reallocf(void *addr, unsigned long size, struct malloc_type *type,
+	 int flags)
 {
 	void *mem;
 

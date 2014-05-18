@@ -90,6 +90,7 @@ VPATH+= $S/libkern
 UINET_SRCS+=			\
 	uinet_api.c		\
 	uinet_api_pool.c	\
+	uinet_arc4random.c	\
 	uinet_clock.c		\
 	uinet_config.c		\
 	uinet_config_kernel.c	\
@@ -152,7 +153,6 @@ endif
 
 UINET_HOST_SRCS+=		\
 	uinet_api_errno.c	\
-	uinet_arc4random.c	\
 	uinet_host_interface.c	\
 	uinet_if_pcap_host.c	\
 	uinet_kern_shutdown.c
@@ -310,14 +310,14 @@ ifeq (${HOST_OS},Darwin)
 	${LD} -r -o $*.ro -exported_symbols_list uinet_api.symlist.darwin ${HOST_OBJS} ${OBJS}
 	rm uinet_api.symlist.darwin
 else
-	${LD} -r -o $*.ro ${HOST_OBJS} ${OBJS}
+	${LD} -r -o $*.ro ${OBJS}
 	nm $*.ro  | grep -v ' U ' | cut -d ' ' -f 3 > $*_localize_list.tmp
 	objcopy --localize-symbols=$*_localize_list.tmp $*.ro 
 	rm $*_localize_list.tmp
 	objcopy --globalize-symbols=uinet_api.symlist $*.ro 
 endif
 	rm -f $@
-	ar -cqs $@ $*.ro
+	ar -cqs $@ $*.ro ${HOST_OBJS}
 	rm -f $*.ro
 
 ${HOST_OBJS}: %.o: %.c
