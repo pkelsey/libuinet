@@ -543,12 +543,17 @@ syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp)
 #endif /* PROMISCUOUS_INET */
 
 #ifdef PROMISCUOUS_INET
-	fib = M_GETFIB(m);
-
-	l2i_tag = (struct ifl2info *)m_tag_locate(m,
-						  MTAG_PROMISCINET,
-						  MTAG_PROMISCINET_L2INFO,
-						  NULL);
+	/* XXX once ICMP plumbing is complete, m should never be NULL.  for now, a bit of armor. */
+	if (m) {
+		fib = M_GETFIB(m);
+		l2i_tag = (struct ifl2info *)m_tag_locate(m,
+							  MTAG_PROMISCINET,
+							  MTAG_PROMISCINET_L2INFO,
+							  NULL);
+	} else {
+		fib = 0;
+		l2i_tag = NULL;
+	}
 	l2i = l2i_tag ? &l2i_tag->ifl2i_info : NULL;
 	ts = l2i ? &l2i->inl2i_tagstack : NULL;
 #endif /* PROMISCUOUS_INET */
