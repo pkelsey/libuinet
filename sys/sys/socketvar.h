@@ -126,6 +126,7 @@ struct socket {
 	 * so_user_cookie is used by ipfw/dummynet.
 	 */
 	int so_fibnum;		/* routing domain for this socket */
+	int so_altfibnum;
 	uint32_t so_user_cookie;
 
 	struct so_upcallprep {
@@ -256,6 +257,16 @@ struct xsocket {
 		SOCK_UNLOCK(so);					\
 		ACCEPT_UNLOCK();					\
 	}								\
+} while (0)
+
+
+#define	sorele_nounlock(so) do {					\
+	ACCEPT_LOCK_ASSERT();						\
+	SOCK_LOCK_ASSERT(so);						\
+	if ((so)->so_count <= 0)					\
+		panic("sorele");					\
+	if (--(so)->so_count == 0)					\
+		sofree(so);						\
 } while (0)
 
 /*

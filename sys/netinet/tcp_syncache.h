@@ -53,7 +53,8 @@ int	 syncache_expand(struct in_conninfo *, struct tcpopt *,
 int	 tcp_offload_syncache_expand(struct in_conninfo *inc, struct toeopt *toeo,
              struct tcphdr *th, struct socket **lsop, struct mbuf *m);
 void	 syncache_add(struct in_conninfo *, struct tcpopt *,
-	     struct tcphdr *, struct inpcb *, struct socket **, struct mbuf *);
+		      struct tcphdr *, struct inpcb *, struct socket **, struct mbuf *,
+		      int);
 void	 tcp_offload_syncache_add(struct in_conninfo *, struct toeopt *,
              struct tcphdr *, struct inpcb *, struct socket **,
              struct toe_usrreqs *tu, void *toepcb);
@@ -117,6 +118,8 @@ struct syncache {
 #define SCF_ECN			0x100			/* send ECN setup packet */
 #define SCF_PASSIVE		0x200			/* connection is in passive mode */
 #define SCF_PASSIVE_SYNACK	0x400			/* SYN|ACK captured in passive mode */
+#define SCF_NO_TIMEOUT_RESET	0x800			/* don't reset timeout on dup SYN */ 
+#define SCF_CONVERT_ON_TIMEOUT	0x1000			/* convert from passive to active on timeout */
 
 #define	SYNCOOKIE_SECRET_SIZE	8	/* dwords */
 #define	SYNCOOKIE_LIFETIME	16	/* seconds */

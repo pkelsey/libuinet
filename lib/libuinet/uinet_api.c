@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -160,6 +160,13 @@ uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size)
 	(void)size;
 
 	return inet_ntoa_r(*((struct in_addr *)&in), buf); 
+}
+
+
+const char *
+uinet_inet_ntop(int af, const void *src, char *dst, unsigned int size)
+{
+	return (inet_ntop(af, src, dst, size));
 }
 
 
@@ -548,6 +555,11 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 	 */
 	SOCK_LOCK(so);			/* soref() and so_state update */
 	soref(so);			/* socket came from sonewconn() with an so_count of 0 */
+#ifdef PASSIVE_INET
+	/* Add an additional ref as each passive socket in a pair references the other */
+	if (so->so_options & SO_PASSIVE)
+		soref(so);
+#endif
 
 	TAILQ_REMOVE(&head->so_comp, so, so_list);
 	head->so_qlen--;
@@ -561,7 +573,10 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 	if (so->so_passive_peer) {
 		SOCK_LOCK(so->so_passive_peer);
 		soref(so->so_passive_peer);
-		so->so_passive_peer->so_state |= (head->so_state & SS_NBIO);
+		/* Add an additional ref as each passive socket in a pair references the other */
+		soref(so->so_passive_peer);
+		so->so_passive_peer->so_state |=
+		    (head->so_state & SS_NBIO) | SO_PASSIVECLNT;
 		SOCK_UNLOCK(so->so_passive_peer);
 	}
 #endif
@@ -1167,6 +1182,16 @@ uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l
 	struct syn_filter_cbarg *cbarg = cookie;
 
 	memcpy(l2i, cbarg->l2i, sizeof(*l2i));
+}
+
+
+void
+uinet_synfilter_go_active_on_timeout(uinet_api_synfilter_cookie_t cookie, unsigned int ms)
+{
+	struct syn_filter_cbarg *cbarg = cookie;
+	
+	cbarg->inc.inc_flags |= INC_CONVONTMO;
+	cbarg->initial_timeout = (ms > INT_MAX / hz) ? INT_MAX / 1000 : (ms * hz) / 1000;
 }
 
 

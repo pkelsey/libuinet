@@ -553,7 +553,7 @@ sonewconn(struct socket *head, int connstatus)
  * listening socket, and return this.
  * Connstatus may be 0, or SO_ISCONFIRMING, or SO_ISCONNECTING.
  *
- * Note: the ref count on the socket is 1 on return.
+ * Note: the ref count on the socket is 0 on return.
  */
 struct socket *
 sonewconn_passive_client(struct socket *head, int connstatus)
@@ -813,9 +813,25 @@ drop:
 		ACCEPT_UNLOCK();
 	}
 	ACCEPT_LOCK();
+#ifdef PASSIVE_INET
+	if ((so->so_options & SO_PASSIVE) &&
+	    !(so->so_options & SO_PASSIVECLNT))
+		SOCK_LOCK(so->so_passive_peer);
+#endif
 	SOCK_LOCK(so);
+#ifdef PASSIVE_INET
+	if (so->so_options & SO_PASSIVECLNT)
+		SOCK_LOCK(so->so_passive_peer);
+#endif
 	KASSERT((so->so_state & SS_NOFDREF) == 0, ("soclose: NOFDREF"));
 	so->so_state |= SS_NOFDREF;
+#ifdef PASSIVE_INET
+	if (so->so_options & SO_PASSIVE) {
+		if (so->so_count == 2)
+			sorele_nounlock(so->so_passive_peer);
+		SOCK_UNLOCK(so->so_passive_peer);
+	}
+#endif
 	sorele(so);
 	CURVNET_RESTORE();
 	return (error);
@@ -2641,6 +2657,36 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 			}
 			break;
 
+		case SO_ALTFIB:
+#if defined(PROMISCUOUS_INET) && defined(PASSIVE_INET)
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+					    sizeof optval);
+			if (optval < 0)
+				so->so_options &= ~sopt->sopt_name;	
+			else if (optval >= rt_numfibs) {
+				error = EINVAL;
+				goto bad;
+			} else {
+				so->so_options |= sopt->sopt_name;
+			}
+			if (((so->so_proto->pr_domain->dom_family == PF_INET) ||
+			   (so->so_proto->pr_domain->dom_family == PF_INET6) ||
+			   (so->so_proto->pr_domain->dom_family == PF_ROUTE))) {
+				if (so->so_options & SO_ALTFIB)
+					so->so_altfibnum = optval;
+				else
+					so->so_altfibnum = 0;
+				/* Note: ignore error */
+				if (so->so_proto->pr_ctloutput)
+					(*so->so_proto->pr_ctloutput)(so, sopt);
+			} else {
+				so->so_altfibnum = 0;
+			}
+#else
+			error = EOPNOTSUPP;
+#endif
+			break;
+
 		case SO_USER_COOKIE:
 			error = sooptcopyin(sopt, &val32, sizeof val32,
 					    sizeof val32);
@@ -2931,6 +2977,12 @@ sogetopt(struct socket *so, struct sockopt *sopt)
 		case SO_TIMESTAMP:
 		case SO_BINTIME:
 		case SO_NOSIGPIPE:
+#ifdef PROMISCUOUS_INET
+		case SO_PROMISC:
+#endif
+#ifdef PASSIVE_INET
+		case SO_PASSIVE:
+#endif
 			optval = so->so_options & sopt->sopt_name;
 integer:
 			error = sooptcopyout(sopt, &optval, sizeof optval);

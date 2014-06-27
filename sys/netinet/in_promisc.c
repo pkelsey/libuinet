@@ -696,7 +696,7 @@ syn_filter_setopt(struct socket *so, struct sockopt *sopt)
 		case SYNF_ACCEPT:
 			INP_INFO_WLOCK(&V_tcbinfo);
 			INP_WLOCK(inp);
-			syncache_add(&cbarg.inc, &cbarg.to, &cbarg.th, inp, &so, cbarg.m);
+			syncache_add(&cbarg.inc, &cbarg.to, &cbarg.th, inp, &so, cbarg.m, cbarg.initial_timeout);
 		
 			/* syncache_add performs the INP_WUNLOCK(inp) */
 			break;

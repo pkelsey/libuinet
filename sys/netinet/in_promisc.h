@@ -117,6 +117,7 @@ struct syn_filter_cbarg {
 				 */
 	struct in_l2info *l2i;
 	int decision;
+	int initial_timeout;
 };
 
 
