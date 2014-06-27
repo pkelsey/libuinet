@@ -34,6 +34,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_icmp.c 237913 2012-07-01 09:00:
 
 #include "opt_inet.h"
 #include "opt_ipsec.h"
+#include "opt_promiscinet.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -337,6 +338,13 @@ icmp_input(struct mbuf *m, int off)
 	int i, code;
 	void (*ctlfunc)(int, struct sockaddr *, void *);
 	int fibnum;
+
+#ifdef PROMISCUOUS_INET
+	/* XXX ICMP plumbing is currently incomplete for promiscuous mode interfaces not in fib 0 */
+	if ((m->m_pkthdr.rcvif->if_flags & IFF_PROMISCINET) &&
+	    (M_GETFIB(m) > 0))
+		goto freeit;
+#endif
 
 	/*
 	 * Locate icmp structure in mbuf, and check

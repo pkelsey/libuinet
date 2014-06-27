@@ -472,6 +472,7 @@ int main (int argc, char **argv)
 	
 	
 	uinet_init(1, 128*1024, 0);
+	uinet_install_sighandlers();
 
 	for (i = 0; i < num_interfaces; i++) {
 		switch (interfaces[i].type) {
@@ -567,9 +568,7 @@ int main (int argc, char **argv)
 			pthread_join(interfaces[i].thread, NULL);
 	}
 
-	for (i = 0; i < num_interfaces; i++) {
-		uinet_ifdestroy_byname(interfaces[i].ifname);
-	}
+	uinet_shutdown(0);
 
 	return (0);
 }

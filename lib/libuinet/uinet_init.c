@@ -45,7 +45,8 @@
 #include <vm/uma_int.h>
 
 #include "uinet_api.h"
-#include "uinet_config.h"
+#include "uinet_config_internal.h"
+#include "uinet_host_interface.h"
 
 
 pid_t     getpid(void);
@@ -174,4 +175,23 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 #endif
 
 	return (0);
+}
+
+
+void
+uinet_shutdown(unsigned int fromsighandler)
+{
+	printf("\nuinet shutting down%s\n", fromsighandler ? " from signal handler" : "");
+
+	printf("Shutting down interfaces...\n");
+	uinet_ifdestroy_all();
+
+	printf("uinet shutdown complete\n");
+}
+
+
+void
+uinet_install_sighandlers(void)
+{
+	uhi_install_sighandlers();
 }
