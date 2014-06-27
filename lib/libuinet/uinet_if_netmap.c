@@ -107,6 +107,7 @@ struct if_netmap_softc {
 	uint16_t queue;
 
 	uint32_t hw_rx_rsvd_begin;
+	uint32_t *nm_buffer_indices;
 	struct if_netmap_host_context *nm_host_ctx;
 
 	struct if_netmap_bufinfo_pool rx_bufinfo;
@@ -184,13 +185,14 @@ if_netmap_bufinfo_pool_destroy(struct if_netmap_bufinfo_pool *p)
 
 /* Only called from the receive thread */
 static struct if_netmap_bufinfo *
-if_netmap_bufinfo_alloc(struct if_netmap_bufinfo_pool *p)
+if_netmap_bufinfo_alloc(struct if_netmap_bufinfo_pool *p, uint32_t slotindex)
 {
 	struct if_netmap_bufinfo *bi;
 
 	if (p->avail) {
 		p->avail--;
 		bi = &p->pool[p->free_list[p->head]];
+		bi->nm_index = slotindex;
 
 		p->head++;
 		if (p->head == p->max) {
@@ -314,7 +316,8 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	int fd = -1;
 	int error = 0;
 	uint32_t pool_size;
-
+	uint32_t slotindex, curslotindex;
+	uint32_t bufindex, unused;
 	
 	if (NULL == cfg->configstr) {
 		error = EINVAL;
@@ -380,6 +383,26 @@ if_netmap_attach(struct uinet_config_if *cfg)
 		}
 	}
 
+	sc->nm_buffer_indices = malloc(if_netmap_rxslots(sc->nm_host_ctx) *
+				       sizeof(sc->nm_buffer_indices[0]),
+				       M_DEVBUF, M_WAITOK);
+	if (NULL == sc->nm_buffer_indices) {
+		printf("Failed to alloc buffer index array\n");
+		goto fail;
+	}
+
+	/*
+	 * XXX This goes away when netmap implements buffer ownership tracking
+	 * Record the set of netmap buffer indices in the rx ring so they
+	 * can be restored on exit.
+	 */
+	slotindex = 0;
+	do {
+		curslotindex = slotindex;
+		if_netmap_rxslot(sc->nm_host_ctx, &slotindex, &unused, &bufindex);		
+		sc->nm_buffer_indices[curslotindex] = bufindex;
+	} while (slotindex);
+
 	if (0 != if_netmap_setup_interface(sc)) {
 		error = ENXIO;
 		goto fail;
@@ -392,11 +415,14 @@ if_netmap_attach(struct uinet_config_if *cfg)
 
 fail:
 	if (sc) {
-		if (sc->nm_host_ctx)
-			if_netmap_deregister_if(sc->nm_host_ctx);
+		if (sc->nm_buffer_indices)
+			free(sc->nm_buffer_indices, M_DEVBUF);
 
 		if (sc->rx_bufinfo.initialized)
 			if_netmap_bufinfo_pool_destroy(&sc->rx_bufinfo);
+
+		if (sc->nm_host_ctx)
+			if_netmap_deregister_if(sc->nm_host_ctx);
 
 		if (sc->fd >= 0)
 			uhi_close(sc->fd);
@@ -554,6 +580,7 @@ static uint32_t
 if_netmap_sweep_trail(struct if_netmap_softc *sc)
 {
 	struct if_netmap_bufinfo_pool *p;
+	struct if_netmap_bufinfo *bi;
 	uint32_t i;
 	uint32_t returned;
 	unsigned int n;
@@ -564,7 +591,9 @@ if_netmap_sweep_trail(struct if_netmap_softc *sc)
 
 	returned = p->returnable;
 	for (n = 0; n < returned; n++) {
-		if_netmap_rxsetslot(sc->nm_host_ctx, &i, p->pool[p->free_list[p->trail]].nm_index);
+		bi = &p->pool[p->free_list[p->trail]];
+		if_netmap_rxsetslot(sc->nm_host_ctx, &i, bi->nm_index);
+		bi->refcnt = 0;
 
 		p->trail++;
 		if (p->trail == p->max) {
@@ -656,7 +685,7 @@ if_netmap_receive(void *arg)
 			ifp->if_ipackets++;
 			ifp->if_ibytes += pktlen;
 
-			bi = if_netmap_bufinfo_alloc(&sc->rx_bufinfo);
+			bi = if_netmap_bufinfo_alloc(&sc->rx_bufinfo, slotindex);
 			if (NULL == bi) {
 				/* copy receive */
 				ifp->if_icopies++;
@@ -691,8 +720,6 @@ if_netmap_receive(void *arg)
 					 * support 16-bit aligned access to
 					 * 32-bit values.
 					 */
-					
-					bi->nm_index = slotindex;
 					
 					m->m_pkthdr.len = m->m_len = pktlen;
 					m->m_pkthdr.rcvif = sc->ifp;
@@ -779,8 +806,52 @@ int
 if_netmap_detach(struct uinet_config_if *cfg)
 {
 	struct if_netmap_softc *sc = cfg->ifdata;
+	int i, j;
+	uint32_t slotindex;
+	uint32_t unused;
+	uint32_t bufindex, bufindex2;
+	uint32_t ring_size;
 
 	if (sc) {
+
+		if (sc->nm_buffer_indices) {
+			/*
+			 * XXX This goes away when netmap implements buffer
+			 * ownership tracking
+			 *
+			 * Zero-copy receive can result in missing/duplicate
+			 * buffer indicies in the receive ring, due to
+			 * out-of-order return.  During normal operation,
+			 * this is fine, as any missing/duplicate buffer
+			 * indices occur in the libuinet-reserved range
+			 * within the ring.  When the netmap fd is closed,
+			 * netmap currently blindly frees the buffer in each
+			 * ring slot, so given the foregoing, there can be
+			 * double frees and leaks.
+			 *
+			 * The following code restores the ring to its
+			 * post-initialization state, thereby avoiding the
+			 * double-free/leak issue.
+			 */
+			slotindex = 0;
+			do {
+				if_netmap_rxsetslot(sc->nm_host_ctx, &slotindex, sc->nm_buffer_indices[slotindex]);
+			} while (slotindex);
+			
+			/* Report any duplicates (there should be none at this point) */
+			ring_size = if_netmap_rxslots(sc->nm_host_ctx);
+			for (i = 0; i < ring_size - 1;) {
+				if_netmap_rxslot(sc->nm_host_ctx, &i, &unused, &bufindex);
+				for (j = i + 1; j < ring_size;) {
+					if_netmap_rxslot(sc->nm_host_ctx, &j, &unused, &bufindex2);
+					if (j ==0) j = ring_size;
+					if (bufindex == bufindex2)
+						printf("Duplicate buffer index %u in slots %u and %u\n", bufindex, i - 1, j - 1);
+				}
+			}
+		}
+
+#if notyet
 		/* XXX ether_ifdetach, stop threads */
 
 		if_netmap_deregister_if(sc->nm_host_ctx);
@@ -790,6 +861,7 @@ if_netmap_detach(struct uinet_config_if *cfg)
 		uhi_close(sc->fd);
 
 		free(sc, M_DEVBUF);
+#endif
 	}
 
 	return (0);

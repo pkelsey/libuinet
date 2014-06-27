@@ -391,9 +391,11 @@ if_pcap_detach(struct uinet_config_if *cfg)
 	if (sc) {
 		/* XXX ether_ifdetach, stop threads */
 
+#if notyet
 		if_pcap_destroy_handle(sc->pcap_host_ctx);
 		
 		free(sc, M_DEVBUF);
+#endif
 	}
 
 	return (0);
