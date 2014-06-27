@@ -156,4 +156,6 @@ int   uhi_get_ifaddr(const char *ifname, uint8_t *ethaddr);
 void  uhi_arc4rand(void *ptr, unsigned int len, int reseed);
 uint32_t uhi_arc4random(void);
 
+void  uhi_install_sighandlers(void);
+
 #endif /* _UINET_HOST_INTERFACE_H_ */

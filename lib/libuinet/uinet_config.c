@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -165,35 +165,56 @@ out:
 }
 
 
+static int
+uinet_ifdestroy_internal(struct uinet_config_if *cfg)
+{
+	int error;
+
+	switch (cfg->type) {
+	case UINET_IFTYPE_NETMAP:
+		error = if_netmap_detach(cfg);
+		break;
+	case UINET_IFTYPE_PCAP:
+		error = if_pcap_detach(cfg);
+		break;
+	default:
+		printf("Error detaching interface %s: unknown interface type %d\n", cfg->name, cfg->type);
+		error = ENXIO;
+		break;
+	}
+
+	TAILQ_REMOVE(&if_conf, cfg, link);
+		
+	if (cfg->configstr)
+		free(cfg->configstr, M_DEVBUF);
+
+	free(cfg, M_DEVBUF);
+
+	return (error);
+}
+
+
 int
 uinet_ifdestroy(uinet_ifcookie_t cookie)
 {
 	struct uinet_config_if *cfg = cookie;
 	int error = EINVAL;
 
-	if (NULL != cfg) {
-		switch (cfg->type) {
-		case UINET_IFTYPE_NETMAP:
-			error = if_netmap_detach(cfg);
-			break;
-		case UINET_IFTYPE_PCAP:
-			error = if_pcap_detach(cfg);
-			break;
-		default:
-			printf("Error detaching interface %s: unknown interface type %d\n", cfg->name, cfg->type);
-			error = ENXIO;
-			break;
-		}
-
-		TAILQ_REMOVE(&if_conf, cfg, link);
-		
-		if (cfg->configstr)
-			free(cfg->configstr, M_DEVBUF);
-
-		free(cfg, M_DEVBUF);
-	}
+	if (NULL != cfg)
+		error = uinet_ifdestroy_internal(cfg);
 
 	return (error);
+}
+
+
+void
+uinet_ifdestroy_all(void)
+{
+	struct uinet_config_if *cfg, *tmp;
+
+	TAILQ_FOREACH_SAFE(cfg, &if_conf, link, tmp) {
+		uinet_ifdestroy_internal(cfg);
+	}
 }
 
 

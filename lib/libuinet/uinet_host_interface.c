@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -45,6 +45,7 @@
 #include <pthread_np.h>
 #endif /* __FreeBSD__ */
 #include <sched.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -78,6 +79,7 @@
 
 #include <sys/mman.h>
 
+#include "uinet_api.h"
 #include "uinet_host_interface.h"
 
 
@@ -879,4 +881,63 @@ uhi_arc4random(void)
 
         uhi_arc4rand(&ret, sizeof ret, 0);
         return ret;
+}
+
+
+static void
+uhi_cleanup_handler(int sig, siginfo_t *info, void *uap)
+{
+	uinet_shutdown(1);
+	kill(getpid(), sig);
+}
+
+
+static void
+uhi_install_cleanup_handler(int signo)
+{
+	struct sigaction sa;
+
+	sigaction(signo, NULL, &sa);
+	if (sa.sa_handler == SIG_DFL) {
+		sa.sa_sigaction = uhi_cleanup_handler;
+		sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+		sigemptyset(&sa.sa_mask);
+		sigaction(signo, &sa, NULL);
+	}
+}
+
+
+/*
+ * Install a cleanup handler for all catchable signals that by default will
+ * terminate the process and that are currently set to the default handler.
+ */
+void
+uhi_install_sighandlers(void)
+{
+	int i;
+	int signal_list[] = {
+		SIGHUP,
+		SIGINT,
+		SIGQUIT,
+		SIGILL,
+		SIGTRAP,
+		SIGABRT,
+		SIGEMT,
+		SIGFPE,
+		SIGBUS,
+		SIGSEGV,
+		SIGSYS,
+		SIGPIPE,
+		SIGALRM,
+		SIGTERM,
+		SIGXCPU,
+		SIGXFSZ,
+		SIGVTALRM,
+		SIGPROF,
+		SIGUSR1,
+		SIGUSR2
+	};
+
+	for (i = 0; i < sizeof(signal_list)/sizeof(signal_list[0]); i++)
+		uhi_install_cleanup_handler(signal_list[i]);
 }

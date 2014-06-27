@@ -15,6 +15,7 @@ uinet_inet_pton
 uinet_inet6_enabled
 uinet_init
 uinet_initialize_thread
+uinet_install_sighandlers
 uinet_interface_add_alias
 uinet_interface_create
 uinet_interface_up
@@ -32,6 +33,7 @@ uinet_pool_get_max
 uinet_pool_set_max
 uinet_setl2info
 uinet_setl2info2
+uinet_shutdown
 uinet_soaccept
 uinet_soallocuserctx
 uinet_sobind

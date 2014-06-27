@@ -48,6 +48,7 @@ struct uinet_config_if {
 };
 
 
+void uinet_ifdestroy_all(void);
 struct uinet_config_if *uinet_iffind_byname(const char *ifname);
 
 
