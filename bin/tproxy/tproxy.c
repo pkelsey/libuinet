@@ -938,6 +938,7 @@ int main (int argc, char **argv)
 	}
 	
 	uinet_init(1, 128*1024, 0);
+	uinet_install_sighandlers();
 
 	for (i = 0; i < num_ifs; i++) {
 		error = uinet_ifcreate(UINET_IFTYPE_NETMAP, ifnames[i], ifnames[i], i + 1, 0, NULL);
@@ -968,9 +969,7 @@ int main (int argc, char **argv)
 
 	ev_run(loop, 0);
 
-	for (i = 0; i < num_ifs; i++) {
-		uinet_ifdestroy_byname(ifnames[i]);
-	}
+	uinet_shutdown(0);
 
 	return (0);
 }
