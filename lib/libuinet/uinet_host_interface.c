@@ -83,6 +83,8 @@
 #include "uinet_host_interface.h"
 
 
+#define UHI_NSEC_PER_SEC	(1000UL * 1000UL * 1000UL)
+
 #if defined(__linux__)
 typedef cpu_set_t cpuset_t;
 #endif /* __linux__ */
@@ -214,7 +216,7 @@ uhi_clock_gettime_ns(int id)
 	 
 	uhi_clock_gettime(id, &sec, &nsec);
 
-	return ((uint64_t)sec * 1000000000ULL + nsec);
+	return ((uint64_t)sec * UHI_NSEC_PER_SEC + nsec);
 }
 
 
@@ -230,8 +232,8 @@ uhi_nanosleep(uint64_t nsecs)
 	struct timespec rts;
 	int rv;
 
-	ts.tv_sec = nsecs / (1000UL*1000UL*1000UL);
-	ts.tv_nsec = nsecs % (1000UL*1000UL*1000UL);
+	ts.tv_sec = nsecs / UHI_NSEC_PER_SEC;
+	ts.tv_nsec = nsecs % UHI_NSEC_PER_SEC;
 	while ((-1 == (rv = nanosleep(&ts, &rts))) && (EINTR == errno)) {
 		ts = rts;
 	}
@@ -559,11 +561,6 @@ uhi_cond_init(uhi_cond_t *c)
 
 	pthread_condattr_init(&attr);
 
-#if !defined(__APPLE__)
-	if (0 != pthread_condattr_setclock(&attr, CLOCK_MONOTONIC))
-		printf("Warning: condition variable timed wait using CLOCK_REALTIME");
-#endif /* __APPLE__ */
-
 	error = pthread_cond_init(pc, &attr);
 	pthread_condattr_destroy(&attr);
 
@@ -594,10 +591,20 @@ int
 uhi_cond_timedwait(uhi_cond_t *c, uhi_mutex_t *m, uint64_t nsecs)
 {
 	struct timespec abstime;
+	int64_t now_sec;
+	long now_nsec;
+	uint64_t total_nsec;
 
-	abstime.tv_sec = nsecs / (1000UL*1000UL*1000UL);
-	abstime.tv_nsec = nsecs % (1000UL*1000UL*1000UL);
+	uhi_clock_gettime(UHI_CLOCK_REALTIME, &now_sec, &now_nsec);
 
+	abstime.tv_sec = now_sec + nsecs / UHI_NSEC_PER_SEC;
+	total_nsec = now_nsec + nsecs % UHI_NSEC_PER_SEC;
+	if (total_nsec >= UHI_NSEC_PER_SEC) {
+		total_nsec -= UHI_NSEC_PER_SEC;
+		abstime.tv_sec++;
+	}
+	abstime.tv_nsec = total_nsec;
+	
 	return (pthread_cond_timedwait((pthread_cond_t *)(*c), (pthread_mutex_t *)(*m), &abstime));
 }
 
