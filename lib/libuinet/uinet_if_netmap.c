@@ -77,6 +77,7 @@
 #define IF_NETMAP_RXRING_ZCOPY_FRAC_NUM 1
 #define IF_NETMAP_RXRING_ZCOPY_FRAC_DEN 2
 
+#define IF_NETMAP_THREAD_STOP_CHECK_MS 200
 
 struct if_netmap_bufinfo {
 	unsigned int refcnt;
@@ -97,6 +98,16 @@ struct if_netmap_bufinfo_pool {
 	uint32_t trail;
 };
 
+
+struct if_netmap_stoppable_thread {
+	struct thread *thr;
+	int last_stop_check;
+	struct mtx stop_lock;
+	struct cv stop_cv;
+	int stop;
+};
+
+
 struct if_netmap_softc {
 	struct ifnet *ifp;
 	const struct uinet_config_if *cfg;
@@ -112,8 +123,11 @@ struct if_netmap_softc {
 
 	struct if_netmap_bufinfo_pool rx_bufinfo;
 
-	struct thread *tx_thread;
-	struct thread *rx_thread;
+	int stop_check_ticks;
+
+	struct if_netmap_stoppable_thread tx_thread;
+	struct if_netmap_stoppable_thread rx_thread;
+
 	struct mtx tx_lock;
 };
 
@@ -124,6 +138,59 @@ static int if_netmap_setup_interface(struct if_netmap_softc *sc);
 
 static unsigned int interface_count;
 
+
+static void
+if_netmap_stoppable_thread_init(struct if_netmap_stoppable_thread *sthr, const char *prefix)
+{
+	char desc[32];
+	
+	sthr->thr = NULL;
+	sthr->last_stop_check = 0;
+	snprintf(desc, sizeof(desc), "%sstplk", prefix ? prefix : "");
+	mtx_init(&sthr->stop_lock, desc, NULL, MTX_DEF);
+	snprintf(desc, sizeof(desc), "%sstpcv", prefix ? prefix : "");
+	cv_init(&sthr->stop_cv, desc);
+	sthr->stop = 0;
+}
+
+
+static int
+if_netmap_stoppable_thread_check(struct if_netmap_stoppable_thread *sthr)
+{
+	int done = 0;
+
+	mtx_lock(&sthr->stop_lock);
+	if (sthr->stop)
+		done = 1;
+	mtx_unlock(&sthr->stop_lock);
+	sthr->last_stop_check = ticks;
+
+	return (done);
+}
+
+
+static void
+if_netmap_stoppable_thread_done(struct if_netmap_stoppable_thread *sthr)
+{
+	mtx_lock(&sthr->stop_lock);
+	sthr->stop = 0;
+	cv_signal(&sthr->stop_cv);
+	mtx_unlock(&sthr->stop_lock);
+}
+
+
+static void
+if_netmap_stoppable_thread_stop(struct if_netmap_stoppable_thread *sthr)
+{
+	mtx_lock(&sthr->stop_lock);
+	sthr->stop = 1;
+	mtx_unlock(&sthr->stop_lock);
+
+	mtx_lock(&sthr->stop_lock);
+	while (sthr->stop)
+		cv_wait(&sthr->stop_cv, &sthr->stop_lock);
+	mtx_unlock(&sthr->stop_lock);
+}
 
 
 static int
@@ -352,7 +419,12 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	}
 
 	sc->fd = fd;
+	sc->stop_check_ticks = (IF_NETMAP_THREAD_STOP_CHECK_MS * hz) / 1000;
+	if (sc->stop_check_ticks == 0)
+		sc->stop_check_ticks = 1;
 
+	if_netmap_stoppable_thread_init(&sc->tx_thread, "tx");
+	if_netmap_stoppable_thread_init(&sc->rx_thread, "rx");
 
 	sc->nm_host_ctx = if_netmap_register_if(sc->fd, sc->host_ifname, sc->isvale, sc->queue);
 	if (NULL == sc->nm_host_ctx) {
@@ -468,18 +540,34 @@ if_netmap_send(void *arg)
 	uint32_t cur;
 	u_int pktlen;
 	int rv;
+	int done;
+
+	/*
+	 *  Shutdown is going to wait for this thread to exit, and shutdown
+	 *  can be initiated (and its completion waited for) from a signal
+	 *  handler, so we don't want signal handlers to run in this thread.
+	 */
+	uhi_mask_all_signals();
 
 	if (sc->cfg->cpu >= 0)
-		sched_bind(sc->tx_thread, sc->cfg->cpu);
+		sched_bind(sc->tx_thread.thr, sc->cfg->cpu);
 
-	while (1) {
+	sc->tx_thread.last_stop_check = ticks;
+	done = 0;
+	do {
 		mtx_lock(&sc->tx_lock);
-		while (IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
+		while (IFQ_DRV_IS_EMPTY(&ifp->if_snd) && !done) {
 			ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
-			mtx_sleep(&ifp->if_drv_flags, &sc->tx_lock, 0, "wtxlk", 0);
+			if (EWOULDBLOCK == mtx_sleep(&ifp->if_drv_flags, &sc->tx_lock,
+						     0, "wtxlk", sc->stop_check_ticks)) {
+				done = if_netmap_stoppable_thread_check(&sc->tx_thread);
+			}
 		}
 		mtx_unlock(&sc->tx_lock);
 	
+		if (done)
+			break;
+
 		rv = if_netmap_txsync(sc->nm_host_ctx, NULL, NULL);
 		if (rv == -1) {
 			printf("could not sync tx descriptors before transmit\n");
@@ -488,18 +576,26 @@ if_netmap_send(void *arg)
 		while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
 			avail = if_netmap_txavail(sc->nm_host_ctx);
 
-			while (0 == avail) {
+			while (0 == avail && !done) {
 				memset(&pfd, 0, sizeof(pfd));
 
 				pfd.fd = sc->fd;
 				pfd.events = UHI_POLLOUT;
 				
-				rv = uhi_poll(&pfd, 1, -1);
-				if (rv == -1)
+				rv = uhi_poll(&pfd, 1, IF_NETMAP_THREAD_STOP_CHECK_MS);
+				if (rv == 0)
+					done = if_netmap_stoppable_thread_check(&sc->tx_thread);	
+				else if (rv == -1)
 					printf("error from poll for transmit\n");
 					
 				avail = if_netmap_txavail(sc->nm_host_ctx);
 			}
+
+			if (ticks - sc->tx_thread.last_stop_check >= sc->stop_check_ticks)
+				done = if_netmap_stoppable_thread_check(&sc->tx_thread);
+
+			if (done)
+				break;
 
 			cur = if_netmap_txcur(sc->nm_host_ctx);
 
@@ -527,8 +623,9 @@ if_netmap_send(void *arg)
 				printf("could not sync tx descriptors after transmit\n");
 			}
 		}
-	}
-	
+	} while (!done);
+
+	if_netmap_stoppable_thread_done(&sc->tx_thread);
 }
 
 
@@ -627,6 +724,7 @@ if_netmap_receive(void *arg)
 	uint32_t new_reserved;
 	unsigned int n;
 	int rv;
+	int done;
 
 
 	/* Zero-copy receive
@@ -652,11 +750,18 @@ if_netmap_receive(void *arg)
 	 * from the stack but not yet returned to the netmap ring.
 	 */
 
+	/*
+	 *  Shutdown is going to wait for this thread to exit, and shutdown
+	 *  can be initiated (and its completion waited for) from a signal
+	 *  handler, so we don't want signal handlers to run in this thread.
+	 */
+	uhi_mask_all_signals();
+
 	sc = (struct if_netmap_softc *)arg;
 	ifp = sc->ifp;
 
 	if (sc->cfg->cpu >= 0)
-		sched_bind(sc->rx_thread, sc->cfg->cpu);
+		sched_bind(sc->rx_thread.thr, sc->cfg->cpu);
 
 	rv = if_netmap_rxsync(sc->nm_host_ctx, NULL, NULL, NULL);
 	if (rv == -1)
@@ -665,17 +770,28 @@ if_netmap_receive(void *arg)
 	reserved = if_netmap_rxreserved(sc->nm_host_ctx);
 	sc->hw_rx_rsvd_begin = if_netmap_rxcur(sc->nm_host_ctx);
 
+	sc->rx_thread.last_stop_check = ticks;
+	done = 0;
 	for (;;) {
-		while (0 == (avail = if_netmap_rxavail(sc->nm_host_ctx))) {
+		while (0 == (avail = if_netmap_rxavail(sc->nm_host_ctx)) && !done) {
 			memset(&pfd, 0, sizeof pfd);
 
 			pfd.fd = sc->fd;
 			pfd.events = UHI_POLLIN;
 
-			rv = uhi_poll(&pfd, 1, -1);
-			if (rv == -1)
+			rv = uhi_poll(&pfd, 1, IF_NETMAP_THREAD_STOP_CHECK_MS);
+			if (rv == 0) {
+				done = if_netmap_stoppable_thread_check(&sc->rx_thread);
+			} else if (rv == -1)
 				printf("error from poll for receive\n");
 		}
+
+		if (ticks - sc->rx_thread.last_stop_check >= sc->stop_check_ticks) {
+			done = if_netmap_stoppable_thread_check(&sc->rx_thread);
+		}
+
+		if (done)
+			break;
 
 		cur = if_netmap_rxcur(sc->nm_host_ctx);
 		new_reserved = 0;
@@ -751,6 +867,8 @@ if_netmap_receive(void *arg)
 			printf("could not sync rx descriptors after receive\n");
 
 	}
+
+	if_netmap_stoppable_thread_done(&sc->rx_thread);
 }
 
 
@@ -783,7 +901,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 
 	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
 
-	if (kthread_add(if_netmap_send, sc, NULL, &sc->tx_thread, 0, 0, "nm_tx: %s", ifp->if_xname)) {
+	if (kthread_add(if_netmap_send, sc, NULL, &sc->tx_thread.thr, 0, 0, "nm_tx: %s", ifp->if_xname)) {
 		printf("Could not start transmit thread for %s (%s)\n", ifp->if_xname, sc->host_ifname);
 		ether_ifdetach(ifp);
 		if_free(ifp);
@@ -791,7 +909,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	}
 
 
-	if (kthread_add(if_netmap_receive, sc, NULL, &sc->rx_thread, 0, 0, "nm_rx: %s", ifp->if_xname)) {
+	if (kthread_add(if_netmap_receive, sc, NULL, &sc->rx_thread.thr, 0, 0, "nm_rx: %s", ifp->if_xname)) {
 		printf("Could not start receive thread for %s (%s)\n", ifp->if_xname, sc->host_ifname);
 		ether_ifdetach(ifp);
 		if_free(ifp);
@@ -813,6 +931,11 @@ if_netmap_detach(struct uinet_config_if *cfg)
 	uint32_t ring_size;
 
 	if (sc) {
+		printf("%s (%s): Stopping rx thread\n", cfg->name, cfg->alias[0] != '\0' ? cfg->alias : "");
+		if_netmap_stoppable_thread_stop(&sc->rx_thread);
+		printf("%s (%s): Stopping tx thread\n", cfg->name, cfg->alias[0] != '\0' ? cfg->alias : "");
+		if_netmap_stoppable_thread_stop(&sc->tx_thread);
+		printf("%s (%s): Interface threads stopped\n", cfg->name, cfg->alias[0] != '\0' ? cfg->alias : "");
 
 		if (sc->nm_buffer_indices) {
 			/*

@@ -35,6 +35,7 @@
 #include <sys/pcpu.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/kthread.h>
 #include <sys/smp.h>
 #include <sys/lock.h>
 #include <sys/sx.h>
@@ -53,17 +54,21 @@ pid_t     getpid(void);
 char *strndup(const char *str, size_t len);
 unsigned int     sleep(unsigned int seconds);
 
-
-
 extern void mi_startup(void);
 
 extern void uinet_init_thread0(void);
 extern void mutex_init(void);
 
+static void shutdown_helper(void *arg);
+
+
 #if 0
 pthread_mutex_t init_lock;
 pthread_cond_t init_cond;
 #endif
+
+static struct thread *shutdown_helper_thread;
+static struct uhi_msg shutdown_helper_msg;
 
 int
 uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
@@ -167,6 +172,12 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 		}
 	}
 
+	if (uhi_msg_init(&shutdown_helper_msg, 1, 0) != 0)
+		printf("Failed to init shutdown helper message - there will be no shutdown helper thread\n");
+	else if (kthread_add(shutdown_helper, &shutdown_helper_msg, NULL, &shutdown_helper_thread, 0, 0, "shutdown_helper"))
+		printf("Failed to create shutdown helper thread\n");
+
+
 #if 0
 	printf("maxusers=%d\n", maxusers);
 	printf("maxfiles=%d\n", maxfiles);
@@ -178,15 +189,47 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 }
 
 
-void
-uinet_shutdown(unsigned int fromsighandler)
+static void
+shutdown_helper(void *arg)
 {
-	printf("\nuinet shutting down%s\n", fromsighandler ? " from signal handler" : "");
+	struct uhi_msg *msg = arg;
+	uint8_t signo;
 
-	printf("Shutting down interfaces...\n");
-	uinet_ifdestroy_all();
+	/* 
+	 * We don't want any signal handlers running in this thread, as
+	 * uinet_shutdown(), which waits for a message from this thread, may
+	 * be called from a signal handler.
+	 */
+	uhi_mask_all_signals();
 
-	printf("uinet shutdown complete\n");
+	if (msg) {
+		printf("Shutdown helper waiting for message\n");
+		if (uhi_msg_wait(msg, &signo) == 0) {
+			printf("\nuinet shutting down%s\n", signo ? " from signal handler" : "");
+
+			printf("Shutting down interfaces...\n");
+			uinet_ifdestroy_all();
+			
+			printf("uinet shutdown complete\n");
+
+			uhi_msg_rsp_send(msg, NULL);
+		} else {
+			printf("Failed to receive shutdown message\n");
+		}
+	}
+
+	printf("Shutdown helper thread exiting\n");
+}
+
+
+void
+uinet_shutdown(unsigned int signo)
+{
+	uint8_t signo_msg = signo;
+
+	uhi_msg_send(&shutdown_helper_msg, &signo_msg);
+	uhi_msg_rsp_wait(&shutdown_helper_msg, NULL);
+	uhi_msg_destroy(&shutdown_helper_msg);
 }
 
 

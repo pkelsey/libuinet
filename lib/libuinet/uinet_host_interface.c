@@ -885,10 +885,10 @@ uhi_arc4random(void)
 
 
 static void
-uhi_cleanup_handler(int sig, siginfo_t *info, void *uap)
+uhi_cleanup_handler(int signo, siginfo_t *info, void *uap)
 {
-	uinet_shutdown(1);
-	kill(getpid(), sig);
+	uinet_shutdown(signo);
+	kill(getpid(), signo);
 }
 
 
@@ -901,7 +901,7 @@ uhi_install_cleanup_handler(int signo)
 	if (sa.sa_handler == SIG_DFL) {
 		sa.sa_sigaction = uhi_cleanup_handler;
 		sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-		sigemptyset(&sa.sa_mask);
+		sigfillset(&sa.sa_mask);
 		sigaction(signo, &sa, NULL);
 	}
 }
@@ -940,4 +940,101 @@ uhi_install_sighandlers(void)
 
 	for (i = 0; i < sizeof(signal_list)/sizeof(signal_list[0]); i++)
 		uhi_install_cleanup_handler(signal_list[i]);
+}
+
+
+void
+uhi_mask_all_signals(void)
+{
+	sigset_t sigs;
+
+	sigfillset(&sigs);
+	pthread_sigmask(SIG_SETMASK, &sigs, NULL);
+}
+
+
+/*
+ * The uhi_msg_* functions implement a simple fixed-size message + response
+ * synchronization facility with the following properties:
+ *
+ *   - Safe to use in threads and signal handlers
+ *   - Zero-size messages and/or responses are permitted
+ */
+
+int
+uhi_msg_init(struct uhi_msg *msg, unsigned int size, unsigned int rsp_size)
+{
+	if (-1 == socketpair(PF_LOCAL, SOCK_STREAM, 0, msg->fds))
+		return (1);
+
+	msg->size = size ? size : 1;
+	msg->rsp_size = rsp_size ? rsp_size : 1;
+
+	return (0);
+}
+
+
+void
+uhi_msg_destroy(struct uhi_msg *msg)
+{
+	close(msg->fds[0]);
+	close(msg->fds[1]);
+}
+
+
+static int
+uhi_msg_sock_write(int fd, void *payload, unsigned int size)
+{
+	uint8_t dummy = 0;
+	unsigned int write_size;
+
+	write_size = payload ? size : 1;
+	if (write_size == write(fd, payload ? payload : &dummy,
+				write_size))
+		return (0);
+
+	return (1);
+}
+
+
+static int
+uhi_msg_sock_read(int fd, void *payload, unsigned int size)
+{
+	uint8_t dummy = 0;
+	unsigned int read_size;
+
+	read_size = payload ? size : 1;
+	if (read_size == read(fd, payload ? payload : &dummy,
+			      read_size))
+		return (0);
+
+	return (1);
+}
+
+
+int
+uhi_msg_send(struct uhi_msg *msg, void *payload)
+{
+	return (uhi_msg_sock_write(msg->fds[0], payload, msg->size));
+}
+
+
+int
+uhi_msg_wait(struct uhi_msg *msg, void *payload)
+{
+	return (uhi_msg_sock_read(msg->fds[1], payload, msg->size));
+}
+
+
+int
+uhi_msg_rsp_send(struct uhi_msg *msg, void *payload)
+{
+	return (uhi_msg_sock_write(msg->fds[1], payload, msg->rsp_size));
+}
+
+
+int
+uhi_msg_rsp_wait(struct uhi_msg *msg, void *payload)
+{
+	return (uhi_msg_sock_read(msg->fds[0], payload, msg->rsp_size));
 }
