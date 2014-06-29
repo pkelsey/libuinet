@@ -83,8 +83,6 @@
 #include "uinet_host_interface.h"
 
 
-#define UHI_NSEC_PER_SEC	(1000UL * 1000UL * 1000UL)
-
 #if defined(__linux__)
 typedef cpu_set_t cpuset_t;
 #endif /* __linux__ */
@@ -397,6 +395,19 @@ pthread_start_routine(void *arg)
 	struct uhi_thread_start_args *tsa = arg;
 	int error;
 	int cpuid;
+
+	/*
+	 * uinet_shutdown() waits for a message from the shutdown thread
+	 * indicating shutdown is complete.  If uinet_shutdown() is called
+	 * from a signal handler running in a thread context that is holding
+	 * a lock that the shutdown activity needs to acquire in order to
+	 * complete, deadlock will occur.  Masking all signals in all
+	 * internal uinet threads prevents such a deadlock by preventing all
+	 * signal handlers (and thus any that might call uinet_shutdown())
+	 * from running in the context of any thread that might be holding a
+	 * lock required by the shutdown thread.
+	 */
+	uhi_mask_all_signals();
 
 #if defined(UINET_PROFILE)
 	setitimer(ITIMER_PROF, &prof_itimer, NULL);
@@ -960,6 +971,16 @@ uhi_mask_all_signals(void)
 }
 
 
+void
+uhi_unmask_all_signals(void)
+{
+	sigset_t sigs;
+
+	sigemptyset(&sigs);
+	pthread_sigmask(SIG_SETMASK, &sigs, NULL);
+}
+
+
 /*
  * The uhi_msg_* functions implement a simple fixed-size message + response
  * synchronization facility with the following properties:
@@ -984,8 +1005,12 @@ uhi_msg_init(struct uhi_msg *msg, unsigned int size, unsigned int rsp_size)
 void
 uhi_msg_destroy(struct uhi_msg *msg)
 {
+	int old_errno = errno;
+
 	close(msg->fds[0]);
 	close(msg->fds[1]);
+
+	errno = old_errno;
 }
 
 
@@ -994,13 +1019,19 @@ uhi_msg_sock_write(int fd, void *payload, unsigned int size)
 {
 	uint8_t dummy = 0;
 	unsigned int write_size;
+	int result;
+	int old_errno = errno;
 
 	write_size = payload ? size : 1;
 	if (write_size == write(fd, payload ? payload : &dummy,
 				write_size))
-		return (0);
+		result = 0;
+	else
+		result = 1;
 
-	return (1);
+	errno = old_errno;
+	
+	return (result);
 }
 
 
@@ -1009,13 +1040,19 @@ uhi_msg_sock_read(int fd, void *payload, unsigned int size)
 {
 	uint8_t dummy = 0;
 	unsigned int read_size;
+	int result;
+	int old_errno = errno;
 
 	read_size = payload ? size : 1;
 	if (read_size == read(fd, payload ? payload : &dummy,
 			      read_size))
-		return (0);
+		result = 0;
+	else
+		result = 1;
 
-	return (1);
+	errno = old_errno;
+	
+	return (result);
 }
 
 

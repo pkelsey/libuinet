@@ -542,13 +542,6 @@ if_netmap_send(void *arg)
 	int rv;
 	int done;
 
-	/*
-	 *  Shutdown is going to wait for this thread to exit, and shutdown
-	 *  can be initiated (and its completion waited for) from a signal
-	 *  handler, so we don't want signal handlers to run in this thread.
-	 */
-	uhi_mask_all_signals();
-
 	if (sc->cfg->cpu >= 0)
 		sched_bind(sc->tx_thread.thr, sc->cfg->cpu);
 
@@ -750,13 +743,6 @@ if_netmap_receive(void *arg)
 	 * from the stack but not yet returned to the netmap ring.
 	 */
 
-	/*
-	 *  Shutdown is going to wait for this thread to exit, and shutdown
-	 *  can be initiated (and its completion waited for) from a signal
-	 *  handler, so we don't want signal handlers to run in this thread.
-	 */
-	uhi_mask_all_signals();
-
 	sc = (struct if_netmap_softc *)arg;
 	ifp = sc->ifp;
 
@@ -773,7 +759,7 @@ if_netmap_receive(void *arg)
 	sc->rx_thread.last_stop_check = ticks;
 	done = 0;
 	for (;;) {
-		while (0 == (avail = if_netmap_rxavail(sc->nm_host_ctx)) && !done) {
+		while (!done && (0 == (avail = if_netmap_rxavail(sc->nm_host_ctx)))) {
 			memset(&pfd, 0, sizeof pfd);
 
 			pfd.fd = sc->fd;
