@@ -31,7 +31,9 @@
 #define UHI_CLOCK_REALTIME	0
 #define UHI_CLOCK_MONOTONIC	4
 
-#define UHI_TS_TO_NSEC(ts) (uint64_t)((uint64_t)((ts).tv_sec) * 1000UL * 1000UL * 1000UL + (ts).tv_nsec)
+#define UHI_NSEC_PER_SEC	(1000ULL * 1000ULL * 1000ULL)
+
+#define UHI_TS_TO_NSEC(ts) (uint64_t)((uint64_t)((ts).tv_sec) * UHI_NSEC_PER_SEC + (ts).tv_nsec)
 #define UHI_MAKE_TS(ts,sec,nsec) (ts).tv_sec = sec; (ts).tv_nsec = nsec
 
 
@@ -98,6 +100,17 @@ typedef void * uhi_rwlock_t;
 #define UHI_RW_WRECURSE 0x1
 
 
+/*
+ * This is opaque - don't reference the members anywhere.  The definition is
+ * public to allow static allocation.
+ */
+struct uhi_msg {
+	int fds[2];
+	unsigned int size;
+	unsigned int rsp_size;
+};
+
+
 void uhi_init(void) __attribute__((constructor));
 void uhi_set_num_cpus(unsigned int n);
 
@@ -157,5 +170,15 @@ void  uhi_arc4rand(void *ptr, unsigned int len, int reseed);
 uint32_t uhi_arc4random(void);
 
 void  uhi_install_sighandlers(void);
+void  uhi_mask_all_signals(void);
+void  uhi_unmask_all_signals(void);
+
+int uhi_msg_init(struct uhi_msg *msg, unsigned int size, unsigned int rsp_size);
+void uhi_msg_destroy(struct uhi_msg *msg);
+int uhi_msg_send(struct uhi_msg *msg, void *payload);
+int uhi_msg_wait(struct uhi_msg *msg, void *payload);
+int uhi_msg_rsp_send(struct uhi_msg *msg, void *payload);
+int uhi_msg_rsp_wait(struct uhi_msg *msg, void *payload);
+
 
 #endif /* _UINET_HOST_INTERFACE_H_ */

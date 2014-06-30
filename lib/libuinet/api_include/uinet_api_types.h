@@ -428,9 +428,10 @@ struct uinet_in_l2info {
 
 
 #define UINET_SYNF_ACCEPT		0	/* Process SYN normally */
-#define UINET_SYNF_REJECT_RST		1	/* Discard SYN, send RST */
-#define UINET_SYNF_REJECT_SILENT	2	/* Discard SYN silently*/
-#define UINET_SYNF_DEFER		3	/* Decision will be returned later via setsockopt() */
+#define UINET_SYNF_ACCEPT_PASSIVE	1	/* Process SYN for passive reassembly */
+#define UINET_SYNF_REJECT_RST		2	/* Discard SYN, send RST */
+#define UINET_SYNF_REJECT_SILENT	3	/* Discard SYN silently */
+#define UINET_SYNF_DEFER		4	/* Decision will be returned later via setsockopt() */
 
 typedef void * uinet_synf_deferral_t;
 

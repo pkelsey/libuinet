@@ -893,7 +893,7 @@ findpcb:
 		    INPLOOKUP_WILDCARD | INPLOOKUP_WLOCKPCB,
 		    m->m_pkthdr.rcvif, m);
 
-		if (inp && 
+		if (inp && inp->inp_socket != NULL &&
 		    ((inp->inp_socket->so_options & (SO_ACCEPTCONN|SO_PASSIVE)) !=
 		     (SO_ACCEPTCONN|SO_PASSIVE))) {
 			INP_WUNLOCK(inp);
@@ -901,7 +901,7 @@ findpcb:
 		}
 	}
 
-	if (inp &&
+	if (inp && inp->inp_socket != NULL &&
 	    ((inp->inp_socket->so_options & (SO_ACCEPTCONN|SO_PASSIVE)) ==
 	     (SO_ACCEPTCONN|SO_PASSIVE)) &&
 	    ((thflags & (TH_SYN|TH_ACK)) == (TH_SYN|TH_ACK))) {

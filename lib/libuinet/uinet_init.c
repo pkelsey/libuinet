@@ -35,6 +35,7 @@
 #include <sys/pcpu.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
+#include <sys/kthread.h>
 #include <sys/smp.h>
 #include <sys/lock.h>
 #include <sys/sx.h>
@@ -53,17 +54,23 @@ pid_t     getpid(void);
 char *strndup(const char *str, size_t len);
 unsigned int     sleep(unsigned int seconds);
 
-
-
 extern void mi_startup(void);
 
 extern void uinet_init_thread0(void);
 extern void mutex_init(void);
 
+static void shutdown_helper(void *arg);
+static void one_sighandling_thread(void *arg);
+
+
 #if 0
 pthread_mutex_t init_lock;
 pthread_cond_t init_cond;
 #endif
+
+static struct thread *shutdown_helper_thread;
+static struct thread *at_least_one_sighandling_thread;
+static struct uhi_msg shutdown_helper_msg;
 
 int
 uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
@@ -167,6 +174,18 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 		}
 	}
 
+	if (uhi_msg_init(&shutdown_helper_msg, 1, 0) != 0)
+		printf("Failed to init shutdown helper message - there will be no shutdown helper thread\n");
+	else if (kthread_add(shutdown_helper, &shutdown_helper_msg, NULL, &shutdown_helper_thread, 0, 0, "shutdown_helper"))
+		printf("Failed to create shutdown helper thread\n");
+
+	/*
+	 * XXX This should be configurable - applications that arrange for a
+	 * particular thread to process all signals will not want this.
+	 */
+	if (kthread_add(one_sighandling_thread, NULL, NULL, &at_least_one_sighandling_thread, 0, 0, "one_sighandler"))
+		printf("Failed to create at least one signal handling thread\n");
+
 #if 0
 	printf("maxusers=%d\n", maxusers);
 	printf("maxfiles=%d\n", maxfiles);
@@ -178,15 +197,85 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 }
 
 
-void
-uinet_shutdown(unsigned int fromsighandler)
+static void
+one_sighandling_thread(void *arg)
 {
-	printf("\nuinet shutting down%s\n", fromsighandler ? " from signal handler" : "");
+	uhi_unmask_all_signals();
 
-	printf("Shutting down interfaces...\n");
-	uinet_ifdestroy_all();
+	for (;;) {
+		uhi_nanosleep(60 * UHI_NSEC_PER_SEC);
+	}
+}
 
-	printf("uinet shutdown complete\n");
+
+static void
+shutdown_helper(void *arg)
+{
+	struct uhi_msg *msg = arg;
+	uint8_t signo;
+	int shutdown_complete = 0;
+
+	if (msg) {
+
+		/*
+		 * Loop to respond to multiple messages, but only shutdown
+		 * once.  This allows multiple, possibly concurrent,
+		 * executions of uinet_shutdown() to result in one shutdown
+		 * and none of the calls to uinet_shutdown() to block
+		 * indefinitely.  This provides nice behavior when
+		 * uinet_shutdown() is called from a signal handler in a
+		 * multi-threaded application that is not carefully policing
+		 * signal masks in all the threads.
+		 */
+		for (;;) {
+			if (uhi_msg_wait(msg, &signo) == 0) {
+				if (!shutdown_complete) {
+					printf("\nuinet shutting down");
+					if (signo)
+						printf(" from signal handler (signal %u)",
+						       signo);
+					printf("\n");
+				
+					printf("Shutting down interfaces...\n");
+					uinet_ifdestroy_all();
+			
+					printf("uinet shutdown complete\n");
+				
+					shutdown_complete = 1;
+				}
+
+				uhi_msg_rsp_send(msg, NULL);
+			} else {
+				printf("Failed to receive shutdown message\n");
+			}
+		}
+	}
+
+	printf("Shutdown helper thread exiting\n");
+}
+
+
+void
+uinet_shutdown(unsigned int signo)
+{
+	uint8_t signo_msg = signo;
+
+	uhi_msg_send(&shutdown_helper_msg, &signo_msg);
+	uhi_msg_rsp_wait(&shutdown_helper_msg, NULL);
+
+	/*
+	 * uinet_shutdown() may in general be invoked from a signal handler,
+	 * and multi-threaded applications may in general have the same
+	 * signal handler running concurrently in multiple threads, and thus
+	 * multiple instances of uinet_shutdown() may be running
+	 * concurrently if it is called from a signal handler in a
+	 * multi-threaded application.  Absent a portable multiprocessor
+	 * memory barrier API to use to ensure uinet_shutdown() only ever
+	 * effectively runs once, there is no safe way to destroy
+	 * shutdown_helper_msg, so for now we leak whatever small bit of
+	 * context might be associated with the message.
+	 */
+	/* uhi_msg_destroy(&shutdown_helper_msg); */
 }
 
 

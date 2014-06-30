@@ -68,6 +68,19 @@ uinet_initialize_thread(void)
 	struct thread *td;
 	int cpuid;
 
+	/*
+	 * uinet_shutdown() waits for a message from the shutdown thread
+	 * indicating shutdown is complete.  If uinet_shutdown() is called
+	 * from a signal handler running in a thread context that is holding
+	 * a lock that the shutdown activity needs to acquire in order to
+	 * complete, deadlock will occur.  Masking all signals in all
+	 * threads that use the uinet API prevents such a deadlock by
+	 * preventing all signal handlers (and thus any that might call
+	 * uinet_shutdown()) from running in the context of any thread that
+	 * might be holding a lock required by the shutdown thread.
+	 */
+	uhi_mask_all_signals();
+
 	utd = uhi_thread_get_thread_specific_data();
 	if (NULL == utd) {
 		utd = uinet_thread_alloc(NULL);

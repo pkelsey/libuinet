@@ -214,7 +214,7 @@ uhi_clock_gettime_ns(int id)
 	 
 	uhi_clock_gettime(id, &sec, &nsec);
 
-	return ((uint64_t)sec * 1000000000ULL + nsec);
+	return ((uint64_t)sec * UHI_NSEC_PER_SEC + nsec);
 }
 
 
@@ -230,8 +230,8 @@ uhi_nanosleep(uint64_t nsecs)
 	struct timespec rts;
 	int rv;
 
-	ts.tv_sec = nsecs / (1000UL*1000UL*1000UL);
-	ts.tv_nsec = nsecs % (1000UL*1000UL*1000UL);
+	ts.tv_sec = nsecs / UHI_NSEC_PER_SEC;
+	ts.tv_nsec = nsecs % UHI_NSEC_PER_SEC;
 	while ((-1 == (rv = nanosleep(&ts, &rts))) && (EINTR == errno)) {
 		ts = rts;
 	}
@@ -396,6 +396,19 @@ pthread_start_routine(void *arg)
 	int error;
 	int cpuid;
 
+	/*
+	 * uinet_shutdown() waits for a message from the shutdown thread
+	 * indicating shutdown is complete.  If uinet_shutdown() is called
+	 * from a signal handler running in a thread context that is holding
+	 * a lock that the shutdown activity needs to acquire in order to
+	 * complete, deadlock will occur.  Masking all signals in all
+	 * internal uinet threads prevents such a deadlock by preventing all
+	 * signal handlers (and thus any that might call uinet_shutdown())
+	 * from running in the context of any thread that might be holding a
+	 * lock required by the shutdown thread.
+	 */
+	uhi_mask_all_signals();
+
 #if defined(UINET_PROFILE)
 	setitimer(ITIMER_PROF, &prof_itimer, NULL);
 #endif /* UINET_PROFILE */
@@ -559,11 +572,6 @@ uhi_cond_init(uhi_cond_t *c)
 
 	pthread_condattr_init(&attr);
 
-#if !defined(__APPLE__)
-	if (0 != pthread_condattr_setclock(&attr, CLOCK_MONOTONIC))
-		printf("Warning: condition variable timed wait using CLOCK_REALTIME");
-#endif /* __APPLE__ */
-
 	error = pthread_cond_init(pc, &attr);
 	pthread_condattr_destroy(&attr);
 
@@ -594,10 +602,20 @@ int
 uhi_cond_timedwait(uhi_cond_t *c, uhi_mutex_t *m, uint64_t nsecs)
 {
 	struct timespec abstime;
+	int64_t now_sec;
+	long now_nsec;
+	uint64_t total_nsec;
 
-	abstime.tv_sec = nsecs / (1000UL*1000UL*1000UL);
-	abstime.tv_nsec = nsecs % (1000UL*1000UL*1000UL);
+	uhi_clock_gettime(UHI_CLOCK_REALTIME, &now_sec, &now_nsec);
 
+	abstime.tv_sec = now_sec + nsecs / UHI_NSEC_PER_SEC;
+	total_nsec = now_nsec + nsecs % UHI_NSEC_PER_SEC;
+	if (total_nsec >= UHI_NSEC_PER_SEC) {
+		total_nsec -= UHI_NSEC_PER_SEC;
+		abstime.tv_sec++;
+	}
+	abstime.tv_nsec = total_nsec;
+	
 	return (pthread_cond_timedwait((pthread_cond_t *)(*c), (pthread_mutex_t *)(*m), &abstime));
 }
 
@@ -885,10 +903,10 @@ uhi_arc4random(void)
 
 
 static void
-uhi_cleanup_handler(int sig, siginfo_t *info, void *uap)
+uhi_cleanup_handler(int signo, siginfo_t *info, void *uap)
 {
-	uinet_shutdown(1);
-	kill(getpid(), sig);
+	uinet_shutdown(signo);
+	kill(getpid(), signo);
 }
 
 
@@ -901,7 +919,7 @@ uhi_install_cleanup_handler(int signo)
 	if (sa.sa_handler == SIG_DFL) {
 		sa.sa_sigaction = uhi_cleanup_handler;
 		sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
-		sigemptyset(&sa.sa_mask);
+		sigfillset(&sa.sa_mask);
 		sigaction(signo, &sa, NULL);
 	}
 }
@@ -940,4 +958,127 @@ uhi_install_sighandlers(void)
 
 	for (i = 0; i < sizeof(signal_list)/sizeof(signal_list[0]); i++)
 		uhi_install_cleanup_handler(signal_list[i]);
+}
+
+
+void
+uhi_mask_all_signals(void)
+{
+	sigset_t sigs;
+
+	sigfillset(&sigs);
+	pthread_sigmask(SIG_SETMASK, &sigs, NULL);
+}
+
+
+void
+uhi_unmask_all_signals(void)
+{
+	sigset_t sigs;
+
+	sigemptyset(&sigs);
+	pthread_sigmask(SIG_SETMASK, &sigs, NULL);
+}
+
+
+/*
+ * The uhi_msg_* functions implement a simple fixed-size message + response
+ * synchronization facility with the following properties:
+ *
+ *   - Safe to use in threads and signal handlers
+ *   - Zero-size messages and/or responses are permitted
+ */
+
+int
+uhi_msg_init(struct uhi_msg *msg, unsigned int size, unsigned int rsp_size)
+{
+	if (-1 == socketpair(PF_LOCAL, SOCK_STREAM, 0, msg->fds))
+		return (1);
+
+	msg->size = size ? size : 1;
+	msg->rsp_size = rsp_size ? rsp_size : 1;
+
+	return (0);
+}
+
+
+void
+uhi_msg_destroy(struct uhi_msg *msg)
+{
+	int old_errno = errno;
+
+	close(msg->fds[0]);
+	close(msg->fds[1]);
+
+	errno = old_errno;
+}
+
+
+static int
+uhi_msg_sock_write(int fd, void *payload, unsigned int size)
+{
+	uint8_t dummy = 0;
+	unsigned int write_size;
+	int result;
+	int old_errno = errno;
+
+	write_size = payload ? size : 1;
+	if (write_size == write(fd, payload ? payload : &dummy,
+				write_size))
+		result = 0;
+	else
+		result = 1;
+
+	errno = old_errno;
+	
+	return (result);
+}
+
+
+static int
+uhi_msg_sock_read(int fd, void *payload, unsigned int size)
+{
+	uint8_t dummy = 0;
+	unsigned int read_size;
+	int result;
+	int old_errno = errno;
+
+	read_size = payload ? size : 1;
+	if (read_size == read(fd, payload ? payload : &dummy,
+			      read_size))
+		result = 0;
+	else
+		result = 1;
+
+	errno = old_errno;
+	
+	return (result);
+}
+
+
+int
+uhi_msg_send(struct uhi_msg *msg, void *payload)
+{
+	return (uhi_msg_sock_write(msg->fds[0], payload, msg->size));
+}
+
+
+int
+uhi_msg_wait(struct uhi_msg *msg, void *payload)
+{
+	return (uhi_msg_sock_read(msg->fds[1], payload, msg->size));
+}
+
+
+int
+uhi_msg_rsp_send(struct uhi_msg *msg, void *payload)
+{
+	return (uhi_msg_sock_write(msg->fds[1], payload, msg->rsp_size));
+}
+
+
+int
+uhi_msg_rsp_wait(struct uhi_msg *msg, void *payload)
+{
+	return (uhi_msg_sock_read(msg->fds[0], payload, msg->rsp_size));
 }

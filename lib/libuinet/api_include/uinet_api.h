@@ -79,7 +79,7 @@ int   uinet_pool_get_cur(uinet_pool_t pool);
 int   uinet_setl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
 int   uinet_setl2info2(struct uinet_socket *so, uint8_t *local_addr, uint8_t *foreign_addr,
 		       uint16_t flags, struct uinet_in_l2tagstack *tagstack);
-void  uinet_shutdown(unsigned int fromsighandler);
+void  uinet_shutdown(unsigned int signo);
 int   uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struct uinet_socket **aso);
 int   uinet_soallocuserctx(struct uinet_socket *so);
 int   uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam);
