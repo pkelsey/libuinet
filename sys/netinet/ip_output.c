@@ -1053,8 +1053,6 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			case SO_L2INFO:
 #ifdef PROMISCUOUS_INET
 			{
-				SOCK_LOCK_ASSERT(so);
-				
 				/*
 				 * The INFO lock is obtained when modifying
 				 * inp->inp_l2info so that inpcb hash
@@ -1063,9 +1061,11 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				 */
 				INP_INFO_RLOCK(inp->inp_pcbinfo);
 				INP_WLOCK(inp);
+				SOCK_LOCK(so);
 
 				in_promisc_l2info_copy(inp->inp_l2info, so->so_l2info);
 
+				SOCK_UNLOCK(so);
 				INP_WUNLOCK(inp);
 				INP_INFO_RUNLOCK(inp->inp_pcbinfo);
 				error = 0;

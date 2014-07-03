@@ -2667,11 +2667,11 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 				
 				SOCK_LOCK(so);
 				in_promisc_l2info_copy(so->so_l2info, &l2info);
+				SOCK_UNLOCK(so);
 
 				/* Note: ignore error */
 				if (so->so_proto->pr_ctloutput)
 					(*so->so_proto->pr_ctloutput)(so, sopt);
-				SOCK_UNLOCK(so);
 			} else {
 				error = ENOPROTOOPT;
 			}
