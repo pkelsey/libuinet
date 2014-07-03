@@ -102,6 +102,9 @@ struct syncache {
 	struct m_tag	*sc_l2tag;		/* L2 info from SYN packet */
 	uint16_t	sc_fib;			/* FIB number for this entry */
 #endif
+#ifdef PASSIVE_INET
+	uint16_t	sc_altfib;		/* FIB for syncache responses */
+#endif
 	u_int32_t	sc_spare[2];		/* UTO */
 };
 

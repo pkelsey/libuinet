@@ -120,6 +120,8 @@ int   uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
 		   void *newp, size_t newplen, size_t *retval, int flags);
 void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
 void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
+void  uinet_synfilter_setl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
+void  uinet_synfilter_setaltfib(uinet_api_synfilter_cookie_t cookie, unsigned int altfib);
 void  uinet_synfilter_go_active_on_timeout(uinet_api_synfilter_cookie_t cookie, unsigned int ms);
 int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);
 uinet_synf_deferral_t uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie);

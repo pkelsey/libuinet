@@ -1199,6 +1199,24 @@ uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l
 
 
 void
+uinet_synfilter_setl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i)
+{
+	struct syn_filter_cbarg *cbarg = cookie;
+
+	memcpy(cbarg->l2i, l2i, sizeof(*l2i));
+}
+
+
+void
+uinet_synfilter_setaltfib(uinet_api_synfilter_cookie_t cookie, unsigned int altfib)
+{
+	struct syn_filter_cbarg *cbarg = cookie;
+	
+	cbarg->altfib = altfib;
+}
+
+
+void
 uinet_synfilter_go_active_on_timeout(uinet_api_synfilter_cookie_t cookie, unsigned int ms)
 {
 	struct syn_filter_cbarg *cbarg = cookie;

@@ -773,20 +773,27 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 #ifdef INET6
 	int isipv6;
 #endif
+	int info_locked = 0;
 	TCPDEBUG0;
 
 	/*
 	 * We require the pcbinfo lock if we will close the socket as part of
 	 * this call.
 	 */
-	if (flags & PRUS_EOF)
+	if (flags & PRUS_EOF) {
 		INP_INFO_WLOCK(&V_tcbinfo);
+		info_locked = 1;
+	}
 	inp = sotoinpcb(so);
 	KASSERT(inp != NULL, ("tcp_usr_send: inp == NULL"));
 #ifdef PASSIVE_INET
-	if (inp->inp_flags2 & INP_PASSIVE)
+	if (inp->inp_flags2 & INP_PASSIVE) {
+		if (!info_locked) {
+			INP_INFO_WLOCK(&V_tcbinfo);
+			info_locked = 1;
+		}
 		in_passive_acquire_locks(so);
-	else
+	} else
 #endif
 	INP_WLOCK(inp);
 	if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
@@ -915,7 +922,7 @@ out:
 	else
 #endif
 	INP_WUNLOCK(inp);
-	if (flags & PRUS_EOF)
+	if (info_locked)
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 	return (error);
 }

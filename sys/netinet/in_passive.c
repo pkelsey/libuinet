@@ -66,19 +66,27 @@ in_passive_inpcb_init(struct inpcb *inp, int flags)
 
 /* Consistently order a coupled pair of passive-reassembly sockets */
 static void
+in_passive_ordered_socks(struct socket *so, struct socket **primary_so,
+			 struct socket **secondary_so)
+{
+	if (so->so_options & SO_PASSIVECLNT) {
+		*primary_so = so->so_passive_peer;
+		*secondary_so = so;
+	} else {
+		*primary_so = so;
+		*secondary_so = so->so_passive_peer;
+	}
+}
+
+
+static void
 in_passive_ordered_inps(struct socket *so, struct inpcb **primary_inp,
 			struct inpcb **secondary_inp)
 {
 	struct socket *primary_so;
 	struct socket *secondary_so;
 
-	if (so->so_options & SO_PASSIVECLNT) {
-		primary_so = so->so_passive_peer;
-		secondary_so = so;
-	} else {
-		primary_so = so;
-		secondary_so = so->so_passive_peer;
-	}
+	in_passive_ordered_socks(so, &primary_so, &secondary_so);
 
 	*primary_inp = sotoinpcb(primary_so);
 	*secondary_inp = sotoinpcb(secondary_so);
@@ -112,6 +120,32 @@ in_passive_release_locks(struct socket *so)
 
 
 void
+in_passive_acquire_sock_locks(struct socket *so)
+{
+	struct socket *primary_so;
+	struct socket *secondary_so;
+
+	in_passive_ordered_socks(so, &primary_so, &secondary_so);
+
+	SOCK_LOCK(primary_so);
+	SOCK_LOCK(secondary_so);
+}
+
+
+void
+in_passive_release_sock_locks(struct socket *so)
+{
+	struct socket *primary_so;
+	struct socket *secondary_so;
+
+	in_passive_ordered_socks(so, &primary_so, &secondary_so);
+
+	SOCK_UNLOCK(secondary_so);
+	SOCK_UNLOCK(primary_so);
+}
+
+
+void
 in_passive_convert_to_active(struct socket *so)
 {
 	struct socket *peer_so;
@@ -132,14 +166,14 @@ in_passive_convert_to_active(struct socket *so)
 	peertp = intotcpcb(peer_inp);
 
 	inp->inp_flags2 &= ~INP_PASSIVE;
-	SOCK_LOCK(so);
-	so->so_options &= ~(SO_PASSIVE|SO_PASSIVECLNT);
-	SOCK_UNLOCK(so);
-
 	peer_inp->inp_flags2 &= ~INP_PASSIVE;
-	SOCK_LOCK(peer_so);
+
+	in_passive_acquire_sock_locks(so);
+	so->so_options &= ~(SO_PASSIVE|SO_PASSIVECLNT);
+	so->so_count--;
 	peer_so->so_options &= ~(SO_PASSIVE|SO_PASSIVECLNT);
-	SOCK_UNLOCK(peer_so);
+	peer_so->so_count--;
+	in_passive_release_sock_locks(so);
 
 	tp->snd_una = peertp->rcv_nxt;
 	tp->snd_max = peertp->rcv_nxt;
@@ -184,5 +218,6 @@ in_passive_convert_to_active(struct socket *so)
 	peertp->t_flags &= ~TF_RCVD_TSTMP;
 
 	/* Send an RST to the endpoint we will be impersonating. */
-	tcp_drop(peertp, ECONNABORTED);
+	if (tcp_drop(peertp, ECONNABORTED))
+		INP_WUNLOCK(peer_inp);
 }

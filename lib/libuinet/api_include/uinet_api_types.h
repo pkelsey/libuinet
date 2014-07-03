@@ -165,6 +165,7 @@ struct uinet_uio {
 #define	UINET_SO_NO_OFFLOAD	0x00004000	/* socket cannot be offloaded */
 #define	UINET_SO_NO_DDP		0x00008000	/* disable direct data placement */
 #define	UINET_SO_PROMISC	0x00010000	/* socket will be used for promiscuous listen */
+#define	UINET_SO_PASSIVE	0x00020000	/* socket will be used for passive reassembly */
 #define	UINET_SO_ALTFIB		0x00080000	/* alternate FIB is set */
 
 
@@ -201,6 +202,7 @@ struct uinet_uio {
 
 
 #define	UINET_MSG_DONTWAIT	0x80		/* this message should be nonblocking */
+#define	UINET_MSG_EOF		0x100		/* data completes connection */
 #define	UINET_MSG_NBIO		0x4000		/* FIONBIO mode, used by fifofs */
 #define	UINET_MSG_HOLE_BREAK	0x40000		/* break at and indicate hole boundary */
 

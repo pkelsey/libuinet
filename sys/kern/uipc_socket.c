@@ -148,6 +148,10 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/uipc_socket.c 233353 2012-03-23 11:26
 #include <netinet/in_promisc.h>
 #endif
 
+#ifdef PASSIVE_INET
+#include <netinet/in_passive.h>
+#endif
+
 #include <vm/uma.h>
 
 #ifdef COMPAT_FREEBSD32
@@ -481,7 +485,7 @@ sonewconn(struct socket *head, int connstatus)
 		connstatus = 0;
 	so->so_head = head;
 	so->so_type = head->so_type;
-	so->so_options = head->so_options &~ SO_ACCEPTCONN;
+	so->so_options = head->so_options &~ (SO_ACCEPTCONN|SO_PASSIVE);
 	so->so_linger = head->so_linger;
 	so->so_state = head->so_state | SS_NOFDREF;
 	so->so_fibnum = head->so_fibnum;
@@ -567,7 +571,7 @@ sonewconn_passive_client(struct socket *head, int connstatus)
 		return (NULL);
 	so->so_head = NULL; /* just inheriting from head, not otherwise associating */
 	so->so_type = head->so_type;
-	so->so_options = head->so_options &~ SO_ACCEPTCONN;
+	so->so_options = head->so_options &~ (SO_ACCEPTCONN|SO_PASSIVE);
 	so->so_linger = head->so_linger;
 	so->so_state = head->so_state | SS_NOFDREF;
 	so->so_fibnum = head->so_fibnum;
@@ -814,23 +818,22 @@ drop:
 	}
 	ACCEPT_LOCK();
 #ifdef PASSIVE_INET
-	if ((so->so_options & SO_PASSIVE) &&
-	    !(so->so_options & SO_PASSIVECLNT))
-		SOCK_LOCK(so->so_passive_peer);
+	if (so->so_options & SO_PASSIVE)
+		in_passive_acquire_sock_locks(so);
+	else
 #endif
 	SOCK_LOCK(so);
-#ifdef PASSIVE_INET
-	if (so->so_options & SO_PASSIVECLNT)
-		SOCK_LOCK(so->so_passive_peer);
-#endif
 	KASSERT((so->so_state & SS_NOFDREF) == 0, ("soclose: NOFDREF"));
 	so->so_state |= SS_NOFDREF;
 #ifdef PASSIVE_INET
 	if (so->so_options & SO_PASSIVE) {
+		sorele_nounlock(so);
 		if (so->so_count == 2)
 			sorele_nounlock(so->so_passive_peer);
-		SOCK_UNLOCK(so->so_passive_peer);
+		in_passive_release_sock_locks(so);
+		ACCEPT_UNLOCK();
 	}
+	else
 #endif
 	sorele(so);
 	CURVNET_RESTORE();
@@ -2713,11 +2716,11 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 				
 				SOCK_LOCK(so);
 				in_promisc_l2info_copy(so->so_l2info, &l2info);
+				SOCK_UNLOCK(so);
 
 				/* Note: ignore error */
 				if (so->so_proto->pr_ctloutput)
 					(*so->so_proto->pr_ctloutput)(so, sopt);
-				SOCK_UNLOCK(so);
 			} else {
 				error = ENOPROTOOPT;
 			}

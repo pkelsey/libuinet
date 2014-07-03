@@ -73,5 +73,7 @@ uinet_synfilter_getconninfo
 uinet_synfilter_getl2info
 uinet_synfilter_go_active_on_timeout
 uinet_synfilter_install
+uinet_synfilter_setaltfib
+uinet_synfilter_setl2info
 uinet_sysctl
 uinet_sysctlbyname

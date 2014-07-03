@@ -117,7 +117,8 @@ struct syn_filter_cbarg {
 				 */
 	struct in_l2info *l2i;
 	int decision;
-	int initial_timeout;
+	int initial_timeout;	/* modified syncache timeout for passive-to-active-on-timeout */
+	unsigned int altfib;	/* fib to use for syncache responses after a passive-to-active transition */
 };
 
 

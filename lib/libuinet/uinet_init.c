@@ -185,6 +185,7 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 	 */
 	if (kthread_add(one_sighandling_thread, NULL, NULL, &at_least_one_sighandling_thread, 0, 0, "one_sighandler"))
 		printf("Failed to create at least one signal handling thread\n");
+	uhi_mask_all_signals();
 
 #if 0
 	printf("maxusers=%d\n", maxusers);

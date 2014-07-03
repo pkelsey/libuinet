@@ -33,6 +33,8 @@
 int in_passive_inpcb_init(struct inpcb *inp, int flags);
 void in_passive_acquire_locks(struct socket *so);
 void in_passive_release_locks(struct socket *so);
+void in_passive_acquire_sock_locks(struct socket *so);
+void in_passive_release_sock_locks(struct socket *so);
 void in_passive_convert_to_active(struct socket *so);
 
 #endif /* !_NETINET_IN_PASSIVE_H_ */

@@ -567,7 +567,8 @@ syn_filter_getopt(struct socket *so, struct sockopt *sopt)
 	sfi = sfinst->sfi;
 	if (sfi) {
 		strcpy(sfa_out->sfa_name, sfi->params.synf_name);
-		strcpy(sfa_out->sfa_arg, sfinst->ctor_arg);
+		/* use memcpy, not strcpy, to support non-string uses of sfa_arg */
+		memcpy(sfa_out->sfa_arg, sfinst->ctor_arg, sizeof(sfa_out->sfa_arg));
 	} else {
 		sfa_out->sfa_name[0] = '\0';
 		sfa_out->sfa_arg[0] = '\0';
@@ -638,7 +639,8 @@ syn_filter_setopt(struct socket *so, struct sockopt *sopt)
 		}
 	
 		sfinst->sfi = sfi;
-		strcpy(sfinst->ctor_arg, sfa->sfa_arg);
+		/* use memcpy, not strcpy, to support non-string uses of sfa_arg */
+		memcpy(sfinst->ctor_arg, sfa->sfa_arg, sizeof(sfinst->ctor_arg));
 
 		inp->inp_synf = sfinst;
 		sfinst->instance_arg = syn_filter_run_constructor(inp);
@@ -698,7 +700,7 @@ syn_filter_setopt(struct socket *so, struct sockopt *sopt)
 			INP_WLOCK(inp);
 			syncache_add(&cbarg.inc, &cbarg.to, &cbarg.th, inp, &so, cbarg.m, cbarg.initial_timeout);
 		
-			/* syncache_add performs the INP_WUNLOCK(inp) */
+			/* syncache_add performs the INP_WUNLOCK(inp) and INP_INFO_WUNLOCK(&V_tcbinfo) */
 			break;
 		default:
 			error = EINVAL;

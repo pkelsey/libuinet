@@ -1340,23 +1340,25 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 	mac_socketpeer_set_from_mbuf(m, so);
 #endif
 	
+	inp = sotoinpcb(so);
+	inp->inp_inc.inc_fibnum = so->so_fibnum;
+	INP_WLOCK(inp);
+	INP_HASH_WLOCK(&V_tcbinfo);
+
 #ifdef PASSIVE_INET
 	if (sc->sc_flags & SCF_PASSIVE) {
 		so->so_options |= SO_PASSIVE;
+		inp->inp_flags2 |= INP_PASSIVE;
 		client_so->so_options |= SO_PASSIVE;
+		client_inp->inp_flags2 |= INP_PASSIVE;
 
 		so->so_passive_peer = client_so;
 		client_so->so_passive_peer = so;
 	} else {
 		so->so_options &= ~SO_PASSIVE;
-		client_so->so_options &= ~SO_PASSIVE;
 	}
 #endif
 
-	inp = sotoinpcb(so);
-	inp->inp_inc.inc_fibnum = so->so_fibnum;
-	INP_WLOCK(inp);
-	INP_HASH_WLOCK(&V_tcbinfo);
 
 #ifdef PROMISCUOUS_INET
 	if (inp->inp_flags2 & INP_PROMISC) {
@@ -1790,6 +1792,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	int win, sb_hiwat, ip_ttl, ip_tos;
 #ifdef PASSIVE_INET
 	int passive;
+	unsigned int altfib;
 #endif
 #ifdef PROMISCUOUS_INET
 	int promisc_listen, synfilter;
@@ -1830,6 +1833,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	ltflags = (tp->t_flags & (TF_NOOPT | TF_SIGNATURE));
 #ifdef PASSIVE_INET
 	passive = inc->inc_flags & INC_PASSIVE;
+	altfib = inc->inc_fibnum;
 #endif
 #ifdef PROMISCUOUS_INET
 	promisc_listen = inp->inp_flags2 & INP_PROMISC;
@@ -1959,6 +1963,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		cbarg.m = m;
 		cbarg.l2i = &l2info_tag->ifl2i_info;
 		cbarg.initial_timeout = -1;
+		cbarg.altfib = altfib;
 
 		decision = syn_filter_run_callback(inp, &cbarg);
 #ifdef PASSIVE_INET
@@ -1969,6 +1974,8 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 
 		if (cbarg.inc.inc_flags & INC_PASSIVE)
 			initial_timeout = cbarg.initial_timeout;
+
+		altfib = cbarg.altfib;
 #endif
 		if (SYNF_ACCEPT != decision) {
 			SCH_UNLOCK(sch);
@@ -2054,6 +2061,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		if (inc->inc_flags & INC_CONVONTMO)
 			sc->sc_flags |= SCF_CONVERT_ON_TIMEOUT;
 	}
+	sc->sc_altfib = altfib;
 #else
 	sc->sc_flags = 0;
 #endif
@@ -2353,7 +2361,11 @@ syncache_respond(struct syncache *sc)
 	} else
 		optlen = 0;
 
+#ifdef PASSIVE_INET
+	M_SETFIB(m, sc->sc_altfib);
+#else
 	M_SETFIB(m, sc->sc_inc.inc_fibnum);
+#endif
 	m->m_pkthdr.csum_data = offsetof(struct tcphdr, th_sum);
 #ifdef INET6
 	if (sc->sc_inc.inc_flags & INC_ISIPV6) {
