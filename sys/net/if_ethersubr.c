@@ -828,7 +828,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 				 * priority-only tags are not considered part of the
 				 * tag stack during comparison.
 				 */
-				*mask = pm->evl_tag & htonl(0x00000fff) ? htonl(0x00000fff) : 0;
+				*mask = pm->evl_tag & htons(0x0fff) ? htonl(0x00000fff) : 0;
 				mask++;
 				pm++;
 				vlan_bytes += ETHER_VLAN_ENCAP_LEN;
