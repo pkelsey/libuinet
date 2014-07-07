@@ -2536,7 +2536,7 @@ sooptcopyin(struct sockopt *sopt, void *buf, size_t len, size_t minlen)
  * XXX: optlen is size_t, not socklen_t
  */
 int
-so_setsockopt(struct socket *so, int level, int optname, void *optval,
+so_setsockopt(struct socket *so, int level, int optname, const void *optval,
     size_t optlen)
 {
 	struct sockopt sopt;
@@ -2544,7 +2544,7 @@ so_setsockopt(struct socket *so, int level, int optname, void *optval,
 	sopt.sopt_level = level;
 	sopt.sopt_name = optname;
 	sopt.sopt_dir = SOPT_SET;
-	sopt.sopt_val = optval;
+	sopt.sopt_val = (void *)optval;
 	sopt.sopt_valsize = optlen;
 	sopt.sopt_td = NULL;
 	return (sosetopt(so, &sopt));

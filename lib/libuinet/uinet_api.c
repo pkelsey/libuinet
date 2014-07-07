@@ -441,13 +441,10 @@ uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i)
 int
 uinet_setl2info(struct uinet_socket *so, const struct uinet_in_l2info *l2i)
 {
-	struct in_l2info l2i_internal;
 	struct socket *so_internal = (struct socket *)so;
 	int error = 0;
 
-	memcpy(&l2i_internal, l2i, sizeof(*l2i));
-
-	error = so_setsockopt(so_internal, SOL_SOCKET, SO_L2INFO, &l2i_internal, sizeof(l2i_internal));
+	error = so_setsockopt(so_internal, SOL_SOCKET, SO_L2INFO, l2i, sizeof(*l2i));
 
 	return (error);
 }

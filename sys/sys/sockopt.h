@@ -67,7 +67,7 @@ int	soopt_mcopyout(struct sockopt *sopt, struct mbuf *m);
 int	do_getopt_accept_filter(struct socket *so, struct sockopt *sopt);
 int	do_setopt_accept_filter(struct socket *so, struct sockopt *sopt);
 int	so_setsockopt(struct socket *so, int level, int optname,
-	    void *optval, size_t optlen);
+	    const void *optval, size_t optlen);
 int	so_getsockopt(struct socket *so, int level, int optname,
 	    void *optval, size_t *optlen);
 
