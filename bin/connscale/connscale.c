@@ -620,11 +620,11 @@ verify_thread(void *arg)
 			case CS_WAIT_REPLY:
 				if (0 == handle_disconnect(client, cc,
 							   UINET_SS_ISDISCONNECTING | UINET_SS_ISDISCONNECTED)) {
-					unsigned int ready;
+					int ready;
 
-					ready = uinet_sogetrxavail(so);
+					ready = uinet_soreadable(so, 0);
 					
-					if (ready) {
+					if (ready > 0) {
 						cc->recvs++;
 
 						iov.iov_base = client->wirebuf;
@@ -772,7 +772,7 @@ static int uinet_test_synfilter(struct uinet_socket *listener, void *arg, uinet_
 
 //	printf("REJECT\n");
 //	printf("--------------------------------\n");
-	return (UINET_SYNF_REJECT);
+	return (UINET_SYNF_REJECT_RST);
 }
 
 
@@ -1626,7 +1626,7 @@ int main(int argc, char **argv)
 
 	for (i = 0; i < num_tests; i++) {
 		test = &tests[i];
-		if (uinet_interface_up(test->ifname, 1)) {
+		if (uinet_interface_up(test->ifname, 1, 1)) {
 			printf("Failed to bring up interface %s\n", test->ifname);
 			return (1);
 		}
