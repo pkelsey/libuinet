@@ -160,6 +160,7 @@ if_pcap_attach(struct uinet_config_if *cfg)
 
 	cfg->ifindex = sc->ifp->if_index;
 	cfg->ifdata = sc;
+	cfg->ifp = sc->ifp;
 
 	return (0);
 

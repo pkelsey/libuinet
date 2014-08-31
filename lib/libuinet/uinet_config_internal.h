@@ -44,7 +44,8 @@ struct uinet_config_if {
 	int cpu;
 	unsigned int cdom;
 	unsigned int ifindex;
-	void *ifdata;
+	void *ifdata;			/* softc */
+	void *ifp;			/* ifnet */
 };
 
 
