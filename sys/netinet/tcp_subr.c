@@ -68,6 +68,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_subr.c 238247 2012-07-08 14:21
 
 #include <netinet/cc.h>
 #include <netinet/in.h>
+#ifdef PASSIVE_INET
+#include <netinet/in_passive.h>
+#endif
 #include <netinet/in_pcb.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
@@ -994,7 +997,12 @@ tcp_close(struct tcpcb *tp)
 		inp->inp_flags &= ~INP_SOCKREF;
 		INP_WUNLOCK(inp);
 		ACCEPT_LOCK();
-		SOCK_LOCK(so);
+#ifdef PASSIVE_INET
+		if (so->so_passive_peer)
+			in_passive_acquire_sock_locks(so);
+		else
+#endif
+			SOCK_LOCK(so);
 		so->so_state &= ~SS_PROTOREF;
 		sofree(so);
 		return (NULL);

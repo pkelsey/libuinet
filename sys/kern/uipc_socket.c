@@ -661,41 +661,11 @@ solisten_proto(struct socket *so, int backlog)
 	so->so_options |= SO_ACCEPTCONN;
 }
 
-/*
- * Evaluate the reference count and named references on a socket; if no
- * references remain, free it.  This should be called whenever a reference is
- * released, such as in sorele(), but also when named reference flags are
- * cleared in socket or protocol code.
- *
- * sofree() will free the socket if:
- *
- * - There are no outstanding file descriptor references or related consumers
- *   (so_count == 0).
- *
- * - The socket has been closed by user space, if ever open (SS_NOFDREF).
- *
- * - The protocol does not have an outstanding strong reference on the socket
- *   (SS_PROTOREF).
- *
- * - The socket is not in a completed connection queue, so a process has been
- *   notified that it is present.  If it is removed, the user process may
- *   block in accept() despite select() saying the socket was ready.
- */
-void
-sofree(struct socket *so)
+
+static void
+sofree_dequeue(struct socket *so)
 {
-	struct protosw *pr = so->so_proto;
 	struct socket *head;
-
-	ACCEPT_LOCK_ASSERT();
-	SOCK_LOCK_ASSERT(so);
-
-	if ((so->so_state & SS_NOFDREF) == 0 || so->so_count != 0 ||
-	    (so->so_state & SS_PROTOREF) || (so->so_qstate & SQ_COMP)) {
-		SOCK_UNLOCK(so);
-		ACCEPT_UNLOCK();
-		return;
-	}
 
 	head = so->so_head;
 	if (head != NULL) {
@@ -719,8 +689,12 @@ sofree(struct socket *so)
 		KASSERT((TAILQ_EMPTY(&so->so_comp)), ("sofree: so_comp populated"));
 		KASSERT((TAILQ_EMPTY(&so->so_incomp)), ("sofree: so_comp populated"));
 	}
-	SOCK_UNLOCK(so);
-	ACCEPT_UNLOCK();
+}
+
+static void
+sofree_dispose(struct socket *so)
+{
+	struct protosw *pr = so->so_proto;
 
 	VNET_SO_ASSERT(so);
 	if (pr->pr_flags & PR_RIGHTS && pr->pr_domain->dom_dispose != NULL)
@@ -749,6 +723,81 @@ sofree(struct socket *so)
 	knlist_destroy(&so->so_rcv.sb_sel.si_note);
 	knlist_destroy(&so->so_snd.sb_sel.si_note);
 	sodealloc(so);
+}
+
+static int
+sohasrefs(const struct socket *so)
+{
+	return ((so->so_state & SS_NOFDREF) == 0 || so->so_count != 0 ||
+		(so->so_state & SS_PROTOREF) || (so->so_qstate & SQ_COMP));
+}
+
+/*
+ * Evaluate the reference count and named references on a socket; if no
+ * references remain, free it.  This should be called whenever a reference is
+ * released, such as in sorele(), but also when named reference flags are
+ * cleared in socket or protocol code.
+ *
+ * sofree() will free the socket if:
+ *
+ * - There are no outstanding file descriptor references or related consumers
+ *   (so_count == 0).
+ *
+ * - The socket has been closed by user space, if ever open (SS_NOFDREF).
+ *
+ * - The protocol does not have an outstanding strong reference on the socket
+ *   (SS_PROTOREF).
+ *
+ * - The socket is not in a completed connection queue, so a process has been
+ *   notified that it is present.  If it is removed, the user process may
+ *   block in accept() despite select() saying the socket was ready.
+ */
+void
+sofree(struct socket *so)
+{
+#ifdef PASSIVE_INET
+	struct socket *peer_so = so->so_passive_peer;
+#endif
+
+	ACCEPT_LOCK_ASSERT();
+	SOCK_LOCK_ASSERT(so);
+#ifdef PASSIVE_INET
+	if (peer_so) {
+		SOCK_LOCK_ASSERT(peer_so);
+		/* 
+		 * Only tear everything down if both sockets in the pair are
+		 * ready to be disposed of.
+		 */
+		if (sohasrefs(so) || sohasrefs(peer_so)) {
+			in_passive_release_sock_locks(so);
+			ACCEPT_UNLOCK();
+			return;
+		}
+	} else
+#endif
+		if (sohasrefs(so)) {
+			SOCK_UNLOCK(so);
+			ACCEPT_UNLOCK();
+			return;
+		}
+
+	sofree_dequeue(so);
+
+#ifdef PASSIVE_INET
+	if (peer_so) {
+		sofree_dequeue(peer_so);
+		in_passive_release_sock_locks(so);
+	} else
+#endif
+		SOCK_UNLOCK(so);
+	ACCEPT_UNLOCK();
+
+	sofree_dispose(so);
+
+#ifdef PASSIVE_INET
+	if (peer_so)
+		sofree_dispose(peer_so);
+#endif
 }
 
 /*
@@ -818,23 +867,13 @@ drop:
 	}
 	ACCEPT_LOCK();
 #ifdef PASSIVE_INET
-	if (so->so_options & SO_PASSIVE)
+	if (so->so_passive_peer)
 		in_passive_acquire_sock_locks(so);
 	else
 #endif
-	SOCK_LOCK(so);
+		SOCK_LOCK(so);
 	KASSERT((so->so_state & SS_NOFDREF) == 0, ("soclose: NOFDREF"));
 	so->so_state |= SS_NOFDREF;
-#ifdef PASSIVE_INET
-	if (so->so_options & SO_PASSIVE) {
-		sorele_nounlock(so);
-		if (so->so_count == 2)
-			sorele_nounlock(so->so_passive_peer);
-		in_passive_release_sock_locks(so);
-		ACCEPT_UNLOCK();
-	}
-	else
-#endif
 	sorele(so);
 	CURVNET_RESTORE();
 	return (error);
@@ -857,6 +896,9 @@ drop:
 void
 soabort(struct socket *so)
 {
+#ifdef PASSIVE_INET
+	struct socket *peer_so = so->so_passive_peer;
+#endif
 
 	/*
 	 * In as much as is possible, assert that no references to this
@@ -873,8 +915,22 @@ soabort(struct socket *so)
 
 	if (so->so_proto->pr_usrreqs->pru_abort != NULL)
 		(*so->so_proto->pr_usrreqs->pru_abort)(so);
+	
+#ifdef PASSIVE_INET
+	if (peer_so && !sohasrefs(peer_so) &&
+	    peer_so->so_proto->pr_usrreqs->pru_abort != NULL) {
+		VNET_SO_ASSERT(peer_so);
+		(*peer_so->so_proto->pr_usrreqs->pru_abort)(peer_so);
+	}
+#endif
+
 	ACCEPT_LOCK();
-	SOCK_LOCK(so);
+#ifdef PASSIVE_INET
+	if (so->so_passive_peer)
+		in_passive_acquire_sock_locks(so);
+	else
+#endif
+		SOCK_LOCK(so);
 	sofree(so);
 }
 

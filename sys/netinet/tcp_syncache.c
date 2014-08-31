@@ -461,7 +461,8 @@ syncache_timer(void *xsch)
 		}
 
 #ifdef PASSIVE_INET
-		if (sc->sc_flags & (SCF_PASSIVE|SCF_CONVERT_ON_TIMEOUT)) {
+		if ((sc->sc_flags & (SCF_PASSIVE|SCF_CONVERT_ON_TIMEOUT)) ==
+		    (SCF_PASSIVE|SCF_CONVERT_ON_TIMEOUT)) {
 			sc->sc_flags &= ~(SCF_PASSIVE|SCF_PASSIVE_SYNACK|SCF_CONVERT_ON_TIMEOUT);
 			sc->sc_inc.inc_flags &= ~(INC_PASSIVE|INC_CONVONTMO);
 		}
@@ -1354,6 +1355,14 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 
 		so->so_passive_peer = client_so;
 		client_so->so_passive_peer = so;
+
+		/*
+		 * Now that the sockets are linked, subsequent calls to
+		 * soabort(so) in this routine will also abort client_so as
+		 * no references to it are currently held, so clear
+		 * client_so to avoid separate cleanup beyond this point.
+		 */
+		client_so = NULL;
 	} else {
 		so->so_options &= ~SO_PASSIVE;
 	}
@@ -1587,14 +1596,14 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 abort:
 	INP_WUNLOCK(inp);
 abort2:
+#ifdef PASSIVE_INET
+	if (client_inp != NULL)
+		INP_WUNLOCK(client_inp);
+	if (client_so != NULL)
+		soabort(client_so);
+#endif
 	if (so != NULL)
 		soabort(so);
-#ifdef PASSIVE_INET
-	if (client_so != NULL) {
-		INP_WUNLOCK(client_inp);
-		soabort(client_so);
-	}
-#endif
 	return (NULL);
 }
 
@@ -1676,7 +1685,7 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	 * carry on by accepting the ACK without validating the sequence
 	 * number and the timestamp.
 	 */
-		if ((sc->sc_flags & (SCF_PASSIVE|SCF_PASSIVE_SYNACK)) == SCF_PASSIVE) {
+	if ((sc->sc_flags & (SCF_PASSIVE|SCF_PASSIVE_SYNACK)) == SCF_PASSIVE) {
 		sc->sc_iss = th->th_ack - 1;
 		sc->sc_ts = to->to_tsecr;
 	}
