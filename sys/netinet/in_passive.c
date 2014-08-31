@@ -170,9 +170,7 @@ in_passive_convert_to_active(struct socket *so)
 
 	in_passive_acquire_sock_locks(so);
 	so->so_options &= ~(SO_PASSIVE|SO_PASSIVECLNT);
-	so->so_count--;
 	peer_so->so_options &= ~(SO_PASSIVE|SO_PASSIVECLNT);
-	peer_so->so_count--;
 	in_passive_release_sock_locks(so);
 
 	tp->snd_una = peertp->rcv_nxt;
