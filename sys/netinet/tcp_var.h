@@ -702,7 +702,7 @@ void	 tcp_input(struct mbuf *, int);
 #define	TI_WLOCKED	2
 void	 tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	     struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos,
-	     int ti_locked);
+	     int ti_locked, int no_unlock);
 u_long	 tcp_maxmtu(struct in_conninfo *, int *);
 u_long	 tcp_maxmtu6(struct in_conninfo *, int *);
 void	 tcp_mss_update(struct tcpcb *, int, int, struct hc_metrics_lite *,

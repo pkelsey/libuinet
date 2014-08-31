@@ -1207,7 +1207,7 @@ relocked:
 			 * the mbuf chain and unlocks the inpcb.
 			 */
 			tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen,
-			    iptos, ti_locked);
+			    iptos, ti_locked, 0);
 			INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
 			return;
 		}
@@ -1455,7 +1455,7 @@ relocked:
 	 * state.  tcp_do_segment() always consumes the mbuf chain, unlocks
 	 * the inpcb, and unlocks pcbinfo.
 	 */
-	tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen, iptos, ti_locked);
+	tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen, iptos, ti_locked, 0);
 	INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
 	return;
 
@@ -1504,10 +1504,27 @@ drop:
 		m_freem(m);
 }
 
+/*
+ * no_unlock is a total hack designed to get around locking issues with
+ * how libuinet uses tcp_do_segment().
+ *
+ * By default it'll unlock the held inp lock and if it's held, the
+ * tcbinfo lock.
+ *
+ * But the libuinet passive mode uses tcp_do_segment() with an assembled
+ * synack to setup the passive peer!  Here, it can't drop the damned
+ * locks or it'll confuse the following code that assumes the locks
+ * are still held.
+ *
+ * So this option is just a hack for the specific code path that
+ * the passive receive socket creation code uses.  Eventually the
+ * relevant bits of tcp_do_segment() should be refactored out and
+ * used as appropriate.
+ */
 void
 tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
     struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos,
-    int ti_locked)
+    int ti_locked, int no_unlock)
 {
 	int thflags, acked, ourfinisacked, needoutput = 0;
 	int rstreason, todrop, win;
@@ -3038,9 +3055,10 @@ dodata:							/* XXX */
 			return;
 		}
 	}
-	if (ti_locked == TI_WLOCKED)
+	if (no_unlock == 0 && ti_locked == TI_WLOCKED) {
 		INP_INFO_WUNLOCK(&V_tcbinfo);
-	ti_locked = TI_UNLOCKED;
+		ti_locked = TI_UNLOCKED;
+	}
 
 #ifdef TCPDEBUG
 	if (so->so_options & SO_DEBUG)
@@ -3051,20 +3069,29 @@ dodata:							/* XXX */
 	/*
 	 * Return any desired output.
 	 */
-	if (needoutput || (tp->t_flags & TF_ACKNOW))
+	if (needoutput || (tp->t_flags & TF_ACKNOW)) {
+		if (no_unlock) {
+			//printf("%s: no_unlock set; but calling tcp_output?\n", __func__);
+		}
 		(void) tcp_output(tp);
+	}
 
 check_delack:
 	KASSERT(ti_locked == TI_UNLOCKED, ("%s: check_delack ti_locked %d",
 	    __func__, ti_locked));
-	INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
+	if (no_unlock == 0)
+		INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
 	INP_WLOCK_ASSERT(tp->t_inpcb);
 
 	if (tp->t_flags & TF_DELACK) {
+		if (no_unlock == 0) {
+			//printf("%s: no_unlock set; but calling tcp_timer_activate()?\n", __func__);
+		}
 		tp->t_flags &= ~TF_DELACK;
 		tcp_timer_activate(tp, TT_DELACK, tcp_delacktime);
 	}
-	INP_WUNLOCK(tp->t_inpcb);
+	if (no_unlock == 0)
+		INP_WUNLOCK(tp->t_inpcb);
 	return;
 
 dropafterack:

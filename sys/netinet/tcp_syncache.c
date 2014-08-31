@@ -1273,7 +1273,7 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	th->th_win = ntohs(th->th_win);
 	th->th_urp = ntohs(th->th_urp);
 
-	tcp_do_segment(m1, th, so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED);
+	tcp_do_segment(m1, th, so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED, 1);
 
 	/* return with inp locked */
 	return (so);
