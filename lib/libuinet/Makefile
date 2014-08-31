@@ -95,7 +95,9 @@ UINET_SRCS+=			\
 	uinet_config.c		\
 	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
+	uinet_if_bridge.c	\
 	uinet_if_pcap.c		\
+	uinet_if_span.c		\
 	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
