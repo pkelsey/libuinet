@@ -729,8 +729,6 @@ struct signalfd_siginfo
   #define ECB_MEMORY_FENCE_RELEASE ECB_MEMORY_FENCE
 #endif
 
-#include <pthread.h>
-
 /*****************************************************************************/
 
 #if __cplusplus

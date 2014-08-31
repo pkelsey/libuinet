@@ -179,6 +179,7 @@ typedef double ev_tstamp;
 #if EV_UINET_ENABLE
 # include <inttypes.h>
 # include <uinet_api.h>
+# include <pthread.h>
 #endif
 
 /* support multiple event loops? */
