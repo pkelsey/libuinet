@@ -107,7 +107,7 @@ poll_poll (EV_P_ ev_tstamp timeout)
   else
     for (p = polls; res; ++p)
       {
-        assert (("libev: poll() returned illegal result, broken BSD kernel?", p < polls + pollcnt));
+        UINET_ASSERT("libev: poll() returned illegal result, broken BSD kernel?", p < polls + pollcnt);
 
         if (expect_false (p->revents)) /* this expect is debatable */
           {

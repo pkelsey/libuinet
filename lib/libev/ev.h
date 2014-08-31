@@ -890,6 +890,9 @@ EV_API_DECL void ev_uinet_stop     (EV_P_ ev_uinet *w) EV_THROW;
 
 #endif
 
+/* XXX doesn't belong here */
+#define	UINET_ASSERT(msg, expr)		assert(expr)
+
 EV_CPP(})
 
 #endif

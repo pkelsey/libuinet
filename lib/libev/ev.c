@@ -729,6 +729,8 @@ struct signalfd_siginfo
   #define ECB_MEMORY_FENCE_RELEASE ECB_MEMORY_FENCE
 #endif
 
+#include <pthread.h>
+
 /*****************************************************************************/
 
 #if __cplusplus
@@ -1800,7 +1802,7 @@ fd_reify (EV_P)
             {
               unsigned long arg;
 
-              assert (("libev: only socket fds supported in this configuration", ioctlsocket (handle, FIONREAD, &arg) == 0));
+              UINET_ASSERT("libev: only socket fds supported in this configuration", ioctlsocket (handle, FIONREAD, &arg) == 0);
 
               /* handle changed, but fd didn't - we need to do it in two steps */
               backend_modify (EV_A_ fd, anfd->events, 0);
@@ -2511,7 +2513,8 @@ uinet_process_pending_list (EV_P_ ev_async *w_async, int revents)
   ev_uinet_ctx *soctx;
   ev_uinet *w;
 
-  assert(("libev: uinet_prev_pend list not empty", UINET_LIST_EMPTY (&uinet_prev_pend_head)));
+  UINET_ASSERT("libev: uinet_prev_pend list not empty",
+      UINET_LIST_EMPTY(&uinet_prev_pend_head));
 
   pthread_mutex_lock (&uinet_pend_lock);
   UINET_LIST_SWAP (&uinet_pend_head, &uinet_prev_pend_head, ev_uinet_ctx, pend_list);
@@ -3013,10 +3016,10 @@ ev_loop_new (unsigned int flags) EV_THROW
 static void noinline ecb_cold
 verify_watcher (EV_P_ W w)
 {
-  assert (("libev: watcher has invalid priority", ABSPRI (w) >= 0 && ABSPRI (w) < NUMPRI));
+  UINET_ASSERT("libev: watcher has invalid priority", ABSPRI (w) >= 0 && ABSPRI (w) < NUMPRI);
 
   if (w->pending)
-    assert (("libev: pending watcher not on pending queue", pendings [ABSPRI (w)][w->pending - 1].w == w));
+    UINET_ASSERT("libev: pending watcher not on pending queue", pendings [ABSPRI (w)][w->pending - 1].w == w);
 }
 
 static void noinline ecb_cold
@@ -3026,9 +3029,9 @@ verify_heap (EV_P_ ANHE *heap, int N)
 
   for (i = HEAP0; i < N + HEAP0; ++i)
     {
-      assert (("libev: active index mismatch in heap", ev_active (ANHE_w (heap [i])) == i));
-      assert (("libev: heap condition violated", i == HEAP0 || ANHE_at (heap [HPARENT (i)]) <= ANHE_at (heap [i])));
-      assert (("libev: heap at cache mismatch", ANHE_at (heap [i]) == ev_at (ANHE_w (heap [i]))));
+      UINET_ASSERT("libev: active index mismatch in heap", ev_active (ANHE_w (heap [i])) == i);
+      UINET_ASSERT("libev: heap condition violated", i == HEAP0 || ANHE_at (heap [HPARENT (i)]) <= ANHE_at (heap [i]));
+      UINET_ASSERT("libev: heap at cache mismatch", ANHE_at (heap [i]) == ev_at (ANHE_w (heap [i])));
 
       verify_watcher (EV_A_ (W)ANHE_w (heap [i]));
     }
@@ -3039,7 +3042,7 @@ array_verify (EV_P_ W *ws, int cnt)
 {
   while (cnt--)
     {
-      assert (("libev: active index mismatch", ev_active (ws [cnt]) == cnt + 1));
+      UINET_ASSERT("libev: active index mismatch", ev_active (ws [cnt]) == cnt + 1);
       verify_watcher (EV_A_ ws [cnt]);
     }
 }
@@ -3057,7 +3060,7 @@ ev_verify (EV_P) EV_THROW
 
   assert (fdchangemax >= fdchangecnt);
   for (i = 0; i < fdchangecnt; ++i)
-    assert (("libev: negative fd in fdchanges", fdchanges [i] >= 0));
+    UINET_ASSERT("libev: negative fd in fdchanges", fdchanges [i] >= 0);
 
   assert (anfdmax >= 0);
   for (i = 0; i < anfdmax; ++i)
@@ -3070,12 +3073,12 @@ ev_verify (EV_P) EV_THROW
 
           if (j++ & 1)
             {
-              assert (("libev: io watcher list contains a loop", w != w2));
+              UINET_ASSERT("libev: io watcher list contains a loop", w != w2);
               w2 = w2->next;
             }
 
-          assert (("libev: inactive fd watcher on anfd list", ev_active (w) == 1));
-          assert (("libev: fd mismatch between watcher and anfd", ((ev_io *)w)->fd == i));
+          UINET_ASSERT("libev: inactive fd watcher on anfd list", ev_active (w) == 1);
+          UINET_ASSERT("libev: fd mismatch between watcher and anfd", ((ev_io *)w)->fd == i);
         }
     }
 
@@ -3257,7 +3260,7 @@ timers_reify (EV_P)
               if (ev_at (w) < mn_now)
                 ev_at (w) = mn_now;
 
-              assert (("libev: negative ev_timer repeat value found while processing timers", w->repeat > 0.));
+              UINET_ASSERT("libev: negative ev_timer repeat value found while processing timers", w->repeat > 0.);
 
               ANHE_at_cache (timers [HEAP0]);
               downheap (timers, timercnt, HEAP0);
@@ -3319,7 +3322,7 @@ periodics_reify (EV_P)
             {
               ev_at (w) = w->reschedule_cb (w, ev_rt_now);
 
-              assert (("libev: ev_periodic reschedule callback returned time in the past", ev_at (w) >= ev_rt_now));
+              UINET_ASSERT("libev: ev_periodic reschedule callback returned time in the past", ev_at (w) >= ev_rt_now);
 
               ANHE_at_cache (periodics [HEAP0]);
               downheap (periodics, periodiccnt, HEAP0);
@@ -3458,7 +3461,7 @@ ev_run (EV_P_ int flags)
   ++loop_depth;
 #endif
 
-  assert (("libev: ev_loop recursion during release detected", loop_done != EVBREAK_RECURSE));
+  UINET_ASSERT("libev: ev_loop recursion during release detected", loop_done != EVBREAK_RECURSE);
 
   loop_done = EVBREAK_CANCEL;
 
@@ -3579,7 +3582,7 @@ ev_run (EV_P_ int flags)
         ECB_MEMORY_FENCE_ACQUIRE;
         if (pipe_write_skipped)
           {
-            assert (("libev: pipe_w not active, but pipe not written", ev_is_active (&pipe_w)));
+            UINET_ASSERT("libev: pipe_w not active, but pipe not written", ev_is_active (&pipe_w));
             ev_feed_event (EV_A_ &pipe_w, EV_CUSTOM);
           }
 
@@ -3753,8 +3756,8 @@ ev_io_start (EV_P_ ev_io *w) EV_THROW
   if (expect_false (ev_is_active (w)))
     return;
 
-  assert (("libev: ev_io_start called with negative fd", fd >= 0));
-  assert (("libev: ev_io_start called with illegal event mask", !(w->events & ~(EV__IOFDSET | EV_READ | EV_WRITE))));
+  UINET_ASSERT("libev: ev_io_start called with negative fd", fd >= 0);
+  UINET_ASSERT("libev: ev_io_start called with illegal event mask", !(w->events & ~(EV__IOFDSET | EV_READ | EV_WRITE)));
 
   EV_FREQUENT_CHECK;
 
@@ -3763,7 +3766,7 @@ ev_io_start (EV_P_ ev_io *w) EV_THROW
   wlist_add (&anfds[fd].head, (WL)w);
 
   /* common bug, apparently */
-  assert (("libev: ev_io_start called with corrupted watcher", ((WL)w)->next != (WL)w));
+  UINET_ASSERT("libev: ev_io_start called with corrupted watcher", ((WL)w)->next != (WL)w);
 
   fd_change (EV_A_ fd, w->events & EV__IOFDSET | EV_ANFD_REIFY);
   w->events &= ~EV__IOFDSET;
@@ -3778,7 +3781,7 @@ ev_io_stop (EV_P_ ev_io *w) EV_THROW
   if (expect_false (!ev_is_active (w)))
     return;
 
-  assert (("libev: ev_io_stop called with illegal fd (must stay constant after start!)", w->fd >= 0 && w->fd < anfdmax));
+  UINET_ASSERT("libev: ev_io_stop called with illegal fd (must stay constant after start!)", w->fd >= 0 && w->fd < anfdmax);
 
   EV_FREQUENT_CHECK;
 
@@ -3798,7 +3801,7 @@ ev_timer_start (EV_P_ ev_timer *w) EV_THROW
 
   ev_at (w) += mn_now;
 
-  assert (("libev: ev_timer_start called with negative timer repeat value", w->repeat >= 0.));
+  UINET_ASSERT("libev: ev_timer_start called with negative timer repeat value", w->repeat >= 0.);
 
   EV_FREQUENT_CHECK;
 
@@ -3826,7 +3829,7 @@ ev_timer_stop (EV_P_ ev_timer *w) EV_THROW
   {
     int active = ev_active (w);
 
-    assert (("libev: internal timer heap corruption", ANHE_w (timers [active]) == (WT)w));
+    UINET_ASSERT("libev: internal timer heap corruption", ANHE_w (timers [active]) == (WT)w);
 
     --timercnt;
 
@@ -3888,7 +3891,7 @@ ev_periodic_start (EV_P_ ev_periodic *w) EV_THROW
     ev_at (w) = w->reschedule_cb (w, ev_rt_now);
   else if (w->interval)
     {
-      assert (("libev: ev_periodic_start called with negative interval value", w->interval >= 0.));
+      UINET_ASSERT("libev: ev_periodic_start called with negative interval value", w->interval >= 0.);
       periodic_recalc (EV_A_ w);
     }
   else
@@ -3920,7 +3923,7 @@ ev_periodic_stop (EV_P_ ev_periodic *w) EV_THROW
   {
     int active = ev_active (w);
 
-    assert (("libev: internal periodic heap corruption", ANHE_w (periodics [active]) == (WT)w));
+    UINET_ASSERT("libev: internal periodic heap corruption", ANHE_w (periodics [active]) == (WT)w);
 
     --periodiccnt;
 
@@ -3957,11 +3960,11 @@ ev_signal_start (EV_P_ ev_signal *w) EV_THROW
   if (expect_false (ev_is_active (w)))
     return;
 
-  assert (("libev: ev_signal_start called with illegal signal number", w->signum > 0 && w->signum < EV_NSIG));
+  UINET_ASSERT("libev: ev_signal_start called with illegal signal number", w->signum > 0 && w->signum < EV_NSIG);
 
 #if EV_MULTIPLICITY
-  assert (("libev: a signal must not be attached to two different loops",
-           !signals [w->signum - 1].loop || signals [w->signum - 1].loop == loop));
+  UINET_ASSERT("libev: a signal must not be attached to two different loops",
+           !signals [w->signum - 1].loop || signals [w->signum - 1].loop == loop);
 
   signals [w->signum - 1].loop = EV_A;
   ECB_MEMORY_FENCE_RELEASE;
@@ -4078,7 +4081,7 @@ void
 ev_child_start (EV_P_ ev_child *w) EV_THROW
 {
 #if EV_MULTIPLICITY
-  assert (("libev: child watchers are only supported in the default loop", loop == ev_default_loop_ptr));
+  UINET_ASSERT("libev: child watchers are only supported in the default loop", loop == ev_default_loop_ptr);
 #endif
   if (expect_false (ev_is_active (w)))
     return;
@@ -4657,7 +4660,7 @@ ev_embed_start (EV_P_ ev_embed *w) EV_THROW
 
   {
     EV_P = w->other;
-    assert (("libev: loop to be embedded is not embeddable", backend & ev_embeddable_backends ()));
+    UINET_ASSERT("libev: loop to be embedded is not embeddable", backend & ev_embeddable_backends ());
     ev_io_init (&w->io, embed_io_cb, backend_fd, EV_READ);
   }
 
@@ -4857,7 +4860,7 @@ ev_uinet_attach (struct uinet_socket *so)
 void
 ev_uinet_detach (struct ev_uinet_ctx *ctx)
 {
-  assert (("libev: detaching uinet ctx that is still in use", ctx->head == NULL));
+  UINET_ASSERT("libev: detaching uinet ctx that is still in use", ctx->head == NULL);
 
   ev_free (ctx);
 }
@@ -4873,9 +4876,9 @@ ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
   if (expect_false (ev_is_active (w)))
     return;
 
-  assert (("libev: ev_uinet_start called with NULL socket", NULL != so));
-  assert (("libev: ev_uinet_start called with illegal event mask", !(w->events & ~(EV_READ | EV_WRITE))));
-  assert (("libev: ev_uinet_start called with empty event mask", w->events & (EV_READ | EV_WRITE)));
+  UINET_ASSERT("libev: ev_uinet_start called with NULL socket", NULL != so);
+  UINET_ASSERT("libev: ev_uinet_start called with illegal event mask", !(w->events & ~(EV_READ | EV_WRITE)));
+  UINET_ASSERT("libev: ev_uinet_start called with empty event mask", w->events & (EV_READ | EV_WRITE));
 
   EV_FREQUENT_CHECK;
 
