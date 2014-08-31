@@ -120,6 +120,8 @@ typedef	__uid_t		uid_t;
 #define	SO_NO_DDP	0x00008000	/* disable direct data placement */
 #define	SO_PROMISC	0x00010000	/* socket will be used for promiscuous listen */
 #define	SO_PASSIVE	0x00020000	/* socket will be used for passive reassembly */
+#define	SO_PASSIVECLNT	0x00040000	/* client socket in the passive pair */
+#define	SO_ALTFIB	0x00080000	/* alternate FIB is set */
 
 /*
  * Additional options, not kept in so_options.

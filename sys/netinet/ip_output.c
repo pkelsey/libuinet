@@ -177,6 +177,11 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 			 */
 			fib = M_GETFIB(m);
 		} else {
+#ifdef PASSIVE_INET
+			if (inp->inp_inc.inc_flags & INC_ALTFIB)
+				fib = inp->inp_altfibnum;
+			else
+#endif
 			fib = inp->inp_fibnum;
 
 			if (0 != if_promiscinet_add_tag(m, inp->inp_l2info)) {
@@ -1017,6 +1022,20 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				inp->inp_inc.inc_fibnum = so->so_fibnum;
 				INP_WUNLOCK(inp);
 				error = 0;
+				break;
+			case SO_ALTFIB:
+#if defined(PROMISCUOUS_INET) && defined(PASSIVE_INET)
+				INP_WLOCK(inp);
+				if (so->so_options & SO_ALTFIB)
+					inp->inp_inc.inc_flags |= INC_ALTFIB;
+				else
+					inp->inp_inc.inc_flags &= ~INC_ALTFIB;
+				inp->inp_inc.inc_altfibnum = so->so_altfibnum;
+				INP_WUNLOCK(inp);
+				error = 0;
+#else
+				error = ENOPROTOOPT;
+#endif
 				break;
 			case SO_PASSIVE:
 #ifdef PASSIVE_INET

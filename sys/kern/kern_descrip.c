@@ -41,6 +41,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_descrip.c 238560 2012-07-18 04:5
 #include "opt_compat.h"
 #include "opt_ddb.h"
 #include "opt_ktrace.h"
+#include "opt_passiveinet.h"
 #include "opt_procdesc.h"
 
 #include <sys/param.h>
@@ -91,6 +92,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_descrip.c 238560 2012-07-18 04:5
 #include <net/vnet.h>
 
 #include <netinet/in.h>
+#ifdef PASSIVE_INET
+#include <netinet/in_passive.h>
+#endif
 #include <netinet/in_pcb.h>
 
 #include <security/audit/audit.h>
@@ -2582,7 +2586,12 @@ fputsock(struct socket *so)
 {
 
 	ACCEPT_LOCK();
-	SOCK_LOCK(so);
+#ifdef PASSIVE_INET
+	if (so->so_passive_peer)
+		in_passive_acquire_sock_locks(so);
+	else
+#endif
+		SOCK_LOCK(so);
 	CURVNET_SET(so->so_vnet);
 	sorele(so);
 	CURVNET_RESTORE();

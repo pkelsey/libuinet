@@ -11,6 +11,7 @@ uinet_ifdestroy
 uinet_ifdestroy_byname
 uinet_ifgenericname
 uinet_inet_ntoa
+uinet_inet_ntop
 uinet_inet_pton
 uinet_inet6_enabled
 uinet_init
@@ -70,6 +71,9 @@ uinet_synfilter_deferral_free
 uinet_synfilter_deferral_get_cookie
 uinet_synfilter_getconninfo
 uinet_synfilter_getl2info
+uinet_synfilter_go_active_on_timeout
 uinet_synfilter_install
+uinet_synfilter_setaltfib
+uinet_synfilter_setl2info
 uinet_sysctl
 uinet_sysctlbyname

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -42,6 +42,7 @@ int   uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
 int   uinet_getifstat(const char *name, struct uinet_ifstat *stat);
 void  uinet_gettcpstat(struct uinet_tcpstat *stat);
 char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
+const char *uinet_inet_ntop(int af, const void *src, char *dst, unsigned int size);
 int   uinet_inet_pton(int af, const char *src, void *dst);
 int   uinet_inet6_enabled(void);
 int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback);
@@ -119,6 +120,9 @@ int   uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
 		   void *newp, size_t newplen, size_t *retval, int flags);
 void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
 void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
+void  uinet_synfilter_setl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
+void  uinet_synfilter_setaltfib(uinet_api_synfilter_cookie_t cookie, unsigned int altfib);
+void  uinet_synfilter_go_active_on_timeout(uinet_api_synfilter_cookie_t cookie, unsigned int ms);
 int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);
 uinet_synf_deferral_t uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie);
 int   uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_deferral_t deferral, int decision);

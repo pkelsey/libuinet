@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -173,6 +173,13 @@ uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size)
 	(void)size;
 
 	return inet_ntoa_r(*((struct in_addr *)&in), buf); 
+}
+
+
+const char *
+uinet_inet_ntop(int af, const void *src, char *dst, unsigned int size)
+{
+	return (inet_ntop(af, src, dst, size));
 }
 
 
@@ -512,6 +519,9 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 {
 	struct socket *head = (struct socket *)listener;
 	struct socket *so;
+#ifdef PASSIVE_INET
+	struct socket *peer_so;
+#endif
 	struct sockaddr *sa = NULL;
 	int error;
 
@@ -571,11 +581,14 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 	SOCK_UNLOCK(so);
 
 #ifdef PASSIVE_INET
-	if (so->so_passive_peer) {
-		SOCK_LOCK(so->so_passive_peer);
-		soref(so->so_passive_peer);
-		so->so_passive_peer->so_state |= (head->so_state & SS_NBIO);
-		SOCK_UNLOCK(so->so_passive_peer);
+	peer_so = so->so_passive_peer;
+	if (so->so_options & SO_PASSIVE) {
+		KASSERT(peer_so, ("uinet_soaccept: passive socket has no peer"));
+		SOCK_LOCK(peer_so);
+		soref(peer_so);
+		peer_so->so_state |=
+		    (head->so_state & SS_NBIO) | SO_PASSIVECLNT;
+		SOCK_UNLOCK(peer_so);
 	}
 #endif
 	ACCEPT_UNLOCK();
@@ -583,8 +596,8 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 	error = soaccept(so, &sa);
 	if (error) {
 #ifdef PASSIVE_INET
-		if (so->so_passive_peer)
-			soclose(so->so_passive_peer);
+		if (peer_so)
+			soclose(peer_so);
 #endif
 		soclose(so);
 		return (error);
@@ -1180,6 +1193,34 @@ uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l
 	struct syn_filter_cbarg *cbarg = cookie;
 
 	memcpy(l2i, cbarg->l2i, sizeof(*l2i));
+}
+
+
+void
+uinet_synfilter_setl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i)
+{
+	struct syn_filter_cbarg *cbarg = cookie;
+
+	memcpy(cbarg->l2i, l2i, sizeof(*l2i));
+}
+
+
+void
+uinet_synfilter_setaltfib(uinet_api_synfilter_cookie_t cookie, unsigned int altfib)
+{
+	struct syn_filter_cbarg *cbarg = cookie;
+	
+	cbarg->altfib = altfib;
+}
+
+
+void
+uinet_synfilter_go_active_on_timeout(uinet_api_synfilter_cookie_t cookie, unsigned int ms)
+{
+	struct syn_filter_cbarg *cbarg = cookie;
+	
+	cbarg->inc.inc_flags |= INC_CONVONTMO;
+	cbarg->initial_timeout = (ms > INT_MAX / hz) ? INT_MAX / 1000 : (ms * hz) / 1000;
 }
 
 

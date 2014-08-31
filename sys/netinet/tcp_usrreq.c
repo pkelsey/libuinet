@@ -71,6 +71,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_usrreq.c 241133 2012-10-02 13:
 
 #include <netinet/cc.h>
 #include <netinet/in.h>
+#ifdef PASSIVE_INET
+#include <netinet/in_passive.h>
+#endif
 #include <netinet/in_pcb.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
@@ -770,16 +773,28 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 #ifdef INET6
 	int isipv6;
 #endif
+	int info_locked = 0;
 	TCPDEBUG0;
 
 	/*
 	 * We require the pcbinfo lock if we will close the socket as part of
 	 * this call.
 	 */
-	if (flags & PRUS_EOF)
+	if (flags & PRUS_EOF) {
 		INP_INFO_WLOCK(&V_tcbinfo);
+		info_locked = 1;
+	}
 	inp = sotoinpcb(so);
 	KASSERT(inp != NULL, ("tcp_usr_send: inp == NULL"));
+#ifdef PASSIVE_INET
+	if (inp->inp_flags2 & INP_PASSIVE) {
+		if (!info_locked) {
+			INP_INFO_WLOCK(&V_tcbinfo);
+			info_locked = 1;
+		}
+		in_passive_acquire_locks(so);
+	} else
+#endif
 	INP_WLOCK(inp);
 	if (inp->inp_flags & (INP_TIMEWAIT | INP_DROPPED)) {
 		if (control)
@@ -805,6 +820,11 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 		}
 		m_freem(control);	/* empty control, just free it */
 	}
+#ifdef PASSIVE_INET
+	if (inp->inp_flags2 & INP_PASSIVE) {
+		in_passive_convert_to_active(so);
+	}
+#endif
 	if (!(flags & PRUS_OOB)) {
 		sbappendstream(&so->so_snd, m);
 		if (nam && tp->t_state < TCPS_SYN_SENT) {
@@ -896,8 +916,13 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 out:
 	TCPDEBUG2((flags & PRUS_OOB) ? PRU_SENDOOB :
 		  ((flags & PRUS_EOF) ? PRU_SEND_EOF : PRU_SEND));
+#ifdef PASSIVE_INET
+	if (inp->inp_flags2 & INP_PASSIVE)
+		in_passive_release_locks(so);
+	else
+#endif
 	INP_WUNLOCK(inp);
-	if (flags & PRUS_EOF)
+	if (info_locked)
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 	return (error);
 }

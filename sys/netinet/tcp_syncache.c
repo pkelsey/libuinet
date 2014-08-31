@@ -128,7 +128,7 @@ SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, syncookies_only, CTLFLAG_RW,
 
 static void	 syncache_drop(struct syncache *, struct syncache_head *);
 static void	 syncache_free(struct syncache *);
-static void	 syncache_insert(struct syncache *, struct syncache_head *);
+static void	 syncache_insert(struct syncache *, struct syncache_head *, int);
 #ifdef PROMISCUOUS_INET
 struct syncache *syncache_lookup(struct in_conninfo *, struct syncache_head **, struct mbuf *);
 #else
@@ -136,9 +136,9 @@ struct syncache *syncache_lookup(struct in_conninfo *, struct syncache_head **);
 #endif /* PROMISCUOUS_INET */
 static int	 syncache_respond(struct syncache *);
 static struct	 socket *syncache_socket(struct syncache *, struct socket *,
-		    struct mbuf *m);
+		    struct mbuf *m, struct tcpopt *to);
 static void	 syncache_timeout(struct syncache *sc, struct syncache_head *sch,
-		    int docallout);
+		    int docallout, int timeout_ticks);
 static void	 syncache_timer(void *);
 static void	 syncookie_generate(struct syncache_head *, struct syncache *,
 		    u_int32_t *);
@@ -328,7 +328,7 @@ syncache_destroy(void)
  * Locks and unlocks the syncache_head autonomously.
  */
 static void
-syncache_insert(struct syncache *sc, struct syncache_head *sch)
+syncache_insert(struct syncache *sc, struct syncache_head *sch, int initial_timeout)
 {
 	struct syncache *sc2;
 
@@ -353,7 +353,7 @@ syncache_insert(struct syncache *sc, struct syncache_head *sch)
 	/* Reinitialize the bucket row's timer. */
 	if (sch->sch_length == 1)
 		sch->sch_nextc = ticks + INT_MAX;
-	syncache_timeout(sc, sch, 1);
+	syncache_timeout(sc, sch, 1, initial_timeout);
 
 	SCH_UNLOCK(sch);
 
@@ -386,10 +386,15 @@ syncache_drop(struct syncache *sc, struct syncache_head *sch)
  * Engage/reengage time on bucket row.
  */
 static void
-syncache_timeout(struct syncache *sc, struct syncache_head *sch, int docallout)
+syncache_timeout(struct syncache *sc, struct syncache_head *sch, int docallout,
+    int timeout_ticks)
 {
-	sc->sc_rxttime = ticks +
-		TCPTV_RTOBASE * (tcp_backoff[sc->sc_rxmits]);
+	if (timeout_ticks > 0)
+		sc->sc_rxttime = ticks + timeout_ticks;
+	else
+		sc->sc_rxttime = ticks +
+		    TCPTV_RTOBASE * (tcp_backoff[sc->sc_rxmits]);
+
 	sc->sc_rxmits++;
 	if (TSTMP_LT(sc->sc_rxttime, sch->sch_nextc)) {
 		sch->sch_nextc = sc->sc_rxttime;
@@ -455,9 +460,16 @@ syncache_timer(void *xsch)
 			free(s, M_TCPLOG);
 		}
 
+#ifdef PASSIVE_INET
+		if ((sc->sc_flags & (SCF_PASSIVE|SCF_CONVERT_ON_TIMEOUT)) ==
+		    (SCF_PASSIVE|SCF_CONVERT_ON_TIMEOUT)) {
+			sc->sc_flags &= ~(SCF_PASSIVE|SCF_PASSIVE_SYNACK|SCF_CONVERT_ON_TIMEOUT);
+			sc->sc_inc.inc_flags &= ~(INC_PASSIVE|INC_CONVONTMO);
+		}
+#endif
 		(void) syncache_respond(sc);
 		TCPSTAT_INC(tcps_sc_retransmitted);
-		syncache_timeout(sc, sch, 0);
+		syncache_timeout(sc, sch, 0, -1);
 	}
 	if (!TAILQ_EMPTY(&(sch)->sch_bucket))
 		callout_reset(&(sch)->sch_timer, (sch)->sch_nextc - tick,
@@ -758,7 +770,8 @@ syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
 
 	/*
 	 * Swap the endpoints before doing the syncache lookup, as the
-	 * SYN|ACK is moving in the other direction.
+	 * SYN|ACK is moving in the other direction.  It's OK to modify inc
+	 * here as we are the final consumer.
 	 */
 #ifdef INET6
 	if (inc->inc_flags & INC_ISIPV6) {
@@ -783,7 +796,7 @@ syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
 #endif /* PROMISCUOUS_INET */
 	SCH_LOCK_ASSERT(sch);
 
-	if (sc) {
+	if (sc && (sc->sc_flags & SCF_PASSIVE)) {
 		sc->sc_flags |= SCF_PASSIVE_SYNACK;
 
 		sc->sc_iss = th->th_seq;
@@ -813,6 +826,7 @@ syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
 			sc->sc_ts = 0;
 			sc->sc_tsreflect = 0;
 		} else if (sc->sc_flags & SCF_TIMESTAMP) {
+			sc->sc_tsoff = to->to_tsval - sc->sc_ts;
 			sc->sc_ts = to->to_tsval;
 			sc->sc_tsreflect = to->to_tsecr;
 		}
@@ -1016,7 +1030,7 @@ syncache_synthesize_synack(struct syncache *sc, struct tcphdr **pth)
  * reconstructed connection, from a syncache entry.
  */
 static struct socket *
-syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
+syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct tcpopt *to)
 {
 	struct inpcb *inp = NULL;
 	struct socket *so = NULL;
@@ -1221,9 +1235,9 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 		}
 		if (sc->sc_flags & SCF_TIMESTAMP) {
 			tp->t_flags |= TF_REQ_TSTMP|TF_RCVD_TSTMP;
-			tp->ts_recent = sc->sc_tsreflect;
+			tp->ts_recent = sc->sc_ts;
 			tp->ts_recent_age = tcp_ts_getticks();
-			tp->ts_offset = sc->sc_tsoff;
+			tp->ts_offset = to->to_tsval - tcp_ts_getticks();
 		}
 #ifdef TCP_SIGNATURE
 		if (sc->sc_flags & SCF_SIGNATURE)
@@ -1259,7 +1273,7 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	th->th_win = ntohs(th->th_win);
 	th->th_urp = ntohs(th->th_urp);
 
-	tcp_do_segment(m1, th, so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED);
+	tcp_do_segment(m1, th, so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED, 1);
 
 	/* return with inp locked */
 	return (so);
@@ -1278,7 +1292,7 @@ abort2:
  * Build a new TCP socket structure from a syncache entry.
  */
 static struct socket *
-syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
+syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct tcpopt *to)
 {
 	struct inpcb *inp = NULL;
 	struct socket *so = NULL;
@@ -1293,8 +1307,8 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);
 
 #ifdef PASSIVE_INET
-	if (sotoinpcb(lso)->inp_flags2 & INP_PASSIVE) {
-		client_so = syncache_passive_client_socket(sc, lso, m);
+	if (sc->sc_flags & SCF_PASSIVE) {
+		client_so = syncache_passive_client_socket(sc, lso, m, to);
 		if (client_so == NULL)
 			goto abort2;
 		client_inp = sotoinpcb(client_so);
@@ -1327,17 +1341,33 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	mac_socketpeer_set_from_mbuf(m, so);
 #endif
 	
-#ifdef PASSIVE_INET
-	if (sotoinpcb(lso)->inp_flags2 & INP_PASSIVE) {
-		so->so_passive_peer = client_so;
-		client_so->so_passive_peer = so;
-	}
-#endif
-
 	inp = sotoinpcb(so);
 	inp->inp_inc.inc_fibnum = so->so_fibnum;
 	INP_WLOCK(inp);
 	INP_HASH_WLOCK(&V_tcbinfo);
+
+#ifdef PASSIVE_INET
+	if (sc->sc_flags & SCF_PASSIVE) {
+		so->so_options |= SO_PASSIVE;
+		inp->inp_flags2 |= INP_PASSIVE;
+		client_so->so_options |= SO_PASSIVE;
+		client_inp->inp_flags2 |= INP_PASSIVE;
+
+		so->so_passive_peer = client_so;
+		client_so->so_passive_peer = so;
+
+		/*
+		 * Now that the sockets are linked, subsequent calls to
+		 * soabort(so) in this routine will also abort client_so as
+		 * no references to it are currently held, so clear
+		 * client_so to avoid separate cleanup beyond this point.
+		 */
+		client_so = NULL;
+	} else {
+		so->so_options &= ~SO_PASSIVE;
+	}
+#endif
+
 
 #ifdef PROMISCUOUS_INET
 	if (inp->inp_flags2 & INP_PROMISC) {
@@ -1566,14 +1596,14 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 abort:
 	INP_WUNLOCK(inp);
 abort2:
+#ifdef PASSIVE_INET
+	if (client_inp != NULL)
+		INP_WUNLOCK(client_inp);
+	if (client_so != NULL)
+		soabort(client_so);
+#endif
 	if (so != NULL)
 		soabort(so);
-#ifdef PASSIVE_INET
-	if (client_so != NULL) {
-		INP_WUNLOCK(client_inp);
-		soabort(client_so);
-	}
-#endif
 	return (NULL);
 }
 
@@ -1655,7 +1685,7 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	 * carry on by accepting the ACK without validating the sequence
 	 * number and the timestamp.
 	 */
-	if ((inc->inc_flags & INC_PASSIVE) && !(sc->sc_flags & SCF_PASSIVE_SYNACK)) {
+	if ((sc->sc_flags & (SCF_PASSIVE|SCF_PASSIVE_SYNACK)) == SCF_PASSIVE) {
 		sc->sc_iss = th->th_ack - 1;
 		sc->sc_ts = to->to_tsecr;
 	}
@@ -1704,7 +1734,7 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		goto failed;
 	}
 
-	*lsop = syncache_socket(sc, *lsop, m);
+	*lsop = syncache_socket(sc, *lsop, m, to);
 
 	if (*lsop == NULL)
 		TCPSTAT_INC(tcps_sc_aborted);
@@ -1759,7 +1789,7 @@ tcp_offload_syncache_expand(struct in_conninfo *inc, struct toeopt *toeo,
 static void
 _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
     struct inpcb *inp, struct socket **lsop, struct mbuf *m,
-    struct toe_usrreqs *tu, void *toepcb)
+    struct toe_usrreqs *tu, void *toepcb, int initial_timeout)
 {
 	struct tcpcb *tp;
 	struct socket *so;
@@ -1771,6 +1801,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	int win, sb_hiwat, ip_ttl, ip_tos;
 #ifdef PASSIVE_INET
 	int passive;
+	unsigned int altfib;
 #endif
 #ifdef PROMISCUOUS_INET
 	int promisc_listen, synfilter;
@@ -1810,7 +1841,8 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	sb_hiwat = so->so_rcv.sb_hiwat;
 	ltflags = (tp->t_flags & (TF_NOOPT | TF_SIGNATURE));
 #ifdef PASSIVE_INET
-	passive = inp->inp_flags2 & INP_PASSIVE;
+	passive = inc->inc_flags & INC_PASSIVE;
+	altfib = inc->inc_fibnum;
 #endif
 #ifdef PROMISCUOUS_INET
 	promisc_listen = inp->inp_flags2 & INP_PROMISC;
@@ -1901,8 +1933,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 			free(s, M_TCPLOG);
 		}
 		if (!TOEPCB_ISSET(sc) && syncache_respond(sc) == 0) {
-			sc->sc_rxmits = 0;
-			syncache_timeout(sc, sch, 1);
+			if (!(sc->sc_flags & SCF_NO_TIMEOUT_RESET)) {
+				sc->sc_rxmits = 0;
+				syncache_timeout(sc, sch, 1, -1);
+			}
 			TCPSTAT_INC(tcps_sndacks);
 			TCPSTAT_INC(tcps_sndtotal);
 		}
@@ -1937,6 +1971,8 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		cbarg.th = *th;
 		cbarg.m = m;
 		cbarg.l2i = &l2info_tag->ifl2i_info;
+		cbarg.initial_timeout = -1;
+		cbarg.altfib = altfib;
 
 		decision = syn_filter_run_callback(inp, &cbarg);
 #ifdef PASSIVE_INET
@@ -1944,6 +1980,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 			passive = 1;
 			decision = SYNF_ACCEPT;
 		}
+
+		if (cbarg.inc.inc_flags & INC_PASSIVE)
+			initial_timeout = cbarg.initial_timeout;
+
+		altfib = cbarg.altfib;
 #endif
 		if (SYNF_ACCEPT != decision) {
 			SCH_UNLOCK(sch);
@@ -2022,7 +2063,14 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	sc->sc_irs = th->th_seq;
 	sc->sc_iss = arc4random();
 #ifdef PASSIVE_INET
-	sc->sc_flags = passive ? SCF_PASSIVE : 0;
+	if (passive) {
+		sc->sc_flags = SCF_PASSIVE;
+		if (initial_timeout > 0)
+			sc->sc_flags |= SCF_NO_TIMEOUT_RESET;
+		if (inc->inc_flags & INC_CONVONTMO)
+			sc->sc_flags |= SCF_CONVERT_ON_TIMEOUT;
+	}
+	sc->sc_altfib = altfib;
 #else
 	sc->sc_flags = 0;
 #endif
@@ -2138,7 +2186,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 #endif
 			syncache_free(sc);
 		else if (sc != &scs)
-			syncache_insert(sc, sch);   /* locks and unlocks sch */
+			syncache_insert(sc, sch, initial_timeout);   /* locks and unlocks sch */
 		TCPSTAT_INC(tcps_sndacks);
 		TCPSTAT_INC(tcps_sndtotal);
 	} else {
@@ -2322,7 +2370,11 @@ syncache_respond(struct syncache *sc)
 	} else
 		optlen = 0;
 
+#ifdef PASSIVE_INET
+	M_SETFIB(m, sc->sc_altfib);
+#else
 	M_SETFIB(m, sc->sc_inc.inc_fibnum);
+#endif
 	m->m_pkthdr.csum_data = offsetof(struct tcphdr, th_sum);
 #ifdef INET6
 	if (sc->sc_inc.inc_flags & INC_ISIPV6) {
@@ -2349,9 +2401,9 @@ syncache_respond(struct syncache *sc)
 
 void
 syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
-    struct inpcb *inp, struct socket **lsop, struct mbuf *m)
+     struct inpcb *inp, struct socket **lsop, struct mbuf *m, int initial_timeout)
 {
-	_syncache_add(inc, to, th, inp, lsop, m, NULL, NULL);
+	_syncache_add(inc, to, th, inp, lsop, m, NULL, NULL, initial_timeout);
 }
 
 void
@@ -2369,7 +2421,7 @@ tcp_offload_syncache_add(struct in_conninfo *inc, struct toeopt *toeo,
 	INP_INFO_WLOCK(&V_tcbinfo);
 	INP_WLOCK(inp);
 
-	_syncache_add(inc, &to, th, inp, lsop, NULL, tu, toepcb);
+	_syncache_add(inc, &to, th, inp, lsop, NULL, tu, toepcb, -1);
 }
 
 /*

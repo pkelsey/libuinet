@@ -34,6 +34,10 @@
 #ifndef _SYS_SOCKETVAR_H_
 #define _SYS_SOCKETVAR_H_
 
+#ifdef _KERNEL
+#include "opt_passiveinet.h"
+#endif
+
 #include <sys/queue.h>			/* for TAILQ macros */
 #include <sys/selinfo.h>		/* for struct selinfo */
 #include <sys/_lock.h>
@@ -126,6 +130,7 @@ struct socket {
 	 * so_user_cookie is used by ipfw/dummynet.
 	 */
 	int so_fibnum;		/* routing domain for this socket */
+	int so_altfibnum;
 	uint32_t so_user_cookie;
 
 	struct so_upcallprep {
@@ -144,6 +149,8 @@ struct socket {
 	struct socket *so_passive_peer;	/* (a) peer socket when performing passive reassembly */
 };
 
+
+#ifdef _KERNEL
 /*
  * Global accept mutex to serialize access to accept queues and
  * fields associated with multiple sockets.  This allows us to
@@ -166,6 +173,8 @@ extern struct mtx accept_mtx;
 #define	SOCK_OWNED(_so)			SOCKBUF_OWNED(&(_so)->so_rcv)
 #define	SOCK_UNLOCK(_so)		SOCKBUF_UNLOCK(&(_so)->so_rcv)
 #define	SOCK_LOCK_ASSERT(_so)		SOCKBUF_LOCK_ASSERT(&(_so)->so_rcv)
+
+#endif
 
 /*
  * Socket state bits stored in so_qstate.
@@ -245,6 +254,28 @@ struct xsocket {
 	++(so)->so_count;						\
 } while (0)
 
+#ifdef PASSIVE_INET
+
+extern void in_passive_release_sock_locks(struct socket *so);
+
+#define	sorele(so) do {							\
+	ACCEPT_LOCK_ASSERT();						\
+	SOCK_LOCK_ASSERT(so);						\
+	if ((so)->so_passive_peer)					\
+		SOCK_LOCK_ASSERT((so)->so_passive_peer);		\
+	if ((so)->so_count <= 0)					\
+		panic("sorele");					\
+	if (--(so)->so_count == 0)					\
+		sofree(so);						\
+	else {								\
+		if ((so)->so_passive_peer)				\
+			in_passive_release_sock_locks(so);		\
+		else							\
+			SOCK_UNLOCK(so);				\
+		ACCEPT_UNLOCK();					\
+	}								\
+} while (0)
+#else
 #define	sorele(so) do {							\
 	ACCEPT_LOCK_ASSERT();						\
 	SOCK_LOCK_ASSERT(so);						\
@@ -257,6 +288,8 @@ struct xsocket {
 		ACCEPT_UNLOCK();					\
 	}								\
 } while (0)
+#endif
+
 
 /*
  * In sorwakeup() and sowwakeup(), acquire the socket buffer lock to
