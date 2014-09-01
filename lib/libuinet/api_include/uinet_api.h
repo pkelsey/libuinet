@@ -128,6 +128,11 @@ uinet_synf_deferral_t uinet_synfilter_deferral_alloc(struct uinet_socket *so, ui
 int   uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_deferral_t deferral, int decision);
 void  uinet_synfilter_deferral_free(uinet_synf_deferral_t deferral);
 uinet_api_synfilter_cookie_t uinet_synfilter_deferral_get_cookie(uinet_synf_deferral_t deferral);
+int uinet_register_pfil_in(uinet_pfil_cb_t cb, void *arg, const char *ifname);
+
+const char * uinet_mbuf_data(const struct uinet_mbuf *);
+size_t uinet_mbuf_len(const struct uinet_mbuf *);
+int uinet_if_xmit(void *cookie, const char *buf, int len);
 
 int uinet_lock_log_set_file(const char *file);
 int uinet_lock_log_enable(void);
