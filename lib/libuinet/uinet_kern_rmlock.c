@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2010 Kip Macy
  * All rights reserved.
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,9 +32,9 @@
 #include <sys/systm.h>
 #include <sys/conf.h>
 #include <sys/rmlock.h>
-#include <sys/rwlock.h>
 #include <sys/proc.h>
 
+#include "uinet_host_interface.h"
 
 static void
 assert_rm(struct lock_object *lock, int what)
@@ -49,7 +49,7 @@ struct lock_class lock_class_rm = {
 	.lc_assert = assert_rm,
 #ifndef UINET
 #ifdef DDB
-	.lc_ddb_show = db_show_rwlock,
+	.lc_ddb_show = db_show_rmlock,
 #endif
 #endif
 #ifdef KDTRACE_HOOKS
@@ -60,54 +60,56 @@ struct lock_class lock_class_rm = {
 void
 rm_init(struct rmlock *rm, const char *name)
 {
-
-	rw_init((struct rwlock *)rm, name);
+	rm_init_flags(rm, name, 0);
 }
 
 void
 rm_init_flags(struct rmlock *rm, const char *name, int opts)
 {
-	int rwopts = 0;
+	int liflags;
 
-	if (opts & RM_RECURSE) rwopts |= RW_RECURSE;
+	liflags = 0;
+	if (!(opts & RM_NOWITNESS))
+		liflags |= LO_WITNESS;
+	if (opts & RM_RECURSE)
+		liflags |= LO_RECURSABLE;
 
-	rw_init_flags((struct rwlock *)rm, name, rwopts);
+	lock_init(&rm->lock_object, &lock_class_rm, name, NULL, liflags);
+	if (0 != uhi_rwlock_init(&rm->rm_lock, opts & RM_RECURSE ? UHI_RW_WRECURSE : 0))
+		panic("Could not initialize rmlock");
 }
 
 void
 rm_destroy(struct rmlock *rm)
 {
-
-	rw_destroy((struct rwlock *)rm);
+	uhi_rwlock_destroy(&rm->rm_lock);
 }
 
 void
 _rm_wlock(struct rmlock *rm)
 {
-
-	_rw_wlock((struct rwlock *)rm, __FILE__, __LINE__);
+	uhi_rwlock_wlock(&rm->rm_lock);
 }
 
 void
 _rm_wunlock(struct rmlock *rm)
 {
-
-	_rw_wunlock((struct rwlock *)rm, __FILE__, __LINE__);
+	uhi_rwlock_wunlock(&rm->rm_lock);
 }
 
 int
 _rm_rlock(struct rmlock *rm, struct rm_priotracker *tracker, int trylock)
 {
 	if (trylock)
-		return _rw_try_rlock((struct rwlock *)rm, __FILE__, __LINE__);
+		return uhi_rwlock_tryrlock(&rm->rm_lock);
 
-	_rw_rlock((struct rwlock *)rm, __FILE__, __LINE__);
+	uhi_rwlock_rlock(&rm->rm_lock);
 	return (1);
 }
+
 
 void
 _rm_runlock(struct rmlock *rm,  struct rm_priotracker *tracker)
 {
-
-	_rw_runlock((struct rwlock *)rm, __FILE__, __LINE__);
+	uhi_rwlock_runlock(&rm->rm_lock);
 }

@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2010 Kip Macy
  * All rights reserved.
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,11 +29,12 @@
  */
 
 #include <sys/param.h>
+#include <sys/systm.h>
 #include <sys/conf.h>
-#include <sys/rwlock.h>
 #include <sys/sx.h>
 #include <sys/proc.h>
 
+#include "uinet_host_interface.h"
 
 struct lock_class lock_class_sx = {
 	.lc_name = "sx",
@@ -49,56 +50,66 @@ struct lock_class lock_class_sx = {
 void
 sx_init_flags(struct sx *sx, const char *description, int opts)
 {
-	int rwopts = 0;
-	
-	if (opts & SX_RECURSE) rwopts |= RW_RECURSE;
+	int flags;
 
-	rw_init_flags((struct rwlock *)sx, description, rwopts);
+	MPASS((opts & ~(SX_QUIET | SX_RECURSE | SX_NOWITNESS | SX_DUPOK |
+	    SX_NOPROFILE | SX_NOADAPTIVE)) == 0);
+
+	flags = LO_SLEEPABLE | LO_UPGRADABLE;
+	if (opts & SX_DUPOK)
+		flags |= LO_DUPOK;
+	if (opts & SX_NOPROFILE)
+		flags |= LO_NOPROFILE;
+	if (!(opts & SX_NOWITNESS))
+		flags |= LO_WITNESS;
+	if (opts & SX_RECURSE)
+		flags |= LO_RECURSABLE;
+	if (opts & SX_QUIET)
+		flags |= LO_QUIET;
+
+	flags |= opts & SX_NOADAPTIVE;
+	lock_init(&sx->lock_object, &lock_class_sx, description, NULL, flags);
+	if (0 != uhi_rwlock_init(&sx->sx_lock, opts & SX_RECURSE ? UHI_RW_WRECURSE : 0))
+		panic("Could not initialize sxlock");
 }
 
 void
 sx_destroy(struct sx *sx)
 {
-
-	rw_destroy((struct rwlock *)sx);
+	uhi_rwlock_destroy(&sx->sx_lock);
 }
 
 int
 _sx_xlock(struct sx *sx, int opts,
     const char *file, int line)
 {
-	
-	_rw_wlock((struct rwlock *)sx, file, line);
+	uhi_rwlock_wlock(&sx->sx_lock);
 	return (0);
 }
 
 int
 _sx_slock(struct sx *sx, int opts, const char *file, int line)
 {
-	
-	_rw_rlock((struct rwlock *)sx, file, line);
+	uhi_rwlock_rlock(&sx->sx_lock);	
 	return (0);
 }
 
 void
 _sx_xunlock(struct sx *sx, const char *file, int line)
 {
-	
-	_rw_wunlock((struct rwlock *)sx, file, line);
+	uhi_rwlock_wunlock(&sx->sx_lock);	
 }
 
 void
 _sx_sunlock(struct sx *sx, const char *file, int line)
 {
-	
-	_rw_runlock((struct rwlock *)sx, file, line);
+	uhi_rwlock_runlock(&sx->sx_lock);	
 }
 
 int
 _sx_try_xlock(struct sx *sx, const char *file, int line)
 {
-
-	return (_rw_try_wlock((struct rwlock *)sx, file, line));
+	return (uhi_rwlock_trywlock(&sx->sx_lock));
 }
 
 void
