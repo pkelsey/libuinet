@@ -179,6 +179,7 @@ typedef double ev_tstamp;
 #if EV_UINET_ENABLE
 # include <inttypes.h>
 # include <uinet_api.h>
+# include <pthread.h>
 #endif
 
 /* support multiple event loops? */
@@ -889,6 +890,9 @@ EV_API_DECL void ev_uinet_stop     (EV_P_ ev_uinet *w) EV_THROW;
 #endif
 
 #endif
+
+/* XXX doesn't belong here */
+#define	UINET_ASSERT(msg, expr)		assert(expr)
 
 EV_CPP(})
 
