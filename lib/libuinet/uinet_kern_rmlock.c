@@ -73,6 +73,14 @@ rm_init_flags(struct rmlock *rm, const char *name, int opts)
 		liflags |= LO_WITNESS;
 	if (opts & RM_RECURSE)
 		liflags |= LO_RECURSABLE;
+	/* XXX validate - do we need more? */
+#if 0
+        if (opts & RM_SLEEPABLE) {
+                liflags |= RM_SLEEPABLE;
+                sx_init_flags(&rm->rm_lock_sx, "rmlock_sx", SX_RECURSE);
+        } else
+                mtx_init(&rm->rm_lock_mtx, name, "rmlock_mtx", MTX_NOWITNESS);
+#endif
 
 	lock_init(&rm->lock_object, &lock_class_rm, name, NULL, liflags);
 	if (0 != uhi_rwlock_init(&rm->rm_lock, opts & RM_RECURSE ? UHI_RW_WRECURSE : 0))
@@ -82,28 +90,32 @@ rm_init_flags(struct rmlock *rm, const char *name, int opts)
 void
 rm_destroy(struct rmlock *rm)
 {
+
 	uhi_rwlock_destroy(&rm->rm_lock);
 }
 
 void
 _rm_wlock(struct rmlock *rm)
 {
-	uhi_rwlock_wlock(&rm->rm_lock);
+	_uhi_rwlock_wlock(&rm->rm_lock, rm, curthread->td_tid, NULL, 0);
 }
 
 void
 _rm_wunlock(struct rmlock *rm)
 {
-	uhi_rwlock_wunlock(&rm->rm_lock);
+
+	_uhi_rwlock_wunlock(&rm->rm_lock, rm, curthread->td_tid, NULL, 0);
 }
 
 int
 _rm_rlock(struct rmlock *rm, struct rm_priotracker *tracker, int trylock)
 {
-	if (trylock)
-		return uhi_rwlock_tryrlock(&rm->rm_lock);
 
-	uhi_rwlock_rlock(&rm->rm_lock);
+	if (trylock)
+		return _uhi_rwlock_tryrlock(&rm->rm_lock, rm,
+		  curthread->td_tid, NULL, 0);
+
+	_uhi_rwlock_rlock(&rm->rm_lock, rm, curthread->td_tid, NULL, 0);
 	return (1);
 }
 
@@ -111,5 +123,69 @@ _rm_rlock(struct rmlock *rm, struct rm_priotracker *tracker, int trylock)
 void
 _rm_runlock(struct rmlock *rm,  struct rm_priotracker *tracker)
 {
-	uhi_rwlock_runlock(&rm->rm_lock);
+
+	_uhi_rwlock_runlock(&rm->rm_lock, rm, curthread->td_tid, NULL, 0);
 }
+
+#if LOCK_DEBUG > 0
+void
+_rm_wlock_debug(struct rmlock *rm, const char *file, int line)
+{
+
+	WITNESS_CHECKORDER(&rm->lock_object, LOP_NEWORDER | LOP_EXCLUSIVE, file,
+	    line, NULL);
+	_rm_wlock(rm);
+#if 0
+	if (rm->lock_object.lo_flags & RM_SLEEPABLE)
+		WITNESS_LOCK(&rm->rm_lock_sx.lock_object, LOP_EXCLUSIVE,
+		    file, line);
+	else
+#endif
+		WITNESS_LOCK(&rm->lock_object, LOP_EXCLUSIVE, file, line);
+}
+
+void
+_rm_wunlock_debug(struct rmlock *rm, const char *file, int line)
+{
+
+#if 0
+	if (rm->lock_object.lo_flags & RM_SLEEPABLE)
+		WITNESS_UNLOCK(&rm->rm_lock_sx.lock_object, LOP_EXCLUSIVE,
+		    file, line);
+	else
+#endif
+		WITNESS_UNLOCK(&rm->lock_object, LOP_EXCLUSIVE, file, line);
+
+	_rm_wunlock(rm);
+}
+
+int
+_rm_rlock_debug(struct rmlock *rm, struct rm_priotracker *tracker,
+    int trylock, const char *file, int line)
+{
+
+#if 0
+	if (!trylock && (rm->lock_object.lo_flags & RM_SLEEPABLE))
+		WITNESS_CHECKORDER(&rm->rm_lock_sx.lock_object, LOP_NEWORDER,
+		    file, line, NULL);
+#endif
+	WITNESS_CHECKORDER(&rm->lock_object, LOP_NEWORDER, file, line, NULL);
+
+#if 0
+	if (trylock)
+		return _rm_try_rlock(rm);
+#endif
+
+	_rm_rlock(rm, tracker, trylock);
+	return (1);
+}
+
+void
+_rm_runlock_debug(struct rmlock *rm,  struct rm_priotracker *tracker,
+    const char *file, int line)
+{
+
+	WITNESS_UNLOCK(&rm->lock_object, 0, file, line);
+	_rm_runlock(rm, tracker);
+}
+#endif

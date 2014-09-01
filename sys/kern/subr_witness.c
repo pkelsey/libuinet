@@ -304,12 +304,14 @@ witness_lock_type_equal(struct witness *w1, struct witness *w2)
 		(w2->w_class->lc_flags & (LC_SLEEPLOCK | LC_SPINLOCK)));
 }
 
+#if 0
 static __inline int
 witness_lock_order_key_empty(const struct witness_lock_order_key *key)
 {
 
 	return (key->from == 0 && key->to == 0);
 }
+#endif
 
 static __inline int
 witness_lock_order_key_equal(const struct witness_lock_order_key *a,
@@ -377,6 +379,8 @@ static void	witness_setflag(struct lock_object *lock, int flag, int set);
 #endif
 
 SYSCTL_NODE(_debug, OID_AUTO, witness, CTLFLAG_RW, NULL, "Witness Locking");
+
+#define	WITNESS_PANIC(...) do { printf(__VA_ARGS__); printf("\n"); } while (0)
 
 /*
  * If set to 0, lock order checking is disabled.  If set to -1,
@@ -821,15 +825,15 @@ witness_init(struct lock_object *lock, const char *type)
 	class = LOCK_CLASS(lock);
 	if ((lock->lo_flags & LO_RECURSABLE) != 0 &&
 	    (class->lc_flags & LC_RECURSABLE) == 0)
-		panic("%s: lock (%s) %s can not be recursable", __func__,
+		WITNESS_PANIC("%s: lock (%s) %s can not be recursable", __func__,
 		    class->lc_name, lock->lo_name);
 	if ((lock->lo_flags & LO_SLEEPABLE) != 0 &&
 	    (class->lc_flags & LC_SLEEPABLE) == 0)
-		panic("%s: lock (%s) %s can not be sleepable", __func__,
+		WITNESS_PANIC("%s: lock (%s) %s can not be sleepable", __func__,
 		    class->lc_name, lock->lo_name);
 	if ((lock->lo_flags & LO_UPGRADABLE) != 0 &&
 	    (class->lc_flags & LC_UPGRADABLE) == 0)
-		panic("%s: lock (%s) %s can not be upgradable", __func__,
+		WITNESS_PANIC("%s: lock (%s) %s can not be upgradable", __func__,
 		    class->lc_name, lock->lo_name);
 
 	/*
@@ -846,7 +850,7 @@ witness_init(struct lock_object *lock, const char *type)
 		pending_locks[pending_cnt].wh_lock = lock;
 		pending_locks[pending_cnt++].wh_type = type;
 		if (pending_cnt > WITNESS_PENDLIST)
-			panic("%s: pending locks list is too small, bump it\n",
+			WITNESS_PANIC("%s: pending locks list is too small, bump it\n",
 			    __func__);
 	} else
 		lock->lo_witness = enroll(type, class);
@@ -861,7 +865,7 @@ witness_destroy(struct lock_object *lock)
 	class = LOCK_CLASS(lock);
 
 	if (witness_cold)
-		panic("lock (%s) %s destroyed while witness_cold",
+		WITNESS_PANIC("lock (%s) %s destroyed while witness_cold",
 		    class->lc_name, lock->lo_name);
 
 	/* XXX: need to verify that no one holds the lock */
@@ -1062,7 +1066,7 @@ witness_checkorder(struct lock_object *lock, int flags, const char *file,
 		 * all spin locks.
 		 */
 		if (td->td_critnest != 0 && !kdb_active)
-			panic("blockable sleep lock (%s) %s @ %s:%d",
+			WITNESS_PANIC("blockable sleep lock (%s) %s @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 
@@ -1106,7 +1110,7 @@ witness_checkorder(struct lock_object *lock, int flags, const char *file,
 			    fixup_filename(file), line);
 			printf("while exclusively locked from %s:%d\n",
 			    fixup_filename(lock1->li_file), lock1->li_line);
-			panic("share->excl");
+			WITNESS_PANIC("share->excl");
 		}
 		if ((lock1->li_flags & LI_EXCLUSIVE) == 0 &&
 		    (flags & LOP_EXCLUSIVE) != 0) {
@@ -1115,7 +1119,7 @@ witness_checkorder(struct lock_object *lock, int flags, const char *file,
 			    fixup_filename(file), line);
 			printf("while share locked from %s:%d\n",
 			    fixup_filename(lock1->li_file), lock1->li_line);
-			panic("excl->share");
+			WITNESS_PANIC("excl->share");
 		}
 		return;
 	}
@@ -1422,26 +1426,26 @@ witness_upgrade(struct lock_object *lock, int flags, const char *file, int line)
 	class = LOCK_CLASS(lock);
 	if (witness_watch) {
 		if ((lock->lo_flags & LO_UPGRADABLE) == 0)
-			panic("upgrade of non-upgradable lock (%s) %s @ %s:%d",
+			WITNESS_PANIC("upgrade of non-upgradable lock (%s) %s @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		if ((class->lc_flags & LC_SLEEPLOCK) == 0)
-			panic("upgrade of non-sleep lock (%s) %s @ %s:%d",
+			WITNESS_PANIC("upgrade of non-sleep lock (%s) %s @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 	}
 	instance = find_instance(curthread->td_sleeplocks, lock);
 	if (instance == NULL)
-		panic("upgrade of unlocked lock (%s) %s @ %s:%d",
+		WITNESS_PANIC("upgrade of unlocked lock (%s) %s @ %s:%d",
 		    class->lc_name, lock->lo_name,
 		    fixup_filename(file), line);
 	if (witness_watch) {
 		if ((instance->li_flags & LI_EXCLUSIVE) != 0)
-			panic("upgrade of exclusive lock (%s) %s @ %s:%d",
+			WITNESS_PANIC("upgrade of exclusive lock (%s) %s @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		if ((instance->li_flags & LI_RECURSEMASK) != 0)
-			panic("upgrade of recursed lock (%s) %s r=%d @ %s:%d",
+			WITNESS_PANIC("upgrade of recursed lock (%s) %s r=%d @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    instance->li_flags & LI_RECURSEMASK,
 			    fixup_filename(file), line);
@@ -1462,26 +1466,26 @@ witness_downgrade(struct lock_object *lock, int flags, const char *file,
 	class = LOCK_CLASS(lock);
 	if (witness_watch) {
 		if ((lock->lo_flags & LO_UPGRADABLE) == 0)
-		panic("downgrade of non-upgradable lock (%s) %s @ %s:%d",
+		WITNESS_PANIC("downgrade of non-upgradable lock (%s) %s @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		if ((class->lc_flags & LC_SLEEPLOCK) == 0)
-			panic("downgrade of non-sleep lock (%s) %s @ %s:%d",
+			WITNESS_PANIC("downgrade of non-sleep lock (%s) %s @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 	}
 	instance = find_instance(curthread->td_sleeplocks, lock);
 	if (instance == NULL)
-		panic("downgrade of unlocked lock (%s) %s @ %s:%d",
+		WITNESS_PANIC("downgrade of unlocked lock (%s) %s @ %s:%d",
 		    class->lc_name, lock->lo_name,
 		    fixup_filename(file), line);
 	if (witness_watch) {
 		if ((instance->li_flags & LI_EXCLUSIVE) == 0)
-			panic("downgrade of shared lock (%s) %s @ %s:%d",
+			WITNESS_PANIC("downgrade of shared lock (%s) %s @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		if ((instance->li_flags & LI_RECURSEMASK) != 0)
-			panic("downgrade of recursed lock (%s) %s r=%d @ %s:%d",
+			WITNESS_PANIC("downgrade of recursed lock (%s) %s r=%d @ %s:%d",
 			    class->lc_name, lock->lo_name,
 			    instance->li_flags & LI_RECURSEMASK,
 			    fixup_filename(file), line);
@@ -1496,7 +1500,7 @@ witness_unlock(struct lock_object *lock, int flags, const char *file, int line)
 	struct lock_instance *instance;
 	struct lock_class *class;
 	struct thread *td;
-	register_t s;
+//	register_t s;
 	int i, j;
 
 	if (witness_cold || lock->lo_witness == NULL || panicstr != NULL)
@@ -1524,9 +1528,9 @@ witness_unlock(struct lock_object *lock, int flags, const char *file, int line)
 	 * eventual register locks and remove them.
 	 */
 	if (witness_watch > 0)
-		panic("lock (%s) %s not locked @ %s:%d", class->lc_name,
+		WITNESS_PANIC("lock (%s) %s not locked @ %s:%d", class->lc_name,
 		    lock->lo_name, fixup_filename(file), line);
-	else
+//	else
 		return;
 found:
 
@@ -1537,7 +1541,7 @@ found:
 		    lock->lo_name, fixup_filename(file), line);
 		printf("while exclusively locked from %s:%d\n",
 		    fixup_filename(instance->li_file), instance->li_line);
-		panic("excl->ushare");
+		WITNESS_PANIC("excl->ushare");
 	}
 	if ((instance->li_flags & LI_EXCLUSIVE) == 0 && witness_watch > 0 &&
 	    (flags & LOP_EXCLUSIVE) != 0) {
@@ -1546,7 +1550,7 @@ found:
 		printf("while share locked from %s:%d\n",
 		    fixup_filename(instance->li_file),
 		    instance->li_line);
-		panic("share->uexcl");
+		WITNESS_PANIC("share->uexcl");
 	}
 	/* If we are recursed, unrecurse. */
 	if ((instance->li_flags & LI_RECURSEMASK) > 0) {
@@ -1560,11 +1564,11 @@ found:
 	if ((instance->li_flags & LI_NORELEASE) != 0 && witness_watch > 0) {
 		printf("forbidden unlock of (%s) %s @ %s:%d\n", class->lc_name,
 		    lock->lo_name, fixup_filename(file), line);
-		panic("lock marked norelease");
+		WITNESS_PANIC("lock marked norelease");
 	}
 
 	/* Otherwise, remove this item from the list. */
-	s = intr_disable();
+//	s = intr_disable();
 	CTR4(KTR_WITNESS, "%s: pid %d removed %s from lle[%d]", __func__,
 	    td->td_proc->p_pid, instance->li_lock->lo_name,
 	    (*lock_list)->ll_count - 1);
@@ -1572,7 +1576,7 @@ found:
 		(*lock_list)->ll_children[j] =
 		    (*lock_list)->ll_children[j + 1];
 	(*lock_list)->ll_count--;
-	intr_restore(s);
+//	intr_restore(s);
 
 	/*
 	 * In order to reduce contention on w_mtx, we want to keep always an
@@ -1615,7 +1619,7 @@ witness_thread_exit(struct thread *td)
 				witness_list_lock(&lle->ll_children[i], printf);
 				
 			}
-		panic("Thread %p cannot exit while holding sleeplocks\n", td);
+		WITNESS_PANIC("Thread %p cannot exit while holding sleeplocks\n", td);
 	}
 	witness_lock_list_free(lle);
 }
@@ -1696,7 +1700,7 @@ witness_warn(int flags, struct lock_object *lock, const char *fmt, ...)
 	} else
 		sched_unpin();
 	if (flags & WARN_PANIC && n)
-		panic("%s", __func__);
+		WITNESS_PANIC("%s", __func__);
 	else
 		witness_debugger(n);
 	return (n);
@@ -1742,7 +1746,7 @@ enroll(const char *description, struct lock_class *lock_class)
 	} else if ((lock_class->lc_flags & LC_SLEEPLOCK))
 		typelist = &w_sleep;
 	else
-		panic("lock class %s is not sleep or spin",
+		WITNESS_PANIC("lock class %s is not sleep or spin",
 		    lock_class->lc_name);
 
 	mtx_lock_spin(&w_mtx);
@@ -1773,7 +1777,7 @@ found:
 	w->w_refcount++;
 	mtx_unlock_spin(&w_mtx);
 	if (lock_class != w->w_class)
-		panic(
+		WITNESS_PANIC(
 			"lock (%s) %s does not match earlier (%s) lock",
 			description, lock_class->lc_name,
 			w->w_class->lc_name);
@@ -1907,7 +1911,7 @@ itismychild(struct witness *parent, struct witness *child)
 	if (!witness_lock_type_equal(parent, child)) {
 		if (witness_cold == 0)
 			mtx_unlock_spin(&w_mtx);
-		panic("%s: parent \"%s\" (%s) and child \"%s\" (%s) are not "
+		WITNESS_PANIC("%s: parent \"%s\" (%s) and child \"%s\" (%s) are not "
 		    "the same lock type", __func__, parent->w_name,
 		    parent->w_class->lc_name, child->w_name,
 		    child->w_class->lc_name);
@@ -2181,7 +2185,7 @@ witness_save(struct lock_object *lock, const char **filep, int *linep)
 	}
 	instance = find_instance(lock_list, lock);
 	if (instance == NULL)
-		panic("%s: lock (%s) %s not locked", __func__,
+		WITNESS_PANIC("%s: lock (%s) %s not locked", __func__,
 		    class->lc_name, lock->lo_name);
 	*filep = instance->li_file;
 	*linep = instance->li_line;
@@ -2214,7 +2218,7 @@ witness_restore(struct lock_object *lock, const char *file, int line)
 	}
 	instance = find_instance(lock_list, lock);
 	if (instance == NULL)
-		panic("%s: lock (%s) %s not locked", __func__,
+		WITNESS_PANIC("%s: lock (%s) %s not locked", __func__,
 		    class->lc_name, lock->lo_name);
 	lock->lo_witness->w_file = file;
 	lock->lo_witness->w_line = line;
@@ -2237,13 +2241,13 @@ witness_assert(struct lock_object *lock, int flags, const char *file, int line)
 	else if ((class->lc_flags & LC_SPINLOCK) != 0)
 		instance = find_instance(PCPU_GET(spinlocks), lock);
 	else {
-		panic("Lock (%s) %s is not sleep or spin!",
+		WITNESS_PANIC("Lock (%s) %s is not sleep or spin!",
 		    class->lc_name, lock->lo_name);
 	}
 	switch (flags) {
 	case LA_UNLOCKED:
 		if (instance != NULL)
-			panic("Lock (%s) %s locked @ %s:%d.",
+			WITNESS_PANIC("Lock (%s) %s locked @ %s:%d.",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		break;
@@ -2257,34 +2261,34 @@ witness_assert(struct lock_object *lock, int flags, const char *file, int line)
 	case LA_XLOCKED | LA_RECURSED:
 	case LA_XLOCKED | LA_NOTRECURSED:
 		if (instance == NULL) {
-			panic("Lock (%s) %s not locked @ %s:%d.",
+			WITNESS_PANIC("Lock (%s) %s not locked @ %s:%d.",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 			break;
 		}
 		if ((flags & LA_XLOCKED) != 0 &&
 		    (instance->li_flags & LI_EXCLUSIVE) == 0)
-			panic("Lock (%s) %s not exclusively locked @ %s:%d.",
+			WITNESS_PANIC("Lock (%s) %s not exclusively locked @ %s:%d.",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		if ((flags & LA_SLOCKED) != 0 &&
 		    (instance->li_flags & LI_EXCLUSIVE) != 0)
-			panic("Lock (%s) %s exclusively locked @ %s:%d.",
+			WITNESS_PANIC("Lock (%s) %s exclusively locked @ %s:%d.",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		if ((flags & LA_RECURSED) != 0 &&
 		    (instance->li_flags & LI_RECURSEMASK) == 0)
-			panic("Lock (%s) %s not recursed @ %s:%d.",
+			WITNESS_PANIC("Lock (%s) %s not recursed @ %s:%d.",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		if ((flags & LA_NOTRECURSED) != 0 &&
 		    (instance->li_flags & LI_RECURSEMASK) != 0)
-			panic("Lock (%s) %s recursed @ %s:%d.",
+			WITNESS_PANIC("Lock (%s) %s recursed @ %s:%d.",
 			    class->lc_name, lock->lo_name,
 			    fixup_filename(file), line);
 		break;
 	default:
-		panic("Invalid lock assertion at %s:%d.",
+		WITNESS_PANIC("Invalid lock assertion at %s:%d.",
 		    fixup_filename(file), line);
 
 	}
@@ -2310,7 +2314,7 @@ witness_setflag(struct lock_object *lock, int flag, int set)
 	}
 	instance = find_instance(lock_list, lock);
 	if (instance == NULL)
-		panic("%s: lock (%s) %s not locked", __func__,
+		WITNESS_PANIC("%s: lock (%s) %s not locked", __func__,
 		    class->lc_name, lock->lo_name);
 
 	if (set)

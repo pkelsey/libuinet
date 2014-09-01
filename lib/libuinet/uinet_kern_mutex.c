@@ -33,6 +33,7 @@
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/systm.h>
+#include <sys/sx.h>
 
 #include "uinet_host_interface.h"
 
@@ -64,6 +65,21 @@ unlock_mtx(struct lock_object *lock)
 	return (0);
 }
 
+static void
+lock_spin(struct lock_object *lock, int how)
+{
+
+	printf("%s: called!\n", __func__);
+}
+
+static int
+unlock_spin(struct lock_object *lock)
+{
+
+	printf("%s: called!\n", __func__);
+	return (0);
+}
+
 /*
  * Lock classes for sleep and spin mutexes.
  */
@@ -86,7 +102,21 @@ struct lock_class lock_class_mtx_sleep = {
 /*
  * XXX should never be used; provided here for linkage with subr_lock.c
  */
-struct lock_class lock_class_mtx_spin;
+struct lock_class lock_class_mtx_spin = {
+	.lc_name = "spin mutex",
+	.lc_flags = LC_SPINLOCK | LC_RECURSABLE,
+	.lc_assert = assert_mtx,
+	.lc_lock = lock_spin,
+	.lc_unlock = unlock_spin,
+#ifndef UINET
+#ifdef DDB
+	.lc_ddb_show = db_show_mtx,
+#endif
+#ifdef KDTRACE_HOOKS
+	.lc_owner = owner_mtx,
+#endif
+#endif
+};
 
 void
 _thread_lock_flags(struct thread *td, int opts, const char *file, int line)
@@ -104,7 +134,6 @@ void
 mutex_init(void)
 {
 	mtx_init(&Giant, "Giant", NULL, MTX_DEF | MTX_RECURSE);
-
 	mtx_init(&proc0.p_mtx, "process lock", NULL, MTX_DEF | MTX_DUPOK);
 }
 
@@ -135,33 +164,48 @@ void
 _mtx_lock_flags(struct mtx *m, int opts, const char *file, int line)
 {
 
-	uhi_mutex_lock(&m->mtx_lock);
+	WITNESS_CHECKORDER(&m->lock_object, opts | LOP_NEWORDER | LOP_EXCLUSIVE,
+	    file, line, NULL);
+	_uhi_mutex_lock(&m->mtx_lock, m, curthread->td_tid, file, line);
+	WITNESS_LOCK(&m->lock_object, opts | LOP_EXCLUSIVE, file, line);
 }
 
 void
 _mtx_unlock_flags(struct mtx *m, int opts, const char *file, int line)
 {
 
-	uhi_mutex_unlock(&m->mtx_lock);
+	WITNESS_UNLOCK(&m->lock_object, opts | LOP_EXCLUSIVE, file, line);
+	_uhi_mutex_unlock(&m->mtx_lock, m, curthread->td_tid, file, line);
 }
 
 int
 _mtx_trylock(struct mtx *m, int opts, const char *file, int line)
 {
+	int rval;
 
-	return (uhi_mutex_trylock(&m->mtx_lock));
+	rval = _uhi_mutex_trylock(&m->mtx_lock, m, curthread->td_tid, file, line);
+	if (rval) {
+		WITNESS_LOCK(&m->lock_object, opts | LOP_EXCLUSIVE | LOP_TRYLOCK,
+		    file, line);
+	}
+
+	return (rval);
 }
 
 void
 _mtx_lock_spin_flags(struct mtx *m, int opts, const char *file, int line)
 {
 
-	uhi_mutex_lock(&m->mtx_lock);
+	WITNESS_CHECKORDER(&m->lock_object, opts | LOP_NEWORDER | LOP_EXCLUSIVE,
+	    file, line, NULL);
+	_uhi_mutex_lock(&m->mtx_lock, m, curthread->td_tid, file, line);
+	WITNESS_LOCK(&m->lock_object, opts | LOP_EXCLUSIVE, file, line);
 }
 
 void
 _mtx_unlock_spin_flags(struct mtx *m, int opts, const char *file, int line)
 {
 
-	uhi_mutex_unlock(&m->mtx_lock);
+	WITNESS_UNLOCK(&m->lock_object, opts | LOP_EXCLUSIVE, file, line);
+	_uhi_mutex_unlock(&m->mtx_lock, m, curthread->td_tid, file, line);
 }

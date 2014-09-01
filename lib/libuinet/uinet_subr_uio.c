@@ -69,8 +69,8 @@ uiofill(uint8_t val, int n, struct uio *uio)
 	KASSERT(uio->uio_segflg != UIO_USERSPACE || uio->uio_td == td,
 	    ("uiofill proc"));
 
-	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
-		     "Calling uiofill()");
+//	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
+//		     "Calling uiofill()");
 
 	save = td->td_pflags & TDP_DEADLKTREAT;
 	td->td_pflags |= TDP_DEADLKTREAT;
@@ -130,8 +130,9 @@ uiomove(void *cp, int n, struct uio *uio)
 	    ("uiomove: mode"));
 	KASSERT(uio->uio_segflg != UIO_USERSPACE || uio->uio_td == curthread,
 	    ("uiomove proc"));
-	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
-	    "Calling uiomove()");
+
+//	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
+//	    "Calling uiomove()");
 
 	save = td->td_pflags & TDP_DEADLKTREAT;
 	td->td_pflags |= TDP_DEADLKTREAT;

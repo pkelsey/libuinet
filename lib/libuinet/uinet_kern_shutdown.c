@@ -30,11 +30,11 @@
  */
 void	panic(const char *, ...) __attribute__((__noreturn__));
 
-
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 
+const char *panicstr = NULL;
 
 void
 panic(const char *fmt, ...)

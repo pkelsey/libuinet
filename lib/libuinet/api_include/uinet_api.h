@@ -129,6 +129,9 @@ int   uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_defer
 void  uinet_synfilter_deferral_free(uinet_synf_deferral_t deferral);
 uinet_api_synfilter_cookie_t uinet_synfilter_deferral_get_cookie(uinet_synf_deferral_t deferral);
 
+int uinet_lock_log_set_file(const char *file);
+int uinet_lock_log_enable(void);
+int uinet_lock_log_disable(void);
 
 #ifdef __cplusplus
 }

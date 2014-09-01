@@ -94,8 +94,100 @@ typedef cpu_set_t cpuset_t;
 static struct itimerval prof_itimer;
 #endif /* UINET_PROFILE */
 
+#if defined(UINET_STACK_UNWIND)
+#define UNW_LOCAL_ONLY
+#include <libunwind.h>
+#endif /* UINET_STACK_UNWIND */
+
 static pthread_key_t thread_specific_data_key;
 static unsigned int uhi_num_cpus;
+
+static FILE *lock_log_fp = NULL;
+static pthread_mutex_t lock_log_mtx;
+static int lock_log_enabled = 0;
+static char *lock_log_filename = NULL;
+
+void
+uhi_lock_log_init(void)
+{
+
+	pthread_mutex_init(&lock_log_mtx, NULL);
+}
+
+void
+uhi_lock_log_set_file(const char *file)
+{
+
+	pthread_mutex_lock(&lock_log_mtx);
+	if (lock_log_filename)
+		free(lock_log_filename);
+	lock_log_filename = strdup(file);
+	pthread_mutex_unlock(&lock_log_mtx);
+}
+
+void
+uhi_lock_log_enable(void)
+{
+
+	pthread_mutex_lock(&lock_log_mtx);
+	if (lock_log_enabled == 1) {
+		pthread_mutex_unlock(&lock_log_mtx);
+		return;
+	}
+
+	lock_log_fp = fopen(lock_log_filename, "w+");
+	lock_log_enabled = 1;
+	pthread_mutex_unlock(&lock_log_mtx);
+}
+
+void
+uhi_lock_log_disable(void)
+{
+	FILE *fp = NULL;
+
+	pthread_mutex_lock(&lock_log_mtx);
+	if (lock_log_mtx == 0) {
+		pthread_mutex_unlock(&lock_log_mtx);
+		return;
+	}
+	fp = lock_log_fp;
+	lock_log_fp = NULL;
+	lock_log_enabled = 0;
+	pthread_mutex_unlock(&lock_log_mtx);
+
+	/* This may take some time, so do it out of the lock */
+	fclose(fp);
+}
+
+static void
+uhi_lock_log(const char *type, const char *what, void *lp, uint32_t tid, void *ptr, const char *file, int line)
+{
+	struct timespec ts;
+	pthread_t curthr;
+
+	if (lock_log_enabled == 0)
+		return;
+
+	clock_gettime(CLOCK_MONOTONIC_FAST, &ts);
+
+	curthr = pthread_self();
+
+	pthread_mutex_lock(&lock_log_mtx);
+	if (lock_log_fp != NULL) {
+		fprintf(lock_log_fp,
+		    "%llu.%06llu: lp %p tid %x type %s what %s where %s:%d ptr %p\n",
+		    (unsigned long long) (ts.tv_sec),
+		    (unsigned long long) (ts.tv_nsec / 1000),
+		    lp,
+		    (int) curthr,
+		    type,
+		    what,
+		    file,
+		    line,
+		    ptr);
+	}
+	pthread_mutex_unlock(&lock_log_mtx);
+}
 
 void
 uhi_init(void)
@@ -115,6 +207,8 @@ uhi_init(void)
 	error = pthread_key_create(&thread_specific_data_key, NULL);
 	if (error != 0)
 		printf("Warning: unable to create pthread key for thread specific data (%d)\n", error);
+
+	uhi_lock_log_init();
 
 #if defined(UINET_PROFILE)
 	printf("getting prof timer\n");
@@ -679,8 +773,9 @@ uhi_mutex_destroy(uhi_mutex_t *m)
 
 
 void
-uhi_mutex_lock(uhi_mutex_t *m)
+_uhi_mutex_lock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line)
 {
+	uhi_lock_log("mtx", "lock", l, tid, m, file, line);
 	pthread_mutex_lock((pthread_mutex_t *)(*m));
 }
 
@@ -689,15 +784,20 @@ uhi_mutex_lock(uhi_mutex_t *m)
  * Returns 0 if the mutex cannot be acquired, non-zero if it can.
  */
 int
-uhi_mutex_trylock(uhi_mutex_t *m)
+_uhi_mutex_trylock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line)
 {
-	return (0 == pthread_mutex_trylock((pthread_mutex_t *)(*m)));
+	int ret;
+	ret = (0 == pthread_mutex_trylock((pthread_mutex_t *)(*m)));
+	if (ret)
+		uhi_lock_log("mtx", "trylock", l, tid, m, file, line);
+	return (ret);
 }
 
 
 void
-uhi_mutex_unlock(uhi_mutex_t *m)
+_uhi_mutex_unlock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line)
 {
+	uhi_lock_log("mtx", "unlock", l, tid, m, file, line);
 	pthread_mutex_unlock((pthread_mutex_t *)(*m));
 }
 
@@ -760,65 +860,81 @@ uhi_rwlock_destroy(uhi_rwlock_t *rw)
 
 
 void
-uhi_rwlock_wlock(uhi_rwlock_t *rw)
+_uhi_rwlock_wlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line)
 {
+	uhi_lock_log("rw", "wlock", l, tid, rw, file, line);
 	pthread_mutex_lock((pthread_mutex_t *)(*rw));
 }
 
 
 int
-uhi_rwlock_trywlock(uhi_rwlock_t *rw)
+_uhi_rwlock_trywlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line)
 {
-	return (0 == pthread_mutex_trylock((pthread_mutex_t *)(*rw)));
+	int ret;
+
+	ret = (0 == pthread_mutex_trylock((pthread_mutex_t *)(*rw)));
+	if (ret)
+		uhi_lock_log("rw", "trywlock", l, tid, rw, file, line);
+	return (ret);
 }
 
 
 void
-uhi_rwlock_wunlock(uhi_rwlock_t *rw)
+_uhi_rwlock_wunlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line)
 {
+	uhi_lock_log("rw", "wunlock", l, tid, rw, file, line);
 	pthread_mutex_unlock((pthread_mutex_t *)(*rw));
 }
 
 
 void
-uhi_rwlock_rlock(uhi_rwlock_t *rw)
+_uhi_rwlock_rlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line)
 {
+	uhi_lock_log("rw", "rlock", l, tid, rw, file, line);
 	pthread_mutex_lock((pthread_mutex_t *)(*rw));
 }
 
 
 int
-uhi_rwlock_tryrlock(uhi_rwlock_t *rw)
+_uhi_rwlock_tryrlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line)
 {
-	return (0 == pthread_mutex_trylock((pthread_mutex_t *)(*rw)));
+	int ret;
+
+	ret = (0 == pthread_mutex_trylock((pthread_mutex_t *)(*rw)));
+	if (ret)
+		uhi_lock_log("rw", "tryrlock", l, tid, rw, file, line);
+	return (ret);
 }
 
 
 void
-uhi_rwlock_runlock(uhi_rwlock_t *rw)
+_uhi_rwlock_runlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line)
 {
+	uhi_lock_log("rw", "runlock", l, tid, rw, file, line);
 	pthread_mutex_unlock((pthread_mutex_t *)(*rw));
 }
 
 
 int
-uhi_rwlock_tryupgrade(uhi_rwlock_t *rw)
+_uhi_rwlock_tryupgrade(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line)
 {
 	/*
 	 * Always succeeds as this implementation is always an exclusive
 	 * lock
 	 */
+	uhi_lock_log("rw", "tryupgrade", l, tid, rw, file, line);
 	return (1);
 }
 
 
 void
-uhi_rwlock_downgrade(uhi_rwlock_t *rw)
+_uhi_rwlock_downgrade(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line)
 {
 	/* 
 	 * Nothing to do here.  In this implementation, there is only one
 	 * grade of this lock.
 	 */
+	uhi_lock_log("rw", "downgrade", l, tid, rw, file, line);
 }
 
 
@@ -1081,4 +1197,28 @@ int
 uhi_msg_rsp_wait(struct uhi_msg *msg, void *payload)
 {
 	return (uhi_msg_sock_read(msg->fds[0], payload, msg->rsp_size));
+}
+
+int
+uhi_get_stacktrace(uintptr_t *pcs, int npcs)
+{
+#if defined(UINET_STACK_UNWIND)
+	unw_cursor_t cursor;
+	unw_context_t uc;
+	unw_word_t ip, sp;
+	int i = 0;
+
+	unw_getcontext(&uc);
+	unw_init_local(&cursor, &uc);
+	while (unw_step(&cursor) > 0 && i < npcs) {
+		unw_get_reg(&cursor, UNW_REG_IP, &ip);
+		unw_get_reg(&cursor, UNW_REG_SP, &sp);
+		pcs[i] = (uintptr_t) ip;
+//		printf ("ip = %lx, sp = %lx\n", (long) ip, (long) sp);
+		i++;
+	}
+	return (i);
+#else
+	return (0);
+#endif
 }

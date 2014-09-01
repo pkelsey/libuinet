@@ -110,6 +110,22 @@ struct uhi_msg {
 	unsigned int rsp_size;
 };
 
+/*
+ * Enable to compile in both the lock file/line into the source tree for
+ * lock debugging.
+ */
+#if 0
+#define	UINET_LOCK_FILE		NULL
+#define	UINET_LOCK_LINE		0
+#else
+#define	UINET_LOCK_FILE		__FILE__
+#define	UINET_LOCK_LINE		__LINE__
+#endif
+
+void uhi_lock_log_init(void);
+void uhi_lock_log_set_file(const char *file);
+void uhi_lock_log_enable(void);
+void uhi_lock_log_disable(void);
 
 void uhi_init(void) __attribute__((constructor));
 void uhi_set_num_cpus(unsigned int n);
@@ -149,20 +165,48 @@ void uhi_cond_broadcast(uhi_cond_t *c);
 
 int   uhi_mutex_init(uhi_mutex_t *m, int opts);
 void  uhi_mutex_destroy(uhi_mutex_t *m);
-void  uhi_mutex_lock(uhi_mutex_t *m);
-int   uhi_mutex_trylock(uhi_mutex_t *m);
-void  uhi_mutex_unlock(uhi_mutex_t *m);
+void  _uhi_mutex_lock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line);
+int   _uhi_mutex_trylock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line);
+void  _uhi_mutex_unlock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line);
+
+#if 0
+#define	uhi_mutex_lock(m)	_uhi_mutex_lock((m),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_mutex_trylock(m)	_uhi_mutex_trylock((m),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_mutex_unlock(m)	_uhi_mutex_unlock((m),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#endif
 
 int   uhi_rwlock_init(uhi_rwlock_t *rw, int opts);
 void  uhi_rwlock_destroy(uhi_rwlock_t *rw);
-void  uhi_rwlock_wlock(uhi_rwlock_t *rw);
-int   uhi_rwlock_trywlock(uhi_rwlock_t *rw);
-void  uhi_rwlock_wunlock(uhi_rwlock_t *rw);
-void  uhi_rwlock_rlock(uhi_rwlock_t *rw);
-int   uhi_rwlock_tryrlock(uhi_rwlock_t *rw);
-void  uhi_rwlock_runlock(uhi_rwlock_t *rw);
-int   uhi_rwlock_tryupgrade(uhi_rwlock_t *rw);
-void  uhi_rwlock_downgrade(uhi_rwlock_t *rw);
+void  _uhi_rwlock_wlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+int   _uhi_rwlock_trywlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+void  _uhi_rwlock_wunlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+void  _uhi_rwlock_rlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+int   _uhi_rwlock_tryrlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+void  _uhi_rwlock_runlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+int   _uhi_rwlock_tryupgrade(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+void  _uhi_rwlock_downgrade(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+
+#if 0
+#define	uhi_rwlock_wlock(rw)	_uhi_rwlock_wlock((rw),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_rwlock_trywlock(rw)	_uhi_rwlock_trywlock((rw),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_rwlock_wunlock(rw)	_uhi_rwlock_wunlock((rw),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_rwlock_rlock(rw)	_uhi_rwlock_rlock((rw),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_rwlock_tryrlock(rw)	_uhi_rwlock_tryrlock((rw),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_rwlock_runlock(rw)	_uhi_rwlock_runlock((rw),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_rwlock_tryupgrade(rw)	_uhi_rwlock_tryupgrade((rw),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#define	uhi_rwlock_downgrade(rw)	_uhi_rwlock_downgrade((rw),	\
+				    UINET_LOCK_FILE, UINET_LOCK_LINE)
+#endif
 
 int   uhi_get_ifaddr(const char *ifname, uint8_t *ethaddr);
 
@@ -180,5 +224,6 @@ int uhi_msg_wait(struct uhi_msg *msg, void *payload);
 int uhi_msg_rsp_send(struct uhi_msg *msg, void *payload);
 int uhi_msg_rsp_wait(struct uhi_msg *msg, void *payload);
 
+int uhi_get_stacktrace(uintptr_t *pcs, int npcs);
 
 #endif /* _UINET_HOST_INTERFACE_H_ */
