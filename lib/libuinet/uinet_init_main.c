@@ -296,8 +296,10 @@ restart:
 		}
 #endif
 
+		mtx_lock(&Giant);
 		/* Call function */
 		(*((*sipp)->func))((*sipp)->udata);
+		mtx_unlock(&Giant);
 
 #if defined(VERBOSE_SYSINIT)
 		if (verbose)
