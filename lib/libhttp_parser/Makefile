@@ -22,19 +22,23 @@ PLATFORM ?= $(shell sh -c 'uname -s | tr "[A-Z]" "[a-z]"')
 SONAME ?= libhttp_parser.so.2.3
 SONAME_GENERIC ?= libhttp_parser.so
 
+TOPDIR?=$(CURDIR)/../..
+include $(TOPDIR)/cflags.mk
+
 CC?=gcc
 AR?=ar
 
 CPPFLAGS += -I.
+
 CPPFLAGS_DEBUG = $(CPPFLAGS) -DHTTP_PARSER_STRICT=1
 CPPFLAGS_DEBUG += $(CPPFLAGS_DEBUG_EXTRA)
 CPPFLAGS_FAST = $(CPPFLAGS) -DHTTP_PARSER_STRICT=0
 CPPFLAGS_FAST += $(CPPFLAGS_FAST_EXTRA)
 
-CFLAGS += -Wall -Wextra -Werror
+CFLAGS += -Wall -Wextra -Werror $(DEBUG_FLAGS)
 CFLAGS_DEBUG = $(CFLAGS) -O0 -g $(CFLAGS_DEBUG_EXTRA)
 CFLAGS_FAST = $(CFLAGS) -O3 $(CFLAGS_FAST_EXTRA)
-CFLAGS_LIB = $(CFLAGS_FAST) -fPIC
+CFLAGS_LIB = $(CFLAGS) -fPIC
 
 LDFLAGS_LIB = $(LDFLAGS) -shared
 
@@ -72,7 +76,7 @@ test-valgrind: test_g
 	valgrind ./test_g
 
 libhttp_parser.o: http_parser.c http_parser.h Makefile
-	$(CC) $(CPPFLAGS_FAST) $(CFLAGS_LIB) -c http_parser.c -o libhttp_parser.o
+	$(CC) $(CPPFLAGS) $(CFLAGS_LIB) -c http_parser.c -o libhttp_parser.o
 
 library: libhttp_parser.o
 	$(CC) $(LDFLAGS_LIB) -o $(SONAME) $<
@@ -96,10 +100,21 @@ parsertrace_g: http_parser_g.o contrib/parsertrace.c
 tags: http_parser.c http_parser.h test.c
 	ctags $^
 
+default: all
+
+all: library package
+
 clean:
 	rm -f *.o *.a tags test test_fast test_g \
 		http_parser.tar libhttp_parser.so* \
 		url_parser url_parser_g parsertrace parsertrace_g
+
+install:
+	${UINET_INSTALL_DIR} -d ${UINET_DESTDIR}/lib
+	${UINET_INSTALL_DIR} -d ${UINET_DESTDIR}/include/http_parser
+	${UINET_INSTALL_LIB} libhttp_parser.a ${UINET_DESTDIR}/lib
+	${UINET_INSTALL_LIB} libhttp_parser.so.2.3 ${UINET_DESTDIR}/lib
+	${UINET_INSTALL_INC} http_parser.h ${UINET_DESTDIR}/include/http_parser
 
 contrib/url_parser.c:	http_parser.h
 contrib/parsertrace.c:	http_parser.h

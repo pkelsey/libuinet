@@ -2,7 +2,6 @@
 # Derived from FreeBSD auto-generated kernel Makefile and
 # machine-specific Makefile templates
 #
-DEBUG=-ggdb -O0
 
 TOPDIR?=${CURDIR}/../..
 S=${TOPDIR}/sys
@@ -12,6 +11,9 @@ OVERRIDE_INCLUDES_ROOT:=${CURDIR}/override_include
 X86_INCLUDES=0
 
 include ${TOPDIR}/mk/kern.pre.mk
+include ${TOPDIR}/cflags.mk
+
+DEBUG=${DEBUG_FLAGS}
 
 KERNPREINCLUDES:= ${INCLUDES}
 INCLUDES= -I${OVERRIDE_INCLUDES_ROOT} -I${API_INCLUDES_ROOT} ${KERNPREINCLUDES}
@@ -19,7 +21,7 @@ INCLUDES+= -I./machine_include
 INCLUDES+= -I./opt
 
 # Include search path for files that only include host OS headers
-HOST_INCLUDES= -I. -I${API_INCLUDES_ROOT} 
+HOST_INCLUDES= -I. -I${API_INCLUDES_ROOT} -I../libuinetnv
 
 ifdef NETMAP_INCLUDES
 HOST_INCLUDES+= -I${NETMAP_INCLUDES}
@@ -128,10 +130,12 @@ UINET_SRCS+=			\
 	uinet_dev_random.c	\
 	uinet_sched.c		\
 	uinet_subr_bus.c	\
+	uinet_subr_kdb.c	\
 	uinet_subr_pcpu.c	\
 	uinet_subr_prf.c	\
 	uinet_subr_rtc.c	\
 	uinet_subr_smp.c	\
+	uinet_subr_stack.c	\
 	uinet_subr_uio.c	\
 	uinet_support.c		\
 	uinet_tty.c		\
@@ -157,7 +161,8 @@ UINET_HOST_SRCS+=		\
 	uinet_api_errno.c	\
 	uinet_host_interface.c	\
 	uinet_if_pcap_host.c	\
-	uinet_kern_shutdown.c
+	uinet_kern_shutdown.c	\
+	uinet_host_sysctl_api.c
 
 ifneq (${HOST_OS},Darwin)
 UINET_HOST_SRCS+= uinet_if_netmap_host.c
@@ -204,6 +209,9 @@ KERN_SRCS+=			\
 	uipc_sockbuf.c		\
 	uipc_socket.c
 
+#KERN_WITNESS_SRCS=		\
+#	subr_witness.c		\
+#	subr_stack.c		\
 
 KERN_MHEADERS+=		\
 	bus_if.m	\
@@ -295,10 +303,15 @@ MSRCS= $(patsubst %.m,%.c,${KERN_MSRCS})
 SRCS=  ${UINET_SRCS} ${CRYPTO_SRCS} ${KERN_SRCS} ${LIBKERN_SRCS} ${MACHINE_SRCS}
 SRCS+= ${MSRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS} ${VM_SRCS}
 
+# If witness is enabled.
+# SRCS+= ${KERN_WITNESS_SRCS}
+
 HOST_SRCS = ${UINET_HOST_SRCS}
 
 OBJS+= $(patsubst %.c,%.o,${SRCS})
 HOST_OBJS+= $(patsubst %.c,%.o,${HOST_SRCS})
+
+all: libuinet.a
 
 #
 # The library is built by first incrementally linking all the object
@@ -354,7 +367,17 @@ machine_includes:
 		cp -r $S/x86/include/* ${MACHINE_INCLUDES_ROOT}/x86;	\
 	fi
 
-
+install:
+	${UINET_INSTALL_DIR} -d ${UINET_DESTDIR}/lib
+	${UINET_INSTALL_DIR} -d ${UINET_DESTDIR}/include/libuinet/
+	${UINET_INSTALL_LIB} libuinet.a ${UINET_DESTDIR}/lib
+	${UINET_INSTALL_INC} api_include/uinet_api.h ${UINET_DESTDIR}/include/libuinet/
+	${UINET_INSTALL_INC} api_include/uinet_api_types.h ${UINET_DESTDIR}/include/libuinet/
+	${UINET_INSTALL_INC} api_include/uinet_api_errno.h ${UINET_DESTDIR}/include/libuinet/
+	${UINET_INSTALL_INC} api_include/uinet_config.h ${UINET_DESTDIR}/include/libuinet/
+	${UINET_INSTALL_INC} api_include/uinet_host_sysctl_api.h ${UINET_DESTDIR}/include/libuinet/
+	${UINET_INSTALL_INC} api_include/uinet_host_sysctl_api_priv.h ${UINET_DESTDIR}/include/libuinet/
+	${UINET_INSTALL_INC} api_include/uinet_queue.h ${UINET_DESTDIR}/include/libuinet/
 
 #
 # Distilled from FreeBSD src/sys/conf/kern.post.mk
@@ -367,7 +390,6 @@ vnode_if_newproto.h:
 	${AWK} -f $S/tools/vnode_if.awk $S/kern/vnode_if.src -p
 vnode_if_typedef.h:
 	${AWK} -f $S/tools/vnode_if.awk $S/kern/vnode_if.src -q
-
 
 include ${TOPDIR}/mk/kern.mk
 
