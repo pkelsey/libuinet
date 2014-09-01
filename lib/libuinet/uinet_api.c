@@ -39,9 +39,11 @@
 #include <sys/uio.h>
 
 #include <net/if.h>
+#include <net/if_promiscinet.h>
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/in_promisc.h>
+#include <net/pfil.h>
 
 #include "uinet_api.h"
 #include "uinet_config_internal.h"
@@ -523,7 +525,7 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 	struct socket *peer_so;
 #endif
 	struct sockaddr *sa = NULL;
-	int error;
+	int error = 0;
 
 	if (nam)
 		*nam = NULL;
@@ -1269,6 +1271,167 @@ uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
 	error = kernel_sysctl(curthread, name, namelen, oldp, oldplen,
 	    newp, newplen, retval, flags);
 	return (error);
+}
+
+static uinet_pfil_cb_t g_uinet_pfil_cb = NULL;
+static void * g_uinet_pfil_cbdata = NULL;
+static struct ifnet *g_uinet_pfil_ifp = NULL;
+
+/*
+ * Hook for processing IPv4 frames.
+ */
+static int
+uinet_pfil_in_hook_v4(void *arg, struct mbuf **m, struct ifnet *ifp, int dir,
+    struct inpcb *inp)
+{
+	struct ifl2info *l2i_tag;
+	struct uinet_in_l2info uinet_l2i;
+
+	/*
+	 * No hook? Turf out.
+	 */
+	if (g_uinet_pfil_cb == NULL)
+		return (0);
+
+	/*
+	 * Check if the ifp matches the ifp name we're interested in.
+	 * When doing bridging we will see incoming frames for the
+	 * physical incoming interface (eg netmap0, netmap1) and
+	 * the bridge interface (bridge0).  We may actually not want
+	 * that.
+	 */
+	if (g_uinet_pfil_ifp && (g_uinet_pfil_ifp != ifp))
+		return (0);
+
+	/*
+	 * See if there's L2 information for this frame.
+	 */
+	l2i_tag = (struct ifl2info *)m_tag_locate(*m,
+	    MTAG_PROMISCINET,
+	    MTAG_PROMISCINET_L2INFO,
+	    NULL);
+
+#if 0
+	if (l2i_tag == NULL) {
+		printf("%s: no L2 information\n",
+		    __func__);
+	} else {
+		printf("%s: src=%s",
+		    __func__,
+		    ether_sprintf(l2i_tag->ifl2i_info.inl2i_local_addr));
+		printf(" dst=%s\n",
+		    ether_sprintf(l2i_tag->ifl2i_info.inl2i_foreign_addr));
+	}
+#endif
+
+	/*
+	 * Populate the libuinet L2 header type
+	 *
+	 * XXX this should be a method!
+	 */
+	if (l2i_tag != NULL)
+		memcpy(&uinet_l2i, &l2i_tag->ifl2i_info, sizeof(uinet_l2i));
+
+	/*
+	 * Call our callback to process the frame
+	 */
+	g_uinet_pfil_cb((const struct uinet_mbuf *) *m,
+	    l2i_tag != NULL ? &uinet_l2i : NULL);
+
+	/* Pass all for now */
+	return (0);
+}
+
+/*
+ * Register a single hook for the AF_INET pfil.
+ */
+int
+uinet_register_pfil_in(uinet_pfil_cb_t cb, void *arg, const char *ifname)
+{
+	int error;
+	VNET_ITERATOR_DECL(vnet_iter);
+	struct pfil_head *pfh;
+
+	if (g_uinet_pfil_cb != NULL) {
+		printf("%s: callback already registered!\n", __func__);
+		return (-1);
+	}
+
+	g_uinet_pfil_cb = cb;
+	g_uinet_pfil_cbdata = arg;
+
+	/* Take a reference to the ifnet if we're interested in it */
+	if (ifname != NULL) {
+		g_uinet_pfil_ifp = ifunit_ref(ifname);
+	}
+
+	VNET_LIST_RLOCK();
+	VNET_FOREACH(vnet_iter) {
+		CURVNET_SET(vnet_iter);
+		/* XXX TODO: ipv6 */
+		pfh = pfil_head_get(PFIL_TYPE_AF, AF_INET);
+		error = pfil_add_hook(uinet_pfil_in_hook_v4, NULL,
+		    PFIL_IN | PFIL_WAITOK, pfh);
+		CURVNET_RESTORE();
+	}
+	VNET_LIST_RUNLOCK();
+	return (0);
+}
+
+/*
+ * Get a pointer to the given mbuf data.
+ *
+ * This only grabs the pointer to this first mbuf; not the whole
+ * chain worth of data.  That's a different API (which likely should
+ * be implemented at some point.)
+ */
+const char *
+uinet_mbuf_data(const struct uinet_mbuf *m)
+{
+	const struct mbuf *mb = (const struct mbuf *) m;
+
+	return mtod(mb, const char *);
+}
+
+size_t
+uinet_mbuf_len(const struct uinet_mbuf *m)
+{
+	const struct mbuf *mb = (const struct mbuf *) m;
+
+	return (mb->m_len);
+}
+
+/*
+ * Queue this buffer for transmit.
+ *
+ * The transmit path will take a copy of the data; it won't reference it.
+ *
+ * Returns 0 on OK, non-zero on error.
+ *
+ * Note: this reaches into kernel code, so you need to have set up all
+ * the possible transmit threads as uinet threads, or this call will
+ * fail.
+ */
+int
+uinet_if_xmit(void *cookie, const char *buf, int len)
+{
+	struct uinet_config_if *cif = cookie;
+	struct mbuf *m;
+	struct ifnet *ifp;
+
+	/* Create mbuf; populate it with the given buffer */
+	m = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
+	if (m == NULL)
+		return (ENOBUFS);
+
+	if (! m_append(m, (size_t) len, (void *) buf)) {
+		m_freem(m);
+		return (ENOMEM);
+	}
+
+	/* Call if_transmit() on the given interface */
+	ifp = cif->ifp;
+	return ((ifp->if_transmit)(ifp, m));
 }
 
 int
