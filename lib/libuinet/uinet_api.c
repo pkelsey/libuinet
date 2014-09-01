@@ -1271,5 +1271,26 @@ uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
 	return (error);
 }
 
+int
+uinet_lock_log_set_file(const char *file)
+{
 
+	uhi_lock_log_set_file(file);
+	return (0);
+}
 
+int
+uinet_lock_log_enable(void)
+{
+
+	uhi_lock_log_enable();
+	return (0);
+}
+
+int
+uinet_lock_log_disable(void)
+{
+
+	uhi_lock_log_disable();
+	return (0);
+}

@@ -94,7 +94,7 @@ rw_init_flags(struct rwlock *rw, const char *name, int opts)
 void
 rw_destroy(struct rwlock *rw)
 {
-	
+
 	uhi_rwlock_destroy(&rw->rw_lock);
 }
 
@@ -102,53 +102,80 @@ void
 _rw_wlock(struct rwlock *rw, const char *file, int line)
 {
 
-	uhi_rwlock_wlock(&rw->rw_lock);
+	WITNESS_CHECKORDER(&rw->lock_object, LOP_NEWORDER | LOP_EXCLUSIVE, file,
+	    line, NULL);
+	_uhi_rwlock_wlock(&rw->rw_lock, rw, curthread->td_tid, file, line);
+	WITNESS_LOCK(&rw->lock_object, LOP_EXCLUSIVE, file, line);
 }
 
 int
 _rw_try_wlock(struct rwlock *rw, const char *file, int line)
 {
+	int rval;
 
-	return (uhi_rwlock_trywlock(&rw->rw_lock));
+	rval = _uhi_rwlock_trywlock(&rw->rw_lock, rw, curthread->td_tid, file, line);
+	if (rval) {
+		WITNESS_LOCK(&rw->lock_object, LOP_EXCLUSIVE | LOP_TRYLOCK,
+		    file, line);
+	}
+	return (rval);
 }
 
 void
 _rw_wunlock(struct rwlock *rw, const char *file, int line)
 {
-	
-	uhi_rwlock_wunlock(&rw->rw_lock);
+
+	WITNESS_UNLOCK(&rw->lock_object, LOP_EXCLUSIVE, file, line);
+	_uhi_rwlock_wunlock(&rw->rw_lock, rw, curthread->td_tid, file, line);
 }
 
 void
 _rw_rlock(struct rwlock *rw, const char *file, int line)
 {
-	
-	uhi_rwlock_rlock(&rw->rw_lock);
+	WITNESS_CHECKORDER(&rw->lock_object, LOP_NEWORDER, file, line, NULL);
+	_uhi_rwlock_rlock(&rw->rw_lock, rw, curthread->td_tid, file, line);
+	WITNESS_LOCK(&rw->lock_object, 0, file, line);
 }
 
 int
 _rw_try_rlock(struct rwlock *rw, const char *file, int line)
 {
-	
-	return (uhi_rwlock_tryrlock(&rw->rw_lock));
+	int rval;
+	rval = _uhi_rwlock_tryrlock(&rw->rw_lock, rw, curthread->td_tid, file, line);
+	if (rval) {
+		WITNESS_LOCK(&rw->lock_object, LOP_TRYLOCK, file, line);
+	}
+	return (rval);
 }
 
 void
 _rw_runlock(struct rwlock *rw, const char *file, int line)
 {
-	
-	uhi_rwlock_runlock(&rw->rw_lock);
+
+	WITNESS_UNLOCK(&rw->lock_object, 0, file, line);
+	_uhi_rwlock_runlock(&rw->rw_lock, rw, curthread->td_tid, file, line);
 }
 
 int
 _rw_try_upgrade(struct rwlock *rw, const char *file, int line)
 {
-	return (uhi_rwlock_tryupgrade(&rw->rw_lock));
+	int rval;
+
+	rval = _uhi_rwlock_tryupgrade(&rw->rw_lock, rw, curthread->td_tid, file, line);
+	/* 0 means fail; non-zero means success */
+	/* XXX uhi_rwlock_tryupgrade always returns 0? */
+	if (rval) {
+		WITNESS_UPGRADE(&rw->lock_object, LOP_EXCLUSIVE | LOP_TRYLOCK,
+		    file, line);
+	}
+
+	return (rval);
 }
 
 void
 _rw_downgrade(struct rwlock *rw, const char *file, int line)
 {
-	uhi_rwlock_downgrade(&rw->rw_lock);
+	WITNESS_DOWNGRADE(&rw->lock_object, 0, file, line);
+	_uhi_rwlock_downgrade(&rw->rw_lock, rw, curthread->td_tid, file, line);
 }
 

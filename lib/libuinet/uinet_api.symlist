@@ -77,3 +77,6 @@ uinet_synfilter_setaltfib
 uinet_synfilter_setl2info
 uinet_sysctl
 uinet_sysctlbyname
+uinet_lock_log_set_file
+uinet_lock_log_enable
+uinet_lock_log_disable
