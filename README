@@ -21,6 +21,12 @@ the latter interface is relatively new and untested).
 Building libuinet
 =============================================================================
 
+The sysctl code (and likely more over time) uses libnv from FreeBSD-HEAD
+to serialise data between processes.
+
+cd lib/libnv
+make
+
 cd lib/libuinet
 gmake
 
