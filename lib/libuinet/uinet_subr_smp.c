@@ -37,6 +37,7 @@
 #include <sys/pcpu.h>
 #include <sys/smp.h>
 #include <sys/systm.h>
+#include <sys/sysctl.h>
 
 
 /* This is used in modules that need to work in both SMP and UP. */
@@ -49,6 +50,11 @@ int mp_maxcpus = MAXCPU;
 volatile int smp_started;
 u_int mp_maxid;
 
+SYSCTL_NODE(_kern, OID_AUTO, smp, CTLFLAG_RD|CTLFLAG_CAPRD, NULL, "Kernel SMP");
+SYSCTL_INT(_kern_smp, OID_AUTO, maxid, CTLFLAG_RD|CTLFLAG_CAPRD, &mp_maxid, 0,
+    "Max CPU ID.");
+SYSCTL_INT(_kern_smp, OID_AUTO, maxcpus, CTLFLAG_RD|CTLFLAG_CAPRD, &mp_maxcpus,
+    0, "Max number of CPUs that the system was compiled for.");
 
 /* XXX temporary until final pcpu approach is determined */
 struct mtx uinet_pcpu_locks[MAXCPU];
