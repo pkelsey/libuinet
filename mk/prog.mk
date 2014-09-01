@@ -60,3 +60,10 @@ endif
 clean:
 	@rm -f ${PROG} ${OBJS}
 
+all: ${PROG}
+
+install:
+	${UINET_INSTALL_DIR} -d ${UINET_DESTDIR}/bin
+	${UINET_INSTALL_BIN} ${PROG} ${UINET_DESTDIR}/bin
+
+config:
