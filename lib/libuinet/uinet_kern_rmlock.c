@@ -163,6 +163,7 @@ int
 _rm_rlock_debug(struct rmlock *rm, struct rm_priotracker *tracker,
     int trylock, const char *file, int line)
 {
+	int ret;
 
 #if 0
 	if (!trylock && (rm->lock_object.lo_flags & RM_SLEEPABLE))
@@ -171,13 +172,11 @@ _rm_rlock_debug(struct rmlock *rm, struct rm_priotracker *tracker,
 #endif
 	WITNESS_CHECKORDER(&rm->lock_object, LOP_NEWORDER, file, line, NULL);
 
-#if 0
-	if (trylock)
-		return _rm_try_rlock(rm);
-#endif
+	ret = (_rm_rlock(rm, tracker, trylock));
+	if (ret)
+		WITNESS_LOCK(&rm->lock_object, 0, file, line);
 
-	_rm_rlock(rm, tracker, trylock);
-	return (1);
+	return (ret);
 }
 
 void
