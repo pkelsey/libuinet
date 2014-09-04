@@ -26,12 +26,16 @@
 #ifndef	_UINET_SYS_PROC_H_
 #define _UINET_SYS_PROC_H_
 
+#include "uinet_host_interface.h"
+
 struct thread;
 
 struct uinet_thread {
 	struct thread *td;
 	/* other uinet thread local data goes here */
 };
+
+extern uhi_tls_key_t kthread_tls_key;
 
 #include_next <sys/proc.h>
 

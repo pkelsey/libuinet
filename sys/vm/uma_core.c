@@ -69,6 +69,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/vm/uma_core.c 236269 2012-05-30 00:38:24Z 
 #include <sys/ktr.h>
 #include <sys/lock.h>
 #include <sys/sysctl.h>
+#ifdef UINET
+#include <sys/condvar.h>
+#endif
 #include <sys/mutex.h>
 #include <sys/proc.h>
 #include <sys/sbuf.h>
@@ -149,6 +152,26 @@ static u_int uma_max_ipers_ref;
  */
 static struct callout uma_callout;
 #define	UMA_TIMEOUT	20		/* Seconds for callout interval. */
+
+#ifdef UINET
+/* Thread local storage key for per-thread cache state */
+static uhi_tls_key_t uma_tls_key;
+
+static MALLOC_DEFINE(M_UMATLS, "UMATls", "UMA Per-thread State");
+
+static TAILQ_HEAD(,uma_tls) uma_tls_list; /* List of per-thread uma state blocks */
+static int uma_tls_list_busy;
+static struct cv uma_tls_list_cv;
+static u_int32_t uma_cache_count;
+
+/* Flags for the slots in the per-thread zone cache tables */
+static u_int8_t uma_cache_table_slot_flags[UMA_CACHE_TABLE_SLOTS];
+#define UMA_CACHE_TABLE_SLOT_INUSE	0x01
+#define UMA_CACHE_TABLE_SLOT_INDTOR	0x02	
+
+/* Remaining cache table slots */
+static u_int32_t uma_cache_table_slots_available = UMA_CACHE_TABLE_SLOTS;
+#endif
 
 /*
  * This structure is passed as the zone ctor arg so that I don't have to create
@@ -591,6 +614,21 @@ bucket_drain(uma_zone_t zone, uma_bucket_t bucket)
 }
 
 /*
+ * Drains a per cpu or per thread cache.
+ */
+static void
+local_cache_drain(uma_zone_t zone, uma_cache_t cache)
+{
+	bucket_drain(zone, cache->uc_allocbucket);
+	bucket_drain(zone, cache->uc_freebucket);
+	if (cache->uc_allocbucket != NULL)
+		bucket_free(cache->uc_allocbucket);
+	if (cache->uc_freebucket != NULL)
+		bucket_free(cache->uc_freebucket);
+	cache->uc_allocbucket = cache->uc_freebucket = NULL;
+}
+
+/*
  * Drains the per cpu caches for a zone.
  *
  * NOTE: This may only be called while the zone is being turn down, and not
@@ -607,7 +645,6 @@ static void
 cache_drain(uma_zone_t zone)
 {
 	uma_cache_t cache;
-	int cpu;
 
 	/*
 	 * XXX: It is safe to not lock the per-CPU caches, because we're
@@ -621,16 +658,17 @@ cache_drain(uma_zone_t zone)
 	 * it is used elsewhere.  Should the tear-down path be made special
 	 * there in some form?
 	 */
-	CPU_FOREACH(cpu) {
-		cache = &zone->uz_cpu[cpu];
-		bucket_drain(zone, cache->uc_allocbucket);
-		bucket_drain(zone, cache->uc_freebucket);
-		if (cache->uc_allocbucket != NULL)
-			bucket_free(cache->uc_allocbucket);
-		if (cache->uc_freebucket != NULL)
-			bucket_free(cache->uc_freebucket);
-		cache->uc_allocbucket = cache->uc_freebucket = NULL;
+	CACHE_LIST_ENTER(zone);
+	CACHE_FOREACH(zone, cache) {
+		local_cache_drain(zone, cache);
+#ifdef UINET
+		/* Clear the cache state as this slot may be reused by
+		 * another zone.
+		 */
+		bzero(cache, sizeof(struct uma_cache));
+#endif
 	}
+	CACHE_LIST_EXIT(zone);
 	ZONE_LOCK(zone);
 	bucket_cache_drain(zone);
 	ZONE_UNLOCK(zone);
@@ -1417,6 +1455,7 @@ zone_ctor(void *mem, int size, void *udata, int flags)
 	uma_zone_t zone = mem;
 	uma_zone_t z;
 	uma_keg_t keg;
+	int i;
 
 	bzero(zone, size);
 	zone->uz_name = arg->name;
@@ -1432,6 +1471,29 @@ zone_ctor(void *mem, int size, void *udata, int flags)
 	zone->uz_fills = zone->uz_count = 0;
 	zone->uz_flags = 0;
 	keg = arg->keg;
+
+#ifdef UINET
+	if (!(arg->flags & UMA_ZFLAG_INTERNAL)) {
+		mtx_lock(&uma_mtx);
+		if (uma_cache_table_slots_available == 0) {
+			mtx_unlock(&uma_mtx);
+			return (ENOMEM);
+		}
+
+		for (i = 0; i < UMA_CACHE_TABLE_SLOTS; i++)
+			if (!(uma_cache_table_slot_flags[i] & UMA_CACHE_TABLE_SLOT_INUSE)) {
+				zone->uz_cacheidx = i;
+				break;
+			}
+		mtx_unlock(&uma_mtx);
+		KASSERT(i != UMA_CACHE_TABLE_SLOTS, ("No available slot in non-full cache table"));
+	} else {
+		zone->uz_cacheidx = -1;
+	}
+#else
+	for (i = 0; i <= mp_maxid; i++)
+		zone->uz_cpu[i].uc_cacheid = i;
+#endif	
 
 	if (arg->flags & UMA_ZONE_SECONDARY) {
 		KASSERT(arg->keg != NULL, ("Secondary zone on zero'd keg"));
@@ -1489,14 +1551,63 @@ zone_ctor(void *mem, int size, void *udata, int flags)
 		return (0);
 	}
 
+#ifdef UINET
+	mtx_lock(&uma_mtx);
+	uma_cache_table_slots_available--;
+	uma_cache_table_slot_flags[zone->uz_cacheidx] = UMA_CACHE_TABLE_SLOT_INUSE;
+	mtx_unlock(&uma_mtx);
+#endif
+
 	if (keg->uk_flags & UMA_ZONE_MAXBUCKET)
 		zone->uz_count = BUCKET_MAX;
 	else if (keg->uk_ipers <= BUCKET_MAX)
 		zone->uz_count = keg->uk_ipers;
 	else
 		zone->uz_count = BUCKET_MAX;
+
 	return (0);
 }
+
+#ifdef UINET
+static void
+uma_thread_start_hook(void *arg)
+{
+	struct uma_tls *tls;
+	int i;
+
+	tls = malloc(sizeof(struct uma_tls), M_UMATLS, M_ZERO|M_WAITOK);
+	for (i = 0; i < UMA_CACHE_TABLE_SLOTS; i++)
+		tls->ut_caches[i].uc_cacheid = uhi_thread_self_id();
+	uhi_tls_set(uma_tls_key, tls);
+
+	CACHE_LIST_ENTER();
+	TAILQ_INSERT_TAIL(&uma_tls_list, tls, ut_link);
+	uma_cache_count++;
+	CACHE_LIST_EXIT();
+}
+
+static void
+uma_tls_destructor(void *arg)
+{
+	struct uma_tls *tls = arg;
+	int i;
+
+	CACHE_LIST_ENTER();
+	TAILQ_REMOVE(&uma_tls_list, tls, ut_link);
+	uma_cache_count--;
+	CACHE_LIST_EXIT();
+	
+	for (i = 0; i < UMA_CACHE_TABLE_SLOTS; i++) {
+		mtx_lock(&uma_mtx);
+		if ((uma_cache_table_slot_flags[i] & UMA_CACHE_TABLE_SLOT_INUSE) &&
+		    !(uma_cache_table_slot_flags[i] & UMA_CACHE_TABLE_SLOT_INDTOR))
+			local_cache_drain(tls->ut_caches[i].uc_zone, &tls->ut_caches[i]);
+		mtx_unlock(&uma_mtx);
+	}
+
+	free(tls, M_UMATLS);
+}
+#endif
 
 /*
  * Keg header dtor.  This frees all data, destroys locks, frees the hash
@@ -1540,6 +1651,13 @@ zone_dtor(void *arg, int size, void *udata)
 	zone = (uma_zone_t)arg;
 	keg = zone_first_keg(zone);
 
+#ifdef UINET
+	mtx_lock(&uma_mtx);
+	if (zone->uz_cacheidx >= 0)
+		uma_cache_table_slot_flags[zone->uz_cacheidx] |= UMA_CACHE_TABLE_SLOT_INDTOR;
+	mtx_unlock(&uma_mtx);
+#endif
+
 	if (!(zone->uz_flags & UMA_ZFLAG_INTERNAL))
 		cache_drain(zone);
 
@@ -1573,6 +1691,15 @@ zone_dtor(void *arg, int size, void *udata)
 		zone_free_item(kegs, keg, NULL, SKIP_NONE,
 		    ZFREE_STATFREE);
 	}
+
+#ifdef UINET
+	if (zone->uz_cacheidx >= 0) {
+		mtx_lock(&uma_mtx);
+		uma_cache_table_slot_flags[zone->uz_cacheidx] = 0;
+		uma_cache_table_slots_available++;
+		mtx_unlock(&uma_mtx);
+	}
+#endif
 }
 
 /*
@@ -1614,6 +1741,22 @@ uma_startup(void *bootmem, int boot_pages)
 	printf("Creating uma keg headers zone and keg.\n");
 #endif
 	mtx_init(&uma_mtx, "UMA lock", NULL, MTX_DEF);
+
+#ifdef UINET
+	cv_init(&uma_tls_list_cv, "uma_tls_list_cv");
+
+	if (uhi_tls_key_create(&uma_tls_key, uma_tls_destructor))
+		panic("Could not create uma subsystem tls key");
+
+	if (uhi_thread_hook_add(UHI_THREAD_HOOK_START, uma_thread_start_hook, NULL) == 0)
+		panic("Could not install uma thread start hook");
+
+	TAILQ_INIT(&uma_tls_list);
+
+	uma_thread_start_hook(NULL);
+#else
+	uma_cache_count = mp_maxid + 1;
+#endif
 
 	/*
 	 * Figure out the maximum number of items-per-slab we'll have if
@@ -1971,7 +2114,6 @@ uma_zalloc_arg(uma_zone_t zone, void *udata, int flags)
 	void *item;
 	uma_cache_t cache;
 	uma_bucket_t bucket;
-	int cpu;
 
 	/* This is the fast path allocation */
 #ifdef UMA_DEBUG_ALLOC_1
@@ -1997,9 +2139,7 @@ uma_zalloc_arg(uma_zone_t zone, void *udata, int flags)
 	 * must detect and handle migration if it has occurred.
 	 */
 zalloc_restart:
-	critical_enter();
-	cpu = curcpu;
-	cache = &zone->uz_cpu[cpu];
+	cache = CACHE_ENTER(zone);
 
 zalloc_start:
 	bucket = cache->uc_allocbucket;
@@ -2014,7 +2154,7 @@ zalloc_start:
 			KASSERT(item != NULL,
 			    ("uma_zalloc: Bucket pointer mangled."));
 			cache->uc_allocs++;
-			critical_exit();
+			CACHE_EXIT(zone);
 #ifdef INVARIANTS
 			ZONE_LOCK(zone);
 			uma_dbg_alloc(zone, NULL, item);
@@ -2059,11 +2199,20 @@ zalloc_start:
 	 * thread-local state specific to the cache from prior to releasing
 	 * the critical section.
 	 */
-	critical_exit();
+	CACHE_EXIT(zone);
 	ZONE_LOCK(zone);
-	critical_enter();
-	cpu = curcpu;
-	cache = &zone->uz_cpu[cpu];
+	cache = CACHE_ENTER(zone);
+#ifdef UINET
+	/*
+	 * Annotate the per-thread cache with the zone it belongs to.  When
+	 * a thread is torn down, all of the zone caches it has must be
+	 * drained, and to do this, the owning zone must be known for each
+	 * cache.  This is a sufficient place to perform the annotation as
+	 * the per-thread cache for a zone will not have any contents
+	 * without passing through this point.
+	 */
+	cache->uc_zone = zone;
+#endif
 	bucket = cache->uc_allocbucket;
 	if (bucket != NULL) {
 		if (bucket->ub_cnt > 0) {
@@ -2103,7 +2252,7 @@ zalloc_start:
 		goto zalloc_start;
 	}
 	/* We are no longer associated with this CPU. */
-	critical_exit();
+	CACHE_EXIT(zone);
 
 	/* Bump up our uz_count so we get here less */
 	if (zone->uz_count < BUCKET_MAX)
@@ -2539,7 +2688,6 @@ uma_zfree_arg(uma_zone_t zone, void *item, void *udata)
 	uma_cache_t cache;
 	uma_bucket_t bucket;
 	int bflags;
-	int cpu;
 
 #ifdef UMA_DEBUG_ALLOC_1
 	printf("Freeing item %p to %s(%p)\n", item, zone->uz_name, zone);
@@ -2581,9 +2729,7 @@ uma_zfree_arg(uma_zone_t zone, void *item, void *udata)
 	 * detect and handle migration if it has occurred.
 	 */
 zfree_restart:
-	critical_enter();
-	cpu = curcpu;
-	cache = &zone->uz_cpu[cpu];
+	cache = CACHE_ENTER(zone);
 
 zfree_start:
 	bucket = cache->uc_freebucket;
@@ -2600,7 +2746,7 @@ zfree_start:
 			bucket->ub_bucket[bucket->ub_cnt] = item;
 			bucket->ub_cnt++;
 			cache->uc_frees++;
-			critical_exit();
+			CACHE_EXIT(zone);
 			return;
 		} else if (cache->uc_allocbucket) {
 #ifdef UMA_DEBUG_ALLOC
@@ -2632,11 +2778,9 @@ zfree_start:
 	 * thread-local state specific to the cache from prior to releasing
 	 * the critical section.
 	 */
-	critical_exit();
+	CACHE_EXIT(zone);
 	ZONE_LOCK(zone);
-	critical_enter();
-	cpu = curcpu;
-	cache = &zone->uz_cpu[cpu];
+	cache = CACHE_ENTER(zone);
 	if (cache->uc_freebucket != NULL) {
 		if (cache->uc_freebucket->ub_cnt <
 		    cache->uc_freebucket->ub_entries) {
@@ -2678,7 +2822,7 @@ zfree_start:
 		goto zfree_start;
 	}
 	/* We are no longer associated with this CPU. */
-	critical_exit();
+	CACHE_EXIT(zone);
 
 	/* And the zone.. */
 	ZONE_UNLOCK(zone);
@@ -2852,19 +2996,20 @@ int
 uma_zone_get_cur(uma_zone_t zone)
 {
 	int64_t nitems;
-	u_int i;
+	uma_cache_t cache;
 
 	ZONE_LOCK(zone);
 	nitems = zone->uz_allocs - zone->uz_frees;
-	CPU_FOREACH(i) {
+	CACHE_LIST_ENTER(zone);
+	CACHE_FOREACH(zone, cache) {
 		/*
 		 * See the comment in sysctl_vm_zone_stats() regarding the
 		 * safety of accessing the per-cpu caches. With the zone lock
 		 * held, it is safe, but can potentially result in stale data.
 		 */
-		nitems += zone->uz_cpu[i].uc_allocs -
-		    zone->uz_cpu[i].uc_frees;
+		nitems += cache->uc_allocs - cache->uc_frees;
 	}
+	CACHE_LIST_EXIT(zone);
 	ZONE_UNLOCK(zone);
 
 	return (nitems < 0 ? 0 : nitems);
@@ -3145,15 +3290,13 @@ uma_print_zone(uma_zone_t zone)
 {
 	uma_cache_t cache;
 	uma_klink_t kl;
-	int i;
 
 	printf("zone: %s(%p) size %d flags %d\n",
 	    zone->uz_name, zone, zone->uz_size, zone->uz_flags);
 	LIST_FOREACH(kl, &zone->uz_kegs, kl_link)
 		uma_print_keg(kl->kl_keg);
-	CPU_FOREACH(i) {
-		cache = &zone->uz_cpu[i];
-		printf("CPU %d Cache:\n", i);
+	CACHE_FOREACH(zone, cache) {
+		printf("Cache %llu:\n", (unsigned long long)cache->uc_cacheid);
 		cache_print(cache);
 	}
 }
@@ -3176,12 +3319,12 @@ uma_zone_sumstat(uma_zone_t z, int *cachefreep, u_int64_t *allocsp,
 {
 	uma_cache_t cache;
 	u_int64_t allocs, frees, sleeps;
-	int cachefree, cpu;
+	int cachefree;
 
 	allocs = frees = sleeps = 0;
 	cachefree = 0;
-	CPU_FOREACH(cpu) {
-		cache = &z->uz_cpu[cpu];
+	CACHE_LIST_ENTER(z);
+	CACHE_FOREACH(z, cache) {
 		if (cache->uc_allocbucket != NULL)
 			cachefree += cache->uc_allocbucket->ub_cnt;
 		if (cache->uc_freebucket != NULL)
@@ -3189,6 +3332,7 @@ uma_zone_sumstat(uma_zone_t z, int *cachefreep, u_int64_t *allocsp,
 		allocs += cache->uc_allocs;
 		frees += cache->uc_frees;
 	}
+	CACHE_LIST_EXIT(z);
 	allocs += z->uz_allocs;
 	frees += z->uz_frees;
 	sleeps += z->uz_sleeps;
@@ -3252,7 +3396,7 @@ sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS)
 	 */
 	bzero(&ush, sizeof(ush));
 	ush.ush_version = UMA_STREAM_VERSION;
-	ush.ush_maxcpus = (mp_maxid + 1);
+	ush.ush_maxcpus = uma_cache_count;
 	ush.ush_count = count;
 	(void)sbuf_bcat(&sbuf, &ush, sizeof(ush));
 
@@ -3296,13 +3440,24 @@ sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS)
 			 * accept the possible race associated with bucket
 			 * exchange during monitoring.
 			 */
-			for (i = 0; i < (mp_maxid + 1); i++) {
+			i = 0;
+			CACHE_LIST_ENTER(z);
+			CACHE_FOREACH(z, cache) {
 				bzero(&ups, sizeof(ups));
 				if (kz->uk_flags & UMA_ZFLAG_INTERNAL)
 					goto skip;
+#ifdef UINET
+				/*
+				 * The length of the cache list may have
+				 * grown since we sampled it at the entry to
+				 * this routine.
+				 */
+				if (i >= ush.ush_maxcpus)
+					goto skip;
+#else
 				if (CPU_ABSENT(i))
 					goto skip;
-				cache = &z->uz_cpu[i];
+#endif
 				if (cache->uc_allocbucket != NULL)
 					ups.ups_cache_free +=
 					    cache->uc_allocbucket->ub_cnt;
@@ -3313,7 +3468,18 @@ sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS)
 				ups.ups_frees = cache->uc_frees;
 skip:
 				(void)sbuf_bcat(&sbuf, &ups, sizeof(ups));
+				i++;
 			}
+			CACHE_LIST_EXIT(z);
+#ifdef UINET
+			/*
+			 * The length of the cache list may have shrunk
+			 * since we sampled it at the entry to this routine.
+			 */
+			bzero(&ups, sizeof(ups));
+			for (; i < ush.ush_maxcpus; i++)
+				(void)sbuf_bcat(&sbuf, &ups, sizeof(ups));
+#endif
 			ZONE_UNLOCK(z);
 		}
 	}

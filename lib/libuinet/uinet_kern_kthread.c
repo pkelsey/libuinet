@@ -51,7 +51,7 @@ void uinet_init_thread0(void);
 
 
 static struct uinet_thread uinet_thread0;
-
+uhi_tls_key_t kthread_tls_key;
 
 struct uinet_thread *
 uinet_thread_alloc(struct proc *p)
@@ -120,11 +120,12 @@ uinet_thread_free(struct uinet_thread *utd)
 
 
 static void
-thread_end_routine(struct uhi_thread_start_args *start_args)
+tls_destructor(void *tls_data)
 {
-	struct uinet_thread *utd = start_args->thread_specific_data;
+	struct uinet_thread *utd = tls_data;
 
-	uinet_thread_free(utd);
+	if (utd != &uinet_thread0)
+		uinet_thread_free(utd);
 }
 
 
@@ -156,12 +157,13 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	tsa = malloc(sizeof(struct uhi_thread_start_args), M_DEVBUF, M_WAITOK);
 	tsa->start_routine = start_routine;
 	tsa->start_routine_arg = arg;
-	tsa->end_routine = thread_end_routine;
-	tsa->thread_specific_data = utd;
+	tsa->end_routine = NULL;
+	tsa->tls_key = kthread_tls_key;
+	tsa->tls_data = utd;
 
 	/* Have uhi_thread_create() store the host thread ID in td_wchan */
 	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("kthread_add: can't safely store host thread id"));
-	tsa->host_thread_id = &td->td_wchan;
+	tsa->host_thread_id = (uhi_thread_t *)&td->td_wchan;
 	tsa->oncpu = &td->td_oncpu;
 
 	va_start(ap, str);
@@ -213,12 +215,13 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	tsa = malloc(sizeof(struct uhi_thread_start_args), M_DEVBUF, M_WAITOK);
 	tsa->start_routine = start_routine;
 	tsa->start_routine_arg = arg;
-	tsa->end_routine = thread_end_routine;
-	tsa->thread_specific_data = utd;
+	tsa->end_routine = NULL;
+	tsa->tls_key = kthread_tls_key;
+	tsa->tls_data = utd;
 
 	/* Have uhi_thread_create() store the host thread ID in td_wchan */
 	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("kproc_kthread_add: can't safely store host thread id"));
-	tsa->host_thread_id = &td->td_wchan;
+	tsa->host_thread_id = (uhi_thread_t *)&td->td_wchan;
 	tsa->oncpu = &td->td_oncpu;
 
 	va_start(ap, str);
@@ -236,11 +239,15 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 }
 
 
+/* This must be run from thread0 */
 void
 uinet_init_thread0(void)
 {
 	struct thread *td;
 	int cpuid;
+
+	if (uhi_tls_key_create(&kthread_tls_key, tls_destructor))
+		panic("Could not create kthread subsystem tls key");
 
 	td = &thread0;
 	td->td_proc = &proc0;
@@ -253,7 +260,7 @@ uinet_init_thread0(void)
 	
 	uinet_thread0.td = td;
 
-	uhi_thread_set_thread_specific_data(&uinet_thread0);
+	uhi_tls_set(kthread_tls_key, &uinet_thread0);
 }
 
 

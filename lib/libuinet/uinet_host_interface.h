@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -74,7 +74,8 @@ struct uhi_pollfd {
 #define UHI_MAP_FAILED	((void *)-1)
 
 
-typedef void * uhi_thread_t;
+typedef intptr_t uhi_thread_t;
+typedef intptr_t uhi_tls_key_t;
 
 struct uhi_thread_start_args {
 #define UHI_THREAD_NAME_SIZE	32
@@ -82,11 +83,16 @@ struct uhi_thread_start_args {
 	void (*start_routine)(void *);
 	void *start_routine_arg;
 	void (*end_routine)(struct uhi_thread_start_args *);
-	void *thread_specific_data;  /* will be freed when thread exits */
+	uhi_tls_key_t tls_key;
+	void *tls_data;
 	uhi_thread_t *host_thread_id;
 	unsigned char *oncpu;
 };
 
+typedef void (*uhi_thread_hook_t)(void *);
+#define UHI_THREAD_HOOK_START		0
+#define UHI_THREAD_HOOK_FINISH		1
+#define UHI_THREAD_NUM_HOOK_TYPES	2
 
 typedef void * uhi_mutex_t;
 
@@ -133,9 +139,15 @@ void  uhi_thread_bind(unsigned int cpu);
 int   uhi_thread_bound_cpu(void);
 int   uhi_thread_create(uhi_thread_t *new_thread, struct uhi_thread_start_args *start_args, unsigned int stack_bytes);
 void  uhi_thread_exit(void) __attribute__((__noreturn__));
-void *uhi_thread_get_thread_specific_data(void);
-int   uhi_thread_set_thread_specific_data(void *data);
+int   uhi_thread_hook_add(int which, uhi_thread_hook_t hook, void *arg);
+void  uhi_thread_hook_remove(int which, int id);
+void  uhi_thread_run_hooks(int which);
+int   uhi_tls_key_create(uhi_tls_key_t *key, void (*destructor)(void *));
+int   uhi_tls_key_delete(uhi_tls_key_t key);
+void *uhi_tls_get(uhi_tls_key_t key);
+int   uhi_tls_set(uhi_tls_key_t key, void *data);
 uhi_thread_t uhi_thread_self(void);
+uint64_t uhi_thread_self_id(void);
 void  uhi_thread_yield(void);
 int   uhi_thread_setprio(unsigned int prio);
 int   uhi_thread_setprio_rt(unsigned int prio);
