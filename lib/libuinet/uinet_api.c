@@ -83,7 +83,7 @@ uinet_initialize_thread(void)
 	 */
 	uhi_mask_all_signals();
 
-	utd = uhi_thread_get_thread_specific_data();
+	utd = uhi_tls_get(kthread_tls_key);
 	if (NULL == utd) {
 		utd = uinet_thread_alloc(NULL);
 		if (NULL == utd)
@@ -94,7 +94,9 @@ uinet_initialize_thread(void)
 		KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_initialize_thread: can't safely store host thread id"));
 		td->td_wchan = (void *)uhi_thread_self();
 
-		uhi_thread_set_thread_specific_data(utd);
+		uhi_tls_set(kthread_tls_key, utd);
+
+		uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
 	} else {
 		td = utd->td;
 	}
@@ -111,11 +113,11 @@ uinet_finalize_thread(void)
 {
 	struct uinet_thread *utd;
 
-	utd = uhi_thread_get_thread_specific_data();
+	utd = uhi_tls_get(kthread_tls_key);
 
 	if (utd != NULL) {
 		uinet_thread_free(utd);
-		uhi_thread_set_thread_specific_data(NULL);
+		uhi_tls_set(kthread_tls_key, NULL);
 	}
 }
 

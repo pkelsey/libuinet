@@ -173,8 +173,10 @@ struct pcpu *uinet_pcpu_get(void);
 #include "uinet_host_interface.h"
 #include <sys/proc.h>
 
+extern uhi_tls_key_t kthread_tls_key;
+
 #undef curthread
-#define curthread (((struct uinet_thread *)uhi_thread_get_thread_specific_data())->td)
+#define curthread (((struct uinet_thread *)uhi_tls_get(kthread_tls_key))->td)
 
 
 #endif	/* _UINET_SYS_PCPU_H_ */

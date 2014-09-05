@@ -114,6 +114,10 @@
 #ifndef VM_UMA_INT_H
 #define VM_UMA_INT_H
 
+#ifdef UINET
+#include "uinet_host_interface.h"
+#endif
+
 #define UMA_SLAB_SIZE	PAGE_SIZE	/* How big are our slabs? */
 #define UMA_SLAB_MASK	(PAGE_SIZE - 1)	/* Mask to get back to the page */
 #define UMA_SLAB_SHIFT	PAGE_SHIFT	/* Number of bits PAGE_MASK */
@@ -186,9 +190,23 @@ struct uma_cache {
 	uma_bucket_t	uc_allocbucket;	/* Bucket to allocate from */
 	u_int64_t	uc_allocs;	/* Count of allocations */
 	u_int64_t	uc_frees;	/* Count of frees */
+	u_int64_t	uc_cacheid;	/* Human-readable cache id */
+#ifdef UINET
+	uma_zone_t	uc_zone;	/* Zone this cache belongs to */
+#endif
 } UMA_ALIGN;
 
 typedef struct uma_cache * uma_cache_t;
+
+#ifdef UINET
+#define UMA_CACHE_TABLE_SLOTS 128
+struct uma_tls {
+	TAILQ_ENTRY(uma_tls) ut_link;	/* Link into uma tls list */
+	struct uma_cache ut_caches[UMA_CACHE_TABLE_SLOTS];
+};
+
+typedef struct uma_tls * uma_tls_t;
+#endif
 
 /*
  * Keg management structure
@@ -331,11 +349,15 @@ struct uma_zone {
 	uint16_t	uz_fills;	/* Outstanding bucket fills */
 	uint16_t	uz_count;	/* Highest value ub_ptr can have */
 
+#ifdef UINET
+	int		uz_cacheidx;	/* Cache index in per-thread cache table */
+#else
 	/*
 	 * This HAS to be the last item because we adjust the zone size
 	 * based on NCPU and then allocate the space for the zones.
 	 */
 	struct uma_cache	uz_cpu[1]; /* Per cpu caches */
+#endif
 };
 
 /*
@@ -377,6 +399,54 @@ void uma_large_free(uma_slab_t slab);
 #define	KEG_UNLOCK(k)	mtx_unlock(&(k)->uk_lock)
 #define	ZONE_LOCK(z)	mtx_lock((z)->uz_lock)
 #define ZONE_UNLOCK(z)	mtx_unlock((z)->uz_lock)
+
+/* Cache Macros */
+
+#ifdef UINET
+
+#define CACHE_ENTER(zone) &((struct uma_tls *)uhi_tls_get(uma_tls_key))->ut_caches[zone->uz_cacheidx]
+#define CACHE_EXIT(zone)
+#define CACHE_FOREACH(zone, cache)					\
+	for (uma_tls_t tls = TAILQ_FIRST(&uma_tls_list);		\
+	    tls && (cache = &tls->ut_caches[zone->uz_cacheidx]);	\
+	    tls = TAILQ_NEXT(tls, ut_link))
+#define CACHE_LIST_ENTER(zone)					\
+	do {							\
+		mtx_lock(&uma_mtx);				\
+		while (uma_tls_list_busy)			\
+			cv_wait(&uma_tls_list_cv, &uma_mtx);	\
+		uma_tls_list_busy = 1;				\
+		mtx_unlock(&uma_mtx);				\
+	} while (0)
+
+#define CACHE_LIST_EXIT(zone)					\
+	  do {							\
+		mtx_lock(&uma_mtx);				\
+		uma_tls_list_busy = 0;				\
+		cv_signal(&uma_tls_list_cv);			\
+		mtx_unlock(&uma_mtx);				\
+	  } while (0)
+
+#else
+
+static __inline uma_cache_t
+_cache_enter(uma_zone_t zone)
+{
+	int cpu;
+
+	critical_enter();
+	cpu = curcpu;
+	return (&zone->uz_cpu[cpu]);
+}
+
+#define CACHE_ENTER(zone)	_cache_enter(zone)
+#define CACHE_EXIT(zone)	critical_exit()
+#define CACHE_FOREACH(zone, cache)					\
+	for (cache = &zone->uz_cpu[0]; (cache - &zone->uz_cpu[0]) <= mp_maxid; cache++) \
+		if (!CPU_ABSENT(cache - &zone->uz_cpu[0]))
+#define CACHE_LIST_ENTER(zone)
+#define CACHE_LIST_EXIT(zone)
+#endif
 
 /*
  * Find a slab within a hash table.  This is used for OFFPAGE zones to lookup

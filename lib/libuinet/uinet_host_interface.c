@@ -99,13 +99,23 @@ static struct itimerval prof_itimer;
 #include <libunwind.h>
 #endif /* UINET_STACK_UNWIND */
 
-static pthread_key_t thread_specific_data_key;
 static unsigned int uhi_num_cpus;
+
+static uhi_mutex_t uhi_thread_hook_lock;
+static uhi_tls_key_t uhi_thread_tls_key;
+
+#define UHI_MAX_THREAD_HOOKS 16
+static struct {
+	uhi_thread_hook_t hook;
+	void *arg;
+} uhi_thread_hook_table[UHI_THREAD_NUM_HOOK_TYPES][UHI_MAX_THREAD_HOOKS];
 
 static FILE *lock_log_fp = NULL;
 static pthread_mutex_t lock_log_mtx;
 static int lock_log_enabled = 0;
 static char *lock_log_filename = NULL;
+
+static void uhi_thread_tls_destructor(void *arg);
 
 void
 uhi_lock_log_init(void)
@@ -189,11 +199,10 @@ uhi_lock_log(const char *type, const char *what, void *lp, uint32_t tid, void *p
 	pthread_mutex_unlock(&lock_log_mtx);
 }
 
+
 void
 uhi_init(void)
 {
-	int error;
-
 	/*
 	 * We don't translate these in our poll wrapper.
 	 */
@@ -204,9 +213,20 @@ uhi_init(void)
 	assert(UHI_POLLHUP == POLLHUP);
 	assert(UHI_POLLNVAL == POLLNVAL);
 	
-	error = pthread_key_create(&thread_specific_data_key, NULL);
-	if (error != 0)
-		printf("Warning: unable to create pthread key for thread specific data (%d)\n", error);
+	/* Ensure that a pthread_t can be stored in a uhi_thread_t. */
+	assert(sizeof(uhi_thread_t) >= sizeof(pthread_t));
+
+	/* Ensure that a pthread_key_t can be stored in a uhi_tls_key_t. */
+	assert(sizeof(uhi_tls_key_t) >= sizeof(pthread_key_t));
+
+	/* Ensure that a pthread_t can be stored in a uint64_t */
+	assert(sizeof(uint64_t) >= sizeof(pthread_t));
+
+	if (uhi_tls_key_create(&uhi_thread_tls_key, uhi_thread_tls_destructor))
+		printf("Could not create uhi thread subsystem tls key");
+
+	if (uhi_mutex_init(&uhi_thread_hook_lock, 0))
+		printf("Could not init uhi thread hook table lock");
 
 	uhi_lock_log_init();
 
@@ -483,6 +503,19 @@ int uhi_thread_bound_cpu()
 }
 
 
+static void
+uhi_thread_tls_destructor(void *arg)
+{
+	struct uhi_thread_start_args *tsa = arg;
+
+	if (tsa->end_routine != NULL)
+		tsa->end_routine(tsa);
+
+	uhi_thread_run_hooks(UHI_THREAD_HOOK_FINISH);
+	free(tsa);
+}
+
+
 static void *
 pthread_start_routine(void *arg)
 {
@@ -507,18 +540,15 @@ pthread_start_routine(void *arg)
 	setitimer(ITIMER_PROF, &prof_itimer, NULL);
 #endif /* UINET_PROFILE */
 
-	error = pthread_setspecific(thread_specific_data_key, tsa->thread_specific_data);
+	error = uhi_tls_set(tsa->tls_key, tsa->tls_data);
 	if (error != 0)
-		printf("Warning: unable to set thread-specific data (%d)\n", error);
+		printf("Warning: unable to set user-supplied thread-specific data (%d)\n", error);
+
+	error = uhi_tls_set(uhi_thread_tls_key, tsa);
+	if (error != 0)
+		printf("Warning: unable to set uhi thread-specific data (%d)\n", error);
 
 	if (tsa->host_thread_id) {
-		/*
-		 *  The cast below is technically a danger, but should work
-		 *  in practice as pthread_t is typically a pointer or a
-		 *  long, and it's unlikely there's a platform where a long
-		 *  won't fit in the storage of a void *.
-		 */
-		assert(sizeof(uhi_thread_t) >= sizeof(pthread_t));
 		*tsa->host_thread_id = (uhi_thread_t)pthread_self();
 	}
 
@@ -533,10 +563,9 @@ pthread_start_routine(void *arg)
 	pthread_setname_np(pthread_self(), tsa->name);
 #endif
 
+	uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
+
 	tsa->start_routine(tsa->start_routine_arg);
-	if (tsa->end_routine != NULL)
-		tsa->end_routine(tsa);
-	free(tsa);
 
 	return (NULL);
 }
@@ -572,17 +601,80 @@ uhi_thread_exit(void)
 	pthread_exit(NULL);
 }
 
-void *
-uhi_thread_get_thread_specific_data(void)
+
+int
+uhi_thread_hook_add(int which, uhi_thread_hook_t hook, void *arg)
 {
-	return (pthread_getspecific(thread_specific_data_key));
+	int i;
+
+	assert(which < UHI_THREAD_NUM_HOOK_TYPES);
+
+	_uhi_mutex_lock(&uhi_thread_hook_lock, NULL, (uint32_t)uhi_thread_self(), UINET_LOCK_FILE, UINET_LOCK_LINE);
+	for (i = 0; i < UHI_MAX_THREAD_HOOKS; i++)
+		if (uhi_thread_hook_table[which][i].hook == NULL) {
+			uhi_thread_hook_table[which][i].hook = hook;
+			uhi_thread_hook_table[which][i].arg = arg;
+			_uhi_mutex_unlock(&uhi_thread_hook_lock, NULL, (uint32_t)uhi_thread_self(), UINET_LOCK_FILE, UINET_LOCK_LINE);
+			return (i + 1);
+		}
+
+	_uhi_mutex_unlock(&uhi_thread_hook_lock, NULL, (uint32_t)uhi_thread_self(), UINET_LOCK_FILE, UINET_LOCK_LINE);
+	return (0);
+}
+
+
+void
+uhi_thread_hook_remove(int which, int id)
+{
+	assert(which < UHI_THREAD_NUM_HOOK_TYPES);
+	assert(id < UHI_MAX_THREAD_HOOKS);
+
+	_uhi_mutex_lock(&uhi_thread_hook_lock, NULL, (uint32_t)uhi_thread_self(), UINET_LOCK_FILE, UINET_LOCK_LINE);
+	uhi_thread_hook_table[which][id].hook = NULL;
+	_uhi_mutex_unlock(&uhi_thread_hook_lock, NULL, (uint32_t)uhi_thread_self(), UINET_LOCK_FILE, UINET_LOCK_LINE);
+}
+
+
+void
+uhi_thread_run_hooks(int which)
+{
+	int i;
+
+	assert(which < UHI_THREAD_NUM_HOOK_TYPES);
+
+	_uhi_mutex_lock(&uhi_thread_hook_lock, NULL, (uint32_t)uhi_thread_self(), UINET_LOCK_FILE, UINET_LOCK_LINE);
+	for (i = 0; i < UHI_MAX_THREAD_HOOKS; i++)
+		if (uhi_thread_hook_table[which][i].hook)
+			uhi_thread_hook_table[which][i].hook(uhi_thread_hook_table[which][i].arg);
+	_uhi_mutex_unlock(&uhi_thread_hook_lock, NULL, (uint32_t)uhi_thread_self(), UINET_LOCK_FILE, UINET_LOCK_LINE);
 }
 
 
 int
-uhi_thread_set_thread_specific_data(void *data)
+uhi_tls_key_create(uhi_tls_key_t *key, void (*destructor)(void *))
 {
-	return (pthread_setspecific(thread_specific_data_key, data));
+	return (pthread_key_create((pthread_key_t *)key, destructor));
+}
+
+
+int
+uhi_tls_key_delete(uhi_tls_key_t key)
+{
+	return (pthread_key_delete((pthread_key_t)key));
+}
+
+
+void *
+uhi_tls_get(uhi_tls_key_t key)
+{
+	return (pthread_getspecific((pthread_key_t)key));
+}
+
+
+int
+uhi_tls_set(uhi_tls_key_t key, void *data)
+{
+	return (pthread_setspecific((pthread_key_t)key, data));
 }
 
 
@@ -590,6 +682,13 @@ uhi_thread_t
 uhi_thread_self(void)
 {
 	return ((uhi_thread_t)pthread_self());
+}
+
+
+uint64_t
+uhi_thread_self_id(void)
+{
+	return ((uint64_t)pthread_self());
 }
 
 
