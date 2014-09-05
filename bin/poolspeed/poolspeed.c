@@ -94,7 +94,7 @@ do_test(const struct test_params *params)
 		}
 	} else {
 		for (i = 0; i < params->num_allocs; i++) {
-			p = uinet_pool_alloc(params->pool, 0);
+			p = uinet_pool_alloc(params->pool, UINET_POOL_ALLOC_NOWAIT);
 			if (p == NULL) {
 				printf("Thread %d: allocation %d failed\n", params->id, i);
 				break;
@@ -122,11 +122,28 @@ start_test_thread(void *arg)
 }
 
 
+static void
+usage(const char *progname)
+{
+
+	printf("Usage: %s [options]\n", progname);
+	printf("    -c num_threads       allocate using n threads [1]\n");
+	printf("    -h                   show usage\n");
+	printf("    -m                   use malloc instead of pool allocator\n");
+	printf("    -n num_allocs        perform num_allocs allocations [1000000]\n");
+	printf("    -p pool_size         set maximum pool size [auto]\n");
+	printf("    -s alloc_size        allocation size [100]\n");
+	printf("    -t                   write one byte to each allocated area\n");
+	printf("    -w                   warm up allocator with full alloc/free cycle\n");
+}
+
+
 int main(int argc, char **argv)
 {
 	int alloc_size = 100;
 	int num_allocs = 1000 * 1000;
-	int pool_size = 1000 * 1000;
+	int pool_size;
+	int pool_auto_size = 1;
 	int use_malloc = 0;
 	int touch = 0;
 	int warm = 0;
@@ -141,12 +158,16 @@ int main(int argc, char **argv)
 	int allocs_per_thread;
 	int remainder;
 
-	while ((ch = getopt(argc, argv, "c:mn:p:s:tw")) != -1) {
+	while ((ch = getopt(argc, argv, "c:hmn:p:s:tw")) != -1) {
 		switch (ch) {
 		case 'c':
 			concurrency = atoi(optarg);
 			if (concurrency < 1)
 				concurrency = 1;
+			break;
+		case 'h':
+			usage(argv[0]);
+			return (0);
 			break;
 		case 'm':
 			use_malloc = 1;
@@ -160,6 +181,7 @@ int main(int argc, char **argv)
 			pool_size = atoi(optarg);
 			if (pool_size < 1)
 				pool_size = 1;
+			pool_auto_size = 0;
 			break;
 		case 's':
 			alloc_size = atoi(optarg);
@@ -180,6 +202,21 @@ int main(int argc, char **argv)
 	argc -= optind;
 	argv += optind;
 
+	/*
+	 * Unless otherwise requested, size the pool so the total number of
+	 * allocations can be made even with the maximum possible number of
+	 * pool members resident in per-thread caches.  Allocations made by
+	 * one thread cannot be satisfied by pool members residing in the
+	 * caches of other threads, so it is possible that a pool sized too
+	 * closely to the number of allocations to be made can result in
+	 * allocation failures occurring.
+	 *
+	 * Add enough extra elements beyond the number of allocations to
+	 * fill two buckets of 128 elements per thread.
+	 */
+	if (pool_auto_size)
+		pool_size = num_allocs + concurrency * 256;
+
 	params = malloc(sizeof(struct test_params) * concurrency);
 	if (params == NULL) {
 		printf("Failed to allocate params array\n");
@@ -188,7 +225,7 @@ int main(int argc, char **argv)
 
 	if (!use_malloc) {
 		uinet_init(1, 128*1024, 0);
-
+		printf("Creating pool of %d elements\n", pool_size);
 		pool = uinet_pool_create("test pool", alloc_size, NULL, NULL, NULL, NULL, UINET_POOL_ALIGN_PTR, 0);
 		if (NULL == pool) {
 			printf("Pool creation failed\n");
@@ -198,7 +235,7 @@ int main(int argc, char **argv)
 	}
 
 	clock_getres(CLOCK_PROF, &t1);
-	printf("Timing resolution is %ldns\n", t1.tv_nsec);
+	printf("Timing resolution is %ldms\n", t1.tv_nsec / 1000000);
 
 	if (barrier_init(&barrier, concurrency)) {
 		printf("Failed to initialize thread sync barrier\n");
@@ -262,10 +299,17 @@ int main(int argc, char **argv)
 			}
 		}
 	}
-
-	barrier_wait(params[0].barrier);
+	
+	/* 
+	 * Give the other threads 100 ms to reach their barriers so timing
+	 * uncertainty is reduced.
+	 */
+	t1.tv_sec = 0;
+	t1.tv_nsec = 100 * 1000 * 1000;
+	nanosleep(&t1, NULL);
 
 	clock_gettime(CLOCK_PROF, &t1);
+	barrier_wait(params[0].barrier);
 	
 	do_test(&params[0]);
 
@@ -281,8 +325,8 @@ int main(int argc, char **argv)
 		t2.tv_nsec = t2.tv_nsec - t1.tv_nsec;
 		t2.tv_sec = t2.tv_sec - t1.tv_sec;
 	}
-	printf("Time for %d allocations of %d bytes was %lds %ld.%03ldms\n",
-	       num_allocs, alloc_size, t2.tv_sec, t2.tv_nsec / 1000000, (t2.tv_nsec % 1000000) / 1000);
+	printf("Time for %d allocations of %d bytes was %lds %ldms\n",
+	       num_allocs, alloc_size, t2.tv_sec, t2.tv_nsec / 1000000);
 
 	barrier_destroy(&barrier);
 	if (!use_malloc) {
