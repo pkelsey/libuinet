@@ -410,7 +410,7 @@ void uma_large_free(uma_slab_t slab);
 	for (uma_tls_t tls = TAILQ_FIRST(&uma_tls_list);		\
 	    tls && (cache = &tls->ut_caches[zone->uz_cacheidx]);	\
 	    tls = TAILQ_NEXT(tls, ut_link))
-#define CACHE_LIST_ENTER(zone)					\
+#define CACHE_LIST_ENTER()					\
 	do {							\
 		mtx_lock(&uma_mtx);				\
 		while (uma_tls_list_busy)			\
@@ -419,7 +419,7 @@ void uma_large_free(uma_slab_t slab);
 		mtx_unlock(&uma_mtx);				\
 	} while (0)
 
-#define CACHE_LIST_EXIT(zone)					\
+#define CACHE_LIST_EXIT()					\
 	  do {							\
 		mtx_lock(&uma_mtx);				\
 		uma_tls_list_busy = 0;				\
@@ -444,8 +444,8 @@ _cache_enter(uma_zone_t zone)
 #define CACHE_FOREACH(zone, cache)					\
 	for (cache = &zone->uz_cpu[0]; (cache - &zone->uz_cpu[0]) <= mp_maxid; cache++) \
 		if (!CPU_ABSENT(cache - &zone->uz_cpu[0]))
-#define CACHE_LIST_ENTER(zone)
-#define CACHE_LIST_EXIT(zone)
+#define CACHE_LIST_ENTER()
+#define CACHE_LIST_EXIT()
 #endif
 
 /*

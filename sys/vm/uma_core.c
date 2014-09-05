@@ -658,7 +658,7 @@ cache_drain(uma_zone_t zone)
 	 * it is used elsewhere.  Should the tear-down path be made special
 	 * there in some form?
 	 */
-	CACHE_LIST_ENTER(zone);
+	CACHE_LIST_ENTER();
 	CACHE_FOREACH(zone, cache) {
 		local_cache_drain(zone, cache);
 #ifdef UINET
@@ -668,7 +668,7 @@ cache_drain(uma_zone_t zone)
 		bzero(cache, sizeof(struct uma_cache));
 #endif
 	}
-	CACHE_LIST_EXIT(zone);
+	CACHE_LIST_EXIT();
 	ZONE_LOCK(zone);
 	bucket_cache_drain(zone);
 	ZONE_UNLOCK(zone);
@@ -2998,9 +2998,9 @@ uma_zone_get_cur(uma_zone_t zone)
 	int64_t nitems;
 	uma_cache_t cache;
 
+	CACHE_LIST_ENTER();
 	ZONE_LOCK(zone);
 	nitems = zone->uz_allocs - zone->uz_frees;
-	CACHE_LIST_ENTER(zone);
 	CACHE_FOREACH(zone, cache) {
 		/*
 		 * See the comment in sysctl_vm_zone_stats() regarding the
@@ -3009,8 +3009,8 @@ uma_zone_get_cur(uma_zone_t zone)
 		 */
 		nitems += cache->uc_allocs - cache->uc_frees;
 	}
-	CACHE_LIST_EXIT(zone);
 	ZONE_UNLOCK(zone);
+	CACHE_LIST_EXIT();
 
 	return (nitems < 0 ? 0 : nitems);
 }
@@ -3323,7 +3323,7 @@ uma_zone_sumstat(uma_zone_t z, int *cachefreep, u_int64_t *allocsp,
 
 	allocs = frees = sleeps = 0;
 	cachefree = 0;
-	CACHE_LIST_ENTER(z);
+	CACHE_LIST_ENTER();
 	CACHE_FOREACH(z, cache) {
 		if (cache->uc_allocbucket != NULL)
 			cachefree += cache->uc_allocbucket->ub_cnt;
@@ -3332,7 +3332,7 @@ uma_zone_sumstat(uma_zone_t z, int *cachefreep, u_int64_t *allocsp,
 		allocs += cache->uc_allocs;
 		frees += cache->uc_frees;
 	}
-	CACHE_LIST_EXIT(z);
+	CACHE_LIST_EXIT();
 	allocs += z->uz_allocs;
 	frees += z->uz_frees;
 	sleeps += z->uz_sleeps;
@@ -3384,6 +3384,7 @@ sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS)
 		return (error);
 	sbuf_new_for_sysctl(&sbuf, NULL, 128, req);
 
+	CACHE_LIST_ENTER();
 	count = 0;
 	mtx_lock(&uma_mtx);
 	LIST_FOREACH(kz, &uma_kegs, uk_link) {
@@ -3441,20 +3442,11 @@ sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS)
 			 * exchange during monitoring.
 			 */
 			i = 0;
-			CACHE_LIST_ENTER(z);
 			CACHE_FOREACH(z, cache) {
 				bzero(&ups, sizeof(ups));
 				if (kz->uk_flags & UMA_ZFLAG_INTERNAL)
 					goto skip;
-#ifdef UINET
-				/*
-				 * The length of the cache list may have
-				 * grown since we sampled it at the entry to
-				 * this routine.
-				 */
-				if (i >= ush.ush_maxcpus)
-					goto skip;
-#else
+#ifndef UINET
 				if (CPU_ABSENT(i))
 					goto skip;
 #endif
@@ -3470,20 +3462,11 @@ skip:
 				(void)sbuf_bcat(&sbuf, &ups, sizeof(ups));
 				i++;
 			}
-			CACHE_LIST_EXIT(z);
-#ifdef UINET
-			/*
-			 * The length of the cache list may have shrunk
-			 * since we sampled it at the entry to this routine.
-			 */
-			bzero(&ups, sizeof(ups));
-			for (; i < ush.ush_maxcpus; i++)
-				(void)sbuf_bcat(&sbuf, &ups, sizeof(ups));
-#endif
 			ZONE_UNLOCK(z);
 		}
 	}
 	mtx_unlock(&uma_mtx);
+	CACHE_LIST_EXIT();
 	error = sbuf_finish(&sbuf);
 	sbuf_delete(&sbuf);
 	return (error);
