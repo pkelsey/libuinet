@@ -1,5 +1,5 @@
 
-SUBDIRS=passive
+SUBDIRS=echo echo++ passive sysctl tproxy vmstat
 
 config:
 	for d in $(SUBDIRS); do ( cd $$d; $(MAKE) config ) ; done
