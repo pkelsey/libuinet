@@ -96,7 +96,7 @@ do_test(const struct test_params *params)
 		for (i = 0; i < params->num_allocs; i++) {
 			p = uinet_pool_alloc(params->pool, 0);
 			if (p == NULL) {
-				printf("Thrad %d: allocation %d failed\n", params->id, i);
+				printf("Thread %d: allocation %d failed\n", params->id, i);
 				break;
 			}
 			if (params->touch)
