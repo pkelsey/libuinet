@@ -54,11 +54,11 @@
 #include "memstat_internal.h"
 
 static struct nlist namelist[] = {
-#define	X_UMA_KEGS	0
+#define	X_UMA_KEGS		0
 	{ .n_name = "_uma_kegs" },
-#define	X_MP_MAXID	1
-	{ .n_name = "_mp_maxid" },
-#define	X_ALL_CPUS	2
+#define	X_UMA_CACHE_COUNT	1
+	{ .n_name = "_uma_cache_count" },
+#define	X_ALL_CPUS		2
 	{ .n_name = "_all_cpus" },
 	{ .n_name = "" },
 };
@@ -82,7 +82,7 @@ memstat_sysctl_uma(struct memory_type_list *list, int flags)
 	struct uma_type_header *uthp;
 	struct uma_percpu_stat *upsp;
 	struct memory_type *mtp;
-	int count, hint_dontsearch, i, j, maxcpus, maxid;
+	int count, hint_dontsearch, i, j, maxcaches, cachecount;
 	char *buffer, *p;
 	size_t size;
 	int fd;
@@ -98,20 +98,20 @@ memstat_sysctl_uma(struct memory_type_list *list, int flags)
 	/*
 	 * Query the number of CPUs, number of malloc types so that we can
 	 * guess an initial buffer size.  We loop until we succeed or really
-	 * fail.  Note that the value of maxcpus we query using sysctl is not
+	 * fail.  Note that the value of maxcaches we query using sysctl is not
 	 * the version we use when processing the real data -- that is read
 	 * from the header.
 	 */
 retry:
-	size = sizeof(maxid);
-	if (u_sysctlbyname(fd, "kern.smp.maxid", &maxid, &size, NULL, 0) < 0) {
+	size = sizeof(cachecount);
+	if (u_sysctlbyname(fd, "vm.cache_count", &cachecount, &size, NULL, 0) < 0) {
 		if (errno == EACCES || errno == EPERM)
 			list->mtl_error = MEMSTAT_ERROR_PERMISSION;
 		else
 			list->mtl_error = MEMSTAT_ERROR_DATAERROR;
 		return (-1);
 	}
-	if (size != sizeof(maxid)) {
+	if (size != sizeof(cachecount)) {
 		list->mtl_error = MEMSTAT_ERROR_DATAERROR;
 		return (-1);
 	}
@@ -130,7 +130,7 @@ retry:
 	}
 
 	size = sizeof(*uthp) + count * (sizeof(*uthp) + sizeof(*upsp) *
-	    (maxid + 1));
+	    cachecount);
 
 	buffer = malloc(size);
 	if (buffer == NULL) {
@@ -180,7 +180,7 @@ retry:
 	 * the layout of structures and sizes, since we've determined we have
 	 * a matching version and acceptable CPU count.
 	 */
-	maxcpus = ushp->ush_maxcpus;
+	maxcaches = ushp->ush_maxcaches;
 	count = ushp->ush_count;
 	for (i = 0; i < count; i++) {
 		uthp = (struct uma_type_header *)p;
@@ -193,7 +193,7 @@ retry:
 			mtp = NULL;
 		if (mtp == NULL)
 			mtp = _memstat_mt_allocate(list, ALLOCATOR_UMA,
-			    uthp->uth_name, maxid + 1);
+			    uthp->uth_name, cachecount);
 		if (mtp == NULL) {
 			_memstat_mtl_empty(list);
 			free(buffer);
@@ -204,14 +204,14 @@ retry:
 		/*
 		 * Reset the statistics on a current node.
 		 */
-		_memstat_mt_reset_stats(mtp, maxid + 1);
+		_memstat_mt_reset_stats(mtp, cachecount);
 
 		mtp->mt_numallocs = uthp->uth_allocs;
 		mtp->mt_numfrees = uthp->uth_frees;
 		mtp->mt_failures = uthp->uth_fails;
 		mtp->mt_sleeps = uthp->uth_sleeps;
 
-		for (j = 0; j < maxcpus; j++) {
+		for (j = 0; j < maxcaches; j++) {
 			upsp = (struct uma_percpu_stat *)p;
 			p += sizeof(*upsp);
 
@@ -313,7 +313,7 @@ memstat_kvm_uma(struct memory_type_list *list, void *kvm_handle)
 	struct uma_cache *ucp, *ucp_array;
 	struct uma_zone *uzp, uz;
 	struct uma_keg *kzp, kz;
-	int hint_dontsearch, i, mp_maxid, ret;
+	int hint_dontsearch, i, uma_cache_count, ret;
 	char name[MEMTYPE_MAXNAME];
 	cpuset_t all_cpus;
 	long cpusetsize;
@@ -330,7 +330,7 @@ memstat_kvm_uma(struct memory_type_list *list, void *kvm_handle)
 		list->mtl_error = MEMSTAT_ERROR_KVM_NOSYMBOL;
 		return (-1);
 	}
-	ret = kread_symbol(kvm, X_MP_MAXID, &mp_maxid, sizeof(mp_maxid), 0);
+	ret = kread_symbol(kvm, X_UMA_CACHE_COUNT, &uma_cache_count, sizeof(uma_cache_count), 0);
 	if (ret != 0) {
 		list->mtl_error = ret;
 		return (-1);
@@ -351,7 +351,7 @@ memstat_kvm_uma(struct memory_type_list *list, void *kvm_handle)
 		list->mtl_error = ret;
 		return (-1);
 	}
-	ucp_array = malloc(sizeof(struct uma_cache) * (mp_maxid + 1));
+	ucp_array = malloc(sizeof(struct uma_cache) * uma_cache_count);
 	if (ucp_array == NULL) {
 		list->mtl_error = MEMSTAT_ERROR_NOMEMORY;
 		return (-1);
@@ -375,7 +375,7 @@ memstat_kvm_uma(struct memory_type_list *list, void *kvm_handle)
 				return (-1);
 			}
 			ret = kread(kvm, uzp, ucp_array,
-			    sizeof(struct uma_cache) * (mp_maxid + 1),
+			    sizeof(struct uma_cache) * uma_cache_count,
 			    offsetof(struct uma_zone, uz_cpu[0]));
 			if (ret != 0) {
 				free(ucp_array);
@@ -398,7 +398,7 @@ memstat_kvm_uma(struct memory_type_list *list, void *kvm_handle)
 				mtp = NULL;
 			if (mtp == NULL)
 				mtp = _memstat_mt_allocate(list, ALLOCATOR_UMA,
-				    name, mp_maxid + 1);
+				    name, uma_cache_count);
 			if (mtp == NULL) {
 				free(ucp_array);
 				_memstat_mtl_empty(list);
@@ -408,14 +408,14 @@ memstat_kvm_uma(struct memory_type_list *list, void *kvm_handle)
 			/*
 			 * Reset the statistics on a current node.
 			 */
-			_memstat_mt_reset_stats(mtp, mp_maxid + 1);
+			_memstat_mt_reset_stats(mtp, uma_cache_count);
 			mtp->mt_numallocs = uz.uz_allocs;
 			mtp->mt_numfrees = uz.uz_frees;
 			mtp->mt_failures = uz.uz_fails;
 			mtp->mt_sleeps = uz.uz_sleeps;
 			if (kz.uk_flags & UMA_ZFLAG_INTERNAL)
 				goto skip_percpu;
-			for (i = 0; i < mp_maxid + 1; i++) {
+			for (i = 0; i < uma_cache_count; i++) {
 				if (!CPU_ISSET(i, &all_cpus))
 					continue;
 				ucp = &ucp_array[i];

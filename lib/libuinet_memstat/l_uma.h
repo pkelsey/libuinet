@@ -599,7 +599,7 @@ int uma_zone_exhausted_nolock(uma_zone_t zone);
 #define	UMA_STREAM_VERSION	0x00000001
 struct uma_stream_header {
 	u_int32_t	ush_version;	/* Stream format version. */
-	u_int32_t	ush_maxcpus;	/* Value of MAXCPU for stream. */
+	u_int32_t	ush_maxcaches;	/* Number of per-zone caches for stream. */
 	u_int32_t	ush_count;	/* Number of records. */
 	u_int32_t	_ush_pad;	/* Pad/reserved field. */
 };

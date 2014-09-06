@@ -276,10 +276,19 @@ static inline void keg_relock(uma_keg_t keg, uma_zone_t zone);
 
 void uma_print_zone(uma_zone_t);
 void uma_print_stats(void);
+static int sysctl_vm_cache_count(SYSCTL_HANDLER_ARGS);
 static int sysctl_vm_zone_count(SYSCTL_HANDLER_ARGS);
 static int sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS);
 
 SYSINIT(uma_startup3, SI_SUB_VM_CONF, SI_ORDER_SECOND, uma_startup3, NULL);
+
+#ifdef UINET
+SYSCTL_PROC(_vm, OID_AUTO, cache_count, CTLFLAG_RD|CTLTYPE_INT,
+    0, 0, sysctl_vm_cache_count, "I", "Number of UMA per-thread caches per zone");
+#else
+SYSCTL_PROC(_vm, OID_AUTO, cache_count, CTLFLAG_RD|CTLTYPE_INT,
+    0, 0, sysctl_vm_cache_count, "I", "Number of UMA per-cpu caches per zone");
+#endif
 
 SYSCTL_PROC(_vm, OID_AUTO, zone_count, CTLFLAG_RD|CTLTYPE_INT,
     0, 0, sysctl_vm_zone_count, "I", "Number of UMA zones");
@@ -3348,6 +3357,18 @@ uma_zone_sumstat(uma_zone_t z, int *cachefreep, u_int64_t *allocsp,
 #endif /* DDB */
 
 static int
+sysctl_vm_cache_count(SYSCTL_HANDLER_ARGS)
+{
+	int count;
+
+	CACHE_LIST_ENTER();
+	count = uma_cache_count;
+	CACHE_LIST_EXIT();
+
+	return (sysctl_handle_int(oidp, &count, 0, req));
+}
+
+static int
 sysctl_vm_zone_count(SYSCTL_HANDLER_ARGS)
 {
 	uma_keg_t kz;
@@ -3397,7 +3418,7 @@ sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS)
 	 */
 	bzero(&ush, sizeof(ush));
 	ush.ush_version = UMA_STREAM_VERSION;
-	ush.ush_maxcpus = uma_cache_count;
+	ush.ush_maxcaches = uma_cache_count;
 	ush.ush_count = count;
 	(void)sbuf_bcat(&sbuf, &ush, sizeof(ush));
 
