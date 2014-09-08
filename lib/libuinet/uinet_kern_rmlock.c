@@ -97,14 +97,14 @@ rm_destroy(struct rmlock *rm)
 void
 _rm_wlock(struct rmlock *rm)
 {
-	_uhi_rwlock_wlock(&rm->rm_lock, rm, curthread->td_tid, NULL, 0);
+	_uhi_rwlock_wlock(&rm->rm_lock, rm, NULL, 0);
 }
 
 void
 _rm_wunlock(struct rmlock *rm)
 {
 
-	_uhi_rwlock_wunlock(&rm->rm_lock, rm, curthread->td_tid, NULL, 0);
+	_uhi_rwlock_wunlock(&rm->rm_lock, rm, NULL, 0);
 }
 
 int
@@ -112,10 +112,9 @@ _rm_rlock(struct rmlock *rm, struct rm_priotracker *tracker, int trylock)
 {
 
 	if (trylock)
-		return _uhi_rwlock_tryrlock(&rm->rm_lock, rm,
-		  curthread->td_tid, NULL, 0);
+		return _uhi_rwlock_tryrlock(&rm->rm_lock, rm, NULL, 0);
 
-	_uhi_rwlock_rlock(&rm->rm_lock, rm, curthread->td_tid, NULL, 0);
+	_uhi_rwlock_rlock(&rm->rm_lock, rm, NULL, 0);
 	return (1);
 }
 
@@ -124,7 +123,7 @@ void
 _rm_runlock(struct rmlock *rm,  struct rm_priotracker *tracker)
 {
 
-	_uhi_rwlock_runlock(&rm->rm_lock, rm, curthread->td_tid, NULL, 0);
+	_uhi_rwlock_runlock(&rm->rm_lock, rm, NULL, 0);
 }
 
 #if LOCK_DEBUG > 0

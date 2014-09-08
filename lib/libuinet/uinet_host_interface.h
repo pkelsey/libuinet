@@ -177,9 +177,9 @@ void uhi_cond_broadcast(uhi_cond_t *c);
 
 int   uhi_mutex_init(uhi_mutex_t *m, int opts);
 void  uhi_mutex_destroy(uhi_mutex_t *m);
-void  _uhi_mutex_lock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line);
-int   _uhi_mutex_trylock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line);
-void  _uhi_mutex_unlock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file, int line);
+void  _uhi_mutex_lock(uhi_mutex_t *m, void *l, const char *file, int line);
+int   _uhi_mutex_trylock(uhi_mutex_t *m, void *l, const char *file, int line);
+void  _uhi_mutex_unlock(uhi_mutex_t *m, void *l, const char *file, int line);
 
 #if 0
 #define	uhi_mutex_lock(m)	_uhi_mutex_lock((m),	\
@@ -192,14 +192,14 @@ void  _uhi_mutex_unlock(uhi_mutex_t *m, void *l, uint32_t tid, const char *file,
 
 int   uhi_rwlock_init(uhi_rwlock_t *rw, int opts);
 void  uhi_rwlock_destroy(uhi_rwlock_t *rw);
-void  _uhi_rwlock_wlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
-int   _uhi_rwlock_trywlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
-void  _uhi_rwlock_wunlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
-void  _uhi_rwlock_rlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
-int   _uhi_rwlock_tryrlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
-void  _uhi_rwlock_runlock(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
-int   _uhi_rwlock_tryupgrade(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
-void  _uhi_rwlock_downgrade(uhi_rwlock_t *rw, void *l, uint32_t tid, const char *file, int line);
+void  _uhi_rwlock_wlock(uhi_rwlock_t *rw, void *l, const char *file, int line);
+int   _uhi_rwlock_trywlock(uhi_rwlock_t *rw, void *l, const char *file, int line);
+void  _uhi_rwlock_wunlock(uhi_rwlock_t *rw, void *l, const char *file, int line);
+void  _uhi_rwlock_rlock(uhi_rwlock_t *rw, void *l, const char *file, int line);
+int   _uhi_rwlock_tryrlock(uhi_rwlock_t *rw, void *l, const char *file, int line);
+void  _uhi_rwlock_runlock(uhi_rwlock_t *rw, void *l, const char *file, int line);
+int   _uhi_rwlock_tryupgrade(uhi_rwlock_t *rw, void *l, const char *file, int line);
+void  _uhi_rwlock_downgrade(uhi_rwlock_t *rw, void *l, const char *file, int line);
 
 #if 0
 #define	uhi_rwlock_wlock(rw)	_uhi_rwlock_wlock((rw),	\

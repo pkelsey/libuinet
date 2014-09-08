@@ -86,7 +86,7 @@ _sx_xlock(struct sx *sx, int opts,
 
 	WITNESS_CHECKORDER(&sx->lock_object, LOP_NEWORDER | LOP_EXCLUSIVE, file,
 	    line, NULL);
-	_uhi_rwlock_wlock(&sx->sx_lock, sx, curthread->td_tid, file, line);
+	_uhi_rwlock_wlock(&sx->sx_lock, sx, file, line);
 	WITNESS_LOCK(&sx->lock_object, LOP_EXCLUSIVE, file, line);
 	return (0);
 }
@@ -96,7 +96,7 @@ _sx_slock(struct sx *sx, int opts, const char *file, int line)
 {
 
 	WITNESS_CHECKORDER(&sx->lock_object, LOP_NEWORDER, file, line, NULL);
-	_uhi_rwlock_rlock(&sx->sx_lock, sx, curthread->td_tid, file, line);
+	_uhi_rwlock_rlock(&sx->sx_lock, sx, file, line);
 	/* XXX always succeeds, so */
 	WITNESS_LOCK(&sx->lock_object, 0, file, line);
 	return (0);
@@ -107,7 +107,7 @@ _sx_xunlock(struct sx *sx, const char *file, int line)
 {
 
 	WITNESS_UNLOCK(&sx->lock_object, LOP_EXCLUSIVE, file, line);
-	_uhi_rwlock_wunlock(&sx->sx_lock, sx, curthread->td_tid, file, line);
+	_uhi_rwlock_wunlock(&sx->sx_lock, sx, file, line);
 }
 
 void
@@ -115,7 +115,7 @@ _sx_sunlock(struct sx *sx, const char *file, int line)
 {
 
 	WITNESS_UNLOCK(&sx->lock_object, 0, file, line);
-	_uhi_rwlock_runlock(&sx->sx_lock, sx, curthread->td_tid, file, line);
+	_uhi_rwlock_runlock(&sx->sx_lock, sx, file, line);
 }
 
 int
@@ -123,8 +123,7 @@ _sx_try_xlock(struct sx *sx, const char *file, int line)
 {
 	int ret;
 
-	ret = (_uhi_rwlock_trywlock(&sx->sx_lock, sx, curthread->td_tid,
-	    file, line));
+	ret = (_uhi_rwlock_trywlock(&sx->sx_lock, sx, file, line));
 
 	if (ret) {
 		WITNESS_LOCK(&sx->lock_object, LOP_EXCLUSIVE | LOP_TRYLOCK,
