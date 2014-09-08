@@ -799,7 +799,7 @@ int
 uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall)
 {
 	struct socket *so_internal = (struct socket *)so;
-	unsigned int space;
+	long space;
 	int canwrite;
 
 	if (so_internal->so_options & SO_ACCEPTCONN) {
@@ -818,6 +818,8 @@ uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall)
 			space = sbspace(&so_internal->so_snd);
 			if (space > INT_MAX)
 				canwrite = INT_MAX;
+			else if (space < 0)
+				canwrite = 0;
 			else
 				canwrite = space;
 		}
