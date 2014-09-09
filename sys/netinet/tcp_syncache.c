@@ -1350,8 +1350,6 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 	if (sc->sc_flags & SCF_PASSIVE) {
 		so->so_options |= SO_PASSIVE;
 		inp->inp_flags2 |= INP_PASSIVE;
-		client_so->so_options |= SO_PASSIVE;
-		client_inp->inp_flags2 |= INP_PASSIVE;
 
 		so->so_passive_peer = client_so;
 		client_so->so_passive_peer = so;

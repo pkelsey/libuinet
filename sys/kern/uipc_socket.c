@@ -571,7 +571,7 @@ sonewconn_passive_client(struct socket *head, int connstatus)
 		return (NULL);
 	so->so_head = NULL; /* just inheriting from head, not otherwise associating */
 	so->so_type = head->so_type;
-	so->so_options = head->so_options &~ (SO_ACCEPTCONN|SO_PASSIVE);
+	so->so_options = head->so_options &~ SO_ACCEPTCONN;
 	so->so_linger = head->so_linger;
 	so->so_state = head->so_state | SS_NOFDREF;
 	so->so_fibnum = head->so_fibnum;
