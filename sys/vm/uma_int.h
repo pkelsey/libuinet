@@ -173,7 +173,7 @@ struct uma_hash {
 #endif
 
 /*
- * Structures for per cpu queues.
+ * Structures for per cpu/thread queues.
  */
 
 struct uma_bucket {
@@ -367,7 +367,7 @@ struct uma_zone {
 #define	UMA_ZFLAG_MULTI		0x04000000	/* Multiple kegs in the zone. */
 #define	UMA_ZFLAG_DRAINING	0x08000000	/* Running zone_drain. */
 #define UMA_ZFLAG_PRIVALLOC	0x10000000	/* Use uz_allocf. */
-#define UMA_ZFLAG_INTERNAL	0x20000000	/* No offpage no PCPU. */
+#define UMA_ZFLAG_INTERNAL	0x20000000	/* No offpage no PCPU/per-thread. */
 #define UMA_ZFLAG_FULL		0x40000000	/* Reached uz_maxpages */
 #define UMA_ZFLAG_CACHEONLY	0x80000000	/* Don't ask VM for buckets. */
 

@@ -154,6 +154,45 @@ static struct callout uma_callout;
 #define	UMA_TIMEOUT	20		/* Seconds for callout interval. */
 
 #ifdef UINET
+/*
+ * When building for user-space, caches are maintained per-thread instead of
+ * per-cpu, as there is no way to efficiently implement per-cpu caching in
+ * user-space due to the inability to disable preemption.
+ *
+ * At thread creation time, an instance of struct uma_tls is attached to the
+ * thread as thread local storage (retrievable with uma_tls_key) and linked
+ * into the global list uma_tls_list.  uma_tls_list is protected by the
+ * global state in uma_tls_list_busy and the condition variable
+ * uma_tls_list_cv in conjunction with uma_mtx.  uma_tls_list is accessed
+ * during thread creation, thread destruction, zone destruction, and stats
+ * collection.
+ *
+ * The per-thread struct uma_tls maintains a fixed table of struct uma_cache
+ * entries.  When a zone is created, a slot number is allocated to it using
+ * the global state in uma_cache_table_slot_flags and
+ * uma_cache_table_slots_available under the protection of uma_mtx.  When a
+ * zone is destroyed, its assigned slot is made available for use by
+ * subsequently created zones.
+ *
+ * When an allocation from or free to a zone is performed by a given thread,
+ * the per-thread cache for that zone is checked by retrieving the thread
+ * local cache table and indexing into it using the slot number stored in
+ * the zone.  No locks are necessary for these cache checks as the cache is
+ * specific to that thread.
+ *
+ * Stats collection accesses may access the per-thread cache state
+ * concurrent with the unlocked accesses performed by the alloc and free
+ * cache checks.  However, there is no danger in doing so as the only state
+ * modifications made in these unlocked alloc and free cache check paths are
+ * counter increments and bucket pointer swaps.  In the worst case, the
+ * stats collection activity results in somewhat inaccurate results.  All
+ * modifications to thread-specific cache state that could result in access
+ * to deallocated memory by concurrent stats collection activity are
+ * protected by the zone lock, which is also acquired by the stats
+ * collection logic.  Note that these concurrent stats-access behaviors are
+ * the same as in the alternative per-cpu caching.
+ */
+
 /* Thread local storage key for per-thread cache state */
 static uhi_tls_key_t uma_tls_key;
 
@@ -354,10 +393,10 @@ bucket_alloc(int entries, int bflags)
 	uma_bucket_t bucket;
 
 	/*
-	 * This is to stop us from allocating per cpu buckets while we're
-	 * running out of vm.boot_pages.  Otherwise, we would exhaust the
-	 * boot pages.  This also prevents us from allocating buckets in
-	 * low memory situations.
+	 * This is to stop us from allocating per cpu/thread cache buckets
+	 * while we're running out of vm.boot_pages.  Otherwise, we would
+	 * exhaust the boot pages.  This also prevents us from allocating
+	 * buckets in low memory situations.
 	 */
 	if (bucketdisable)
 		return (NULL);
@@ -623,7 +662,7 @@ bucket_drain(uma_zone_t zone, uma_bucket_t bucket)
 }
 
 /*
- * Drains a per cpu or per thread cache.
+ * Drains a per cpu/thread cache.
  */
 static void
 local_cache_drain(uma_zone_t zone, uma_cache_t cache)
@@ -638,11 +677,12 @@ local_cache_drain(uma_zone_t zone, uma_cache_t cache)
 }
 
 /*
- * Drains the per cpu caches for a zone.
+ * Drains the per cpu/thread caches for a zone.
  *
  * NOTE: This may only be called while the zone is being turn down, and not
  * during normal operation.  This is necessary in order that we do not have
- * to migrate CPUs to drain the per-CPU caches.
+ * to migrate CPUs to drain the per-CPU caches, or maintain locks in the
+ * fast path for per-thread caches.
  *
  * Arguments:
  *	zone     The zone to drain, must be unlocked.
@@ -656,9 +696,9 @@ cache_drain(uma_zone_t zone)
 	uma_cache_t cache;
 
 	/*
-	 * XXX: It is safe to not lock the per-CPU caches, because we're
-	 * tearing down the zone anyway.  I.e., there will be no further use
-	 * of the caches at this point.
+	 * XXX: It is safe to not lock the per-CPU/thread caches, because
+	 * we're tearing down the zone anyway.  I.e., there will be no
+	 * further use of the caches at this point.
 	 *
 	 * XXX: It would good to be able to assert that the zone is being
 	 * torn down to prevent improper use of cache_drain().
@@ -693,7 +733,7 @@ bucket_cache_drain(uma_zone_t zone)
 
 	/*
 	 * Drain the bucket queues and free the buckets, we just keep two per
-	 * cpu (alloc/free).
+	 * cpu/thread (alloc/free).
 	 */
 	while ((bucket = LIST_FIRST(&zone->uz_full_bucket)) != NULL) {
 		LIST_REMOVE(bucket, ub_link);
@@ -1551,8 +1591,8 @@ zone_ctor(void *mem, int size, void *udata, int flags)
 	    (UMA_ZONE_INHERIT | UMA_ZFLAG_INHERIT));
 
 	/*
-	 * Some internal zones don't have room allocated for the per cpu
-	 * caches.  If we're internal, bail out here.
+	 * Some internal zones don't have room allocated for the per
+	 * cpu/thread caches.  If we're internal, bail out here.
 	 */
 	if (keg->uk_flags & UMA_ZFLAG_INTERNAL) {
 		KASSERT((zone->uz_flags & UMA_ZONE_SECONDARY) == 0,
@@ -2137,15 +2177,15 @@ uma_zalloc_arg(uma_zone_t zone, void *udata, int flags)
 	}
 
 	/*
-	 * If possible, allocate from the per-CPU cache.  There are two
-	 * requirements for safe access to the per-CPU cache: (1) the thread
-	 * accessing the cache must not be preempted or yield during access,
-	 * and (2) the thread must not migrate CPUs without switching which
-	 * cache it accesses.  We rely on a critical section to prevent
-	 * preemption and migration.  We release the critical section in
-	 * order to acquire the zone mutex if we are unable to allocate from
-	 * the current cache; when we re-acquire the critical section, we
-	 * must detect and handle migration if it has occurred.
+	 * If possible, allocate from the per-CPU/thread cache.  There are
+	 * two requirements for safe access to the per-CPU cache: (1) the
+	 * thread accessing the cache must not be preempted or yield during
+	 * access, and (2) the thread must not migrate CPUs without
+	 * switching which cache it accesses.  We rely on a critical section
+	 * to prevent preemption and migration.  We release the critical
+	 * section in order to acquire the zone mutex if we are unable to
+	 * allocate from the current cache; when we re-acquire the critical
+	 * section, we must detect and handle migration if it has occurred.
 	 */
 zalloc_restart:
 	cache = CACHE_ENTER(zone);
@@ -2200,13 +2240,13 @@ zalloc_start:
 		}
 	}
 	/*
-	 * Attempt to retrieve the item from the per-CPU cache has failed, so
-	 * we must go back to the zone.  This requires the zone lock, so we
-	 * must drop the critical section, then re-acquire it when we go back
-	 * to the cache.  Since the critical section is released, we may be
-	 * preempted or migrate.  As such, make sure not to maintain any
-	 * thread-local state specific to the cache from prior to releasing
-	 * the critical section.
+	 * Attempt to retrieve the item from the per-CPU/thread cache has
+	 * failed, so we must go back to the zone.  This requires the zone
+	 * lock, so we must drop the critical section, then re-acquire it
+	 * when we go back to the cache.  Since the critical section is
+	 * released, we may be preempted or migrate.  As such, make sure not
+	 * to maintain any thread-local state specific to the cache from
+	 * prior to releasing the critical section.
 	 */
 	CACHE_EXIT(zone);
 	ZONE_LOCK(zone);
@@ -2347,9 +2387,9 @@ keg_fetch_slab(uma_keg_t keg, uma_zone_t zone, int flags)
 			return (slab);
 		}
 		/*
-		 * We might not have been able to get a slab but another cpu
-		 * could have while we were unlocked.  Check again before we
-		 * fail.
+		 * We might not have been able to get a slab but another
+		 * cpu/thread could have while we were unlocked.  Check
+		 * again before we fail.
 		 */
 		flags |= M_NOVM;
 	}
@@ -2727,7 +2767,7 @@ uma_zfree_arg(uma_zone_t zone, void *item, void *udata)
 		goto zfree_internal;
 
 	/*
-	 * If possible, free to the per-CPU cache.  There are two
+	 * If possible, free to the per-CPU/thread cache.  There are two
 	 * requirements for safe access to the per-CPU cache: (1) the thread
 	 * accessing the cache must not be preempted or yield during access,
 	 * and (2) the thread must not migrate CPUs without switching which
@@ -3013,8 +3053,9 @@ uma_zone_get_cur(uma_zone_t zone)
 	CACHE_FOREACH(zone, cache) {
 		/*
 		 * See the comment in sysctl_vm_zone_stats() regarding the
-		 * safety of accessing the per-cpu caches. With the zone lock
-		 * held, it is safe, but can potentially result in stale data.
+		 * safety of accessing the per-cpu/thread caches. With the
+		 * zone lock held, it is safe, but can potentially result in
+		 * stale data.
 		 */
 		nitems += cache->uc_allocs - cache->uc_frees;
 	}
@@ -3312,11 +3353,11 @@ uma_print_zone(uma_zone_t zone)
 
 #ifdef DDB
 /*
- * Generate statistics across both the zone and its per-cpu cache's.  Return
- * desired statistics if the pointer is non-NULL for that statistic.
+ * Generate statistics across both the zone and its per-cpu/thread caches.
+ * Return desired statistics if the pointer is non-NULL for that statistic.
  *
  * Note: does not update the zone statistics, as it can't safely clear the
- * per-CPU cache statistic.
+ * per-CPU/thread cache statistic.
  *
  * XXXRW: Following the uc_allocbucket and uc_freebucket pointers here isn't
  * safe from off-CPU; we should modify the caches to track this information
@@ -3456,11 +3497,12 @@ sysctl_vm_zone_stats(SYSCTL_HANDLER_ARGS)
 			(void)sbuf_bcat(&sbuf, &uth, sizeof(uth));
 			/*
 			 * While it is not normally safe to access the cache
-			 * bucket pointers while not on the CPU that owns the
-			 * cache, we only allow the pointers to be exchanged
-			 * without the zone lock held, not invalidated, so
-			 * accept the possible race associated with bucket
-			 * exchange during monitoring.
+			 * bucket pointers while not on the CPU/in the
+			 * thread that owns the cache, we only allow the
+			 * pointers to be exchanged without the zone lock
+			 * held, not invalidated, so accept the possible
+			 * race associated with bucket exchange during
+			 * monitoring.
 			 */
 			i = 0;
 			CACHE_FOREACH(z, cache) {
