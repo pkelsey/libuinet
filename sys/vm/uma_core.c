@@ -2593,9 +2593,13 @@ zone_alloc_bucket(uma_zone_t zone, int flags)
 	 * for any given zone to the number of per cpu caches in this zone. This
 	 * is done so that we don't allocate more memory than we really need.
 	 */
+#ifdef UINET
+	if (zone->uz_fills >= uma_cache_count)
+		goto done;	
+#else
 	if (zone->uz_fills >= mp_ncpus)
 		goto done;
-
+#endif
 #endif
 	zone->uz_fills++;
 
