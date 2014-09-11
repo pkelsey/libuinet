@@ -1645,14 +1645,34 @@ uma_tls_destructor(void *arg)
 	TAILQ_REMOVE(&uma_tls_list, tls, ut_link);
 	uma_cache_count--;
 	CACHE_LIST_EXIT();
-	
+
+	/*
+	 * Before the destructor is called, the current value for this key
+	 * is set to NULL.  In order for local_cache_drain() to work, it
+	 * needs to still point to the uma_tls structure for this thread, so
+	 * we set the value anew here and clear it below.
+	 */
+	uhi_tls_set(uma_tls_key, tls);
+
 	for (i = 0; i < UMA_CACHE_TABLE_SLOTS; i++) {
 		mtx_lock(&uma_mtx);
+		/*
+		 * The check for tls->ut_caches[i].uc_zone != NULL is
+		 * necessary because the zone is not set for a per-thread
+		 * cache slot until the first allocation in that zone by
+		 * that thread.  If the zone pointer is NULL, we are unable
+		 * to call local_cache_drain(), but as the NULL zone pointer
+		 * indicates that no allocations have been performed by this
+		 * thread in the zone using that slot, there is no need to.
+		 */
 		if ((uma_cache_table_slot_flags[i] & UMA_CACHE_TABLE_SLOT_INUSE) &&
-		    !(uma_cache_table_slot_flags[i] & UMA_CACHE_TABLE_SLOT_INDTOR))
+		    !(uma_cache_table_slot_flags[i] & UMA_CACHE_TABLE_SLOT_INDTOR) &&
+		    tls->ut_caches[i].uc_zone != NULL)
 			local_cache_drain(tls->ut_caches[i].uc_zone, &tls->ut_caches[i]);
 		mtx_unlock(&uma_mtx);
 	}
+
+	uhi_tls_set(uma_tls_key, NULL);
 
 	free(tls, M_UMATLS);
 }
