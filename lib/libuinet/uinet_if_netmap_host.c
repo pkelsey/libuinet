@@ -37,9 +37,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#if defined(__linux__)
 #include <unistd.h>
-#endif /* __linux__ */
 
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -54,8 +52,8 @@
 #include <linux/ethtool.h>
 #include <linux/sockios.h>
 #include <linux/version.h>
-#include <netinet/in.h>
 #endif /* __linux__ */
+#include <netinet/in.h>
 
 #if defined(__FreeBSD__)
 #include <net/if.h>
@@ -106,13 +104,11 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 		return (NULL);
 	
 	ctx->fd = nmfd;
-#if defined(__linux__)
+
 	ctx->cfgfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
 	if (-1 == ctx->cfgfd)
 		goto fail;
-#else
-	ctx->cfgfd = ctx->fd;
-#endif
+
 	ctx->isvale = isvale;
 	ctx->ifname = ifname;
 
@@ -178,10 +174,7 @@ if_netmap_deregister_if(struct if_netmap_host_context *ctx)
 		if_netmap_set_promisc(ctx, 0);
 
 	munmap(ctx->mem, ctx->req.nr_memsize);
-
-#if defined(__linux__)
 	close (ctx->cfgfd);
-#endif	
 	free(ctx);
 }
 
