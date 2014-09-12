@@ -601,7 +601,6 @@ if_netmap_send(void *arg)
 				avail--;
 
 				pktlen = m_length(m, NULL);
-				ifp->if_obytes += pktlen;
 
 				m_copydata(m, 0, pktlen,
 					   if_netmap_txslot(sc->nm_host_ctx, &cur, pktlen)); 

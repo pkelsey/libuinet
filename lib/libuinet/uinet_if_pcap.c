@@ -225,7 +225,6 @@ if_pcap_send(void *arg)
 			pktlen = m_length(m, NULL);
 
 			ifp->if_opackets++;
-			ifp->if_obytes += pktlen;
 
 			if (!sc->isfile && (pktlen <= sizeof(copybuf))) {			
 				if (NULL == m->m_next) {
