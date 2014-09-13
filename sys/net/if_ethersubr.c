@@ -741,10 +741,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		struct in_l2info *l2info;
 		struct in_l2tagstack *l2ts;
 
-		l2info_tag = (struct ifl2info *)m_tag_alloc(MTAG_PROMISCINET,
-							    MTAG_PROMISCINET_L2INFO,
-							    MTAG_PROMISCINET_L2INFO_LEN,
-							    M_NOWAIT);
+		l2info_tag = if_promsicinet_tag_alloc();
 		if (NULL == l2info_tag) {
 #ifdef DIAGNOSTIC
 			if_printf(ifp, "cannot allocate MTAG_PROMISCINET_L2INFO\n");

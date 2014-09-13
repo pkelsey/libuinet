@@ -31,6 +31,8 @@
 
 #include <sys/mbuf.h>
 
+#include <vm/uma.h>
+
 
 #include <net/ethernet.h>
 #include <netinet/in_promisc.h>
@@ -49,7 +51,21 @@ struct ifl2info {
 
 #define MTAG_PROMISCINET_L2INFO_LEN (sizeof(struct ifl2info) - sizeof(struct m_tag))
 
+
+extern uma_zone_t if_promiscinet_tag_zone;
+
+
 int if_promiscinet_add_tag(struct mbuf *m, struct in_l2info *l2i);
+static __inline struct ifl2info *if_promsicinet_tag_alloc(void);
+
+static __inline struct ifl2info *
+if_promsicinet_tag_alloc(void)
+{
+
+	return (uma_zalloc(if_promiscinet_tag_zone, 0));
+}
+
+
 
 #endif /* _KERNEL */
 

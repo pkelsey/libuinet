@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2013-2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -24,26 +24,62 @@
  */
 
 #include <sys/param.h>
+#include <sys/kernel.h>
+#include <sys/mbuf.h>
 
 #include <net/if_promiscinet.h>
 
 #include <netinet/in_promisc.h>
 
 
-int if_promiscinet_add_tag(struct mbuf *m, struct in_l2info *l2i)
+uma_zone_t if_promiscinet_tag_zone;
+
+static int if_promiscinet_tag_init(void *mem, int size, int flags);
+static void if_promiscinet_tag_free(struct m_tag *tag);
+
+
+static void
+if_promiscinet_init(__unused void *arg)
+{
+
+	if_promiscinet_tag_zone = uma_zcreate("promiscinet_tags",
+					      sizeof(struct ifl2info),
+					      NULL, NULL,
+					      if_promiscinet_tag_init, NULL,
+					      UMA_ALIGN_PTR, 0);
+}
+SYSINIT(promiscinet, SI_SUB_INIT_IF, SI_ORDER_ANY, if_promiscinet_init, NULL);
+
+
+static int
+if_promiscinet_tag_init(void *mem, int size, int flags)
+{
+	struct m_tag *t = mem;
+	m_tag_setup(t, MTAG_PROMISCINET, MTAG_PROMISCINET_L2INFO, MTAG_PROMISCINET_L2INFO_LEN);
+	t->m_tag_free = if_promiscinet_tag_free;
+	return (0);
+}
+
+
+static void
+if_promiscinet_tag_free(struct m_tag *tag)
+{
+
+	uma_zfree(if_promiscinet_tag_zone, tag);
+}
+
+
+int
+if_promiscinet_add_tag(struct mbuf *m, struct in_l2info *l2i)
 {
 	struct ifl2info *l2info_tag;
 
-	l2info_tag = (struct ifl2info *)m_tag_alloc(MTAG_PROMISCINET,
-						    MTAG_PROMISCINET_L2INFO,
-						    MTAG_PROMISCINET_L2INFO_LEN,
-						    M_NOWAIT);
+	l2info_tag = if_promsicinet_tag_alloc();
 	if (NULL == l2info_tag) {
 		return (ENOMEM);
 	}
 
 	in_promisc_l2info_copy(&l2info_tag->ifl2i_info, l2i);
-
 	m_tag_prepend(m, &l2info_tag->ifl2i_mtag);
 
 	return (0);
