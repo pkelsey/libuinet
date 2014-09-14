@@ -129,6 +129,8 @@ struct if_netmap_softc {
 	struct if_netmap_stoppable_thread rx_thread;
 
 	struct mtx tx_lock;
+	struct cv tx_cv;
+	int tx_pkts_to_send;
 };
 
 
@@ -524,8 +526,10 @@ if_netmap_start(struct ifnet *ifp)
 	struct if_netmap_softc *sc = ifp->if_softc;
 
 	mtx_lock(&sc->tx_lock);
-	ifp->if_drv_flags |= IFF_DRV_OACTIVE;
-	wakeup(&ifp->if_drv_flags);
+	sc->tx_pkts_to_send++;
+	if (sc->tx_pkts_to_send == 1) {
+		cv_signal(&sc->tx_cv);
+	}
 	mtx_unlock(&sc->tx_lock);
 }
 
@@ -542,34 +546,36 @@ if_netmap_send(void *arg)
 	u_int pktlen;
 	int rv;
 	int done;
+	int pkts_sent;
 
 	if (sc->cfg->cpu >= 0)
 		sched_bind(sc->tx_thread.thr, sc->cfg->cpu);
 
+	rv = if_netmap_txsync(sc->nm_host_ctx, NULL, NULL);
+	if (rv == -1) {
+		printf("could not sync tx descriptors before transmit\n");
+	}
+
+	avail = if_netmap_txavail(sc->nm_host_ctx);
+
 	sc->tx_thread.last_stop_check = ticks;
 	done = 0;
+	pkts_sent = 0;
 	do {
 		mtx_lock(&sc->tx_lock);
-		while (IFQ_DRV_IS_EMPTY(&ifp->if_snd) && !done) {
-			ifp->if_drv_flags &= ~IFF_DRV_OACTIVE;
-			if (EWOULDBLOCK == mtx_sleep(&ifp->if_drv_flags, &sc->tx_lock,
-						     0, "wtxlk", sc->stop_check_ticks)) {
+		sc->tx_pkts_to_send -= pkts_sent;
+		while ((sc->tx_pkts_to_send == 0) && !done)
+			if (EWOULDBLOCK == cv_timedwait(&sc->tx_cv, &sc->tx_lock, sc->stop_check_ticks))
 				done = if_netmap_stoppable_thread_check(&sc->tx_thread);
-			}
-		}
 		mtx_unlock(&sc->tx_lock);
 	
 		if (done)
 			break;
 
-		rv = if_netmap_txsync(sc->nm_host_ctx, NULL, NULL);
-		if (rv == -1) {
-			printf("could not sync tx descriptors before transmit\n");
-		}
-	
-		while (!IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
-			avail = if_netmap_txavail(sc->nm_host_ctx);
+		pkts_sent = 0;
 
+		IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
+		while (m) {
 			while (0 == avail && !done) {
 				memset(&pfd, 0, sizeof(pfd));
 
@@ -593,12 +599,12 @@ if_netmap_send(void *arg)
 
 			cur = if_netmap_txcur(sc->nm_host_ctx);
 
-			while (avail) {
+			while (m && avail) {
 				ifp->if_ocopies++;
 				ifp->if_opackets++;
 
-				IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
 				avail--;
+				pkts_sent++;
 
 				pktlen = m_length(m, NULL);
 
@@ -606,16 +612,16 @@ if_netmap_send(void *arg)
 					   if_netmap_txslot(sc->nm_host_ctx, &cur, pktlen)); 
 				m_freem(m);
 
-				if (IFQ_DRV_IS_EMPTY(&ifp->if_snd)) {
-					break;
-				}
+				IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
 			}
 
 			rv = if_netmap_txsync(sc->nm_host_ctx, &avail, &cur);
 			if (rv == -1) {
 				printf("could not sync tx descriptors after transmit\n");
 			}
+			avail = if_netmap_txavail(sc->nm_host_ctx);
 		}
+
 	} while (!done);
 
 	if_netmap_stoppable_thread_done(&sc->tx_thread);
@@ -886,6 +892,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 
 
 	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
+	cv_init(&sc->tx_cv, "txcv");
 
 	if (kthread_add(if_netmap_send, sc, NULL, &sc->tx_thread.thr, 0, 0, "nm_tx: %s", ifp->if_xname)) {
 		printf("Could not start transmit thread for %s (%s)\n", ifp->if_xname, sc->host_ifname);
