@@ -2412,7 +2412,40 @@ typedef struct ev_uinet_ctx
   UINET_LIST_ENTRY (ev_uinet_ctx) pend_list; /* entry on list of pending sockets */
 } ev_uinet_ctx;
 
-void inline_size
+static void noinline
+uinet_batch_event_handler (void *arg, int event)
+{
+#if EV_MULTIPLICITY
+  EV_P = arg;
+#endif
+
+  pthread_mutex_lock (&uinet_pend_lock);
+  switch (event)
+    {
+    case UINET_BATCH_EVENT_START:
+      uinet_in_batch = 1;
+      break;
+    case UINET_BATCH_EVENT_FINISH:
+      uinet_in_batch = 0;
+      ev_async_send (EV_A_ &uinet_async_w);
+      break;
+    }
+  pthread_mutex_unlock (&uinet_pend_lock);
+}
+
+void
+ev_loop_attach_uinet_interface (EV_P_ uinet_ifcookie_t cookie) EV_THROW
+{
+#if EV_MULTIPLICITY
+  void *arg = EV_A;
+#else
+  void *arg = NULL;
+#endif
+
+  uinet_if_set_batch_event_handler(cookie, uinet_batch_event_handler, arg);
+}
+
+inline_size void
 uinet_socket_events (ev_uinet_ctx *soctx, int events)
 {
   int new_pend_flags;
@@ -2429,7 +2462,8 @@ uinet_socket_events (ev_uinet_ctx *soctx, int events)
     {
       new_pend_flags |= EV_UINET_PENDING;
       UINET_LIST_INSERT_HEAD (&uinet_pend_head, soctx, pend_list);
-      ev_async_send (EV_A_ &uinet_async_w);
+      if (!uinet_in_batch)
+        ev_async_send (EV_A_ &uinet_async_w);
     }
 
   soctx->pend_flags |= new_pend_flags;
@@ -2821,6 +2855,8 @@ loop_init (EV_P_ unsigned int flags) EV_THROW
   ev_init (&uinet_prepare_w, uinet_reenable_upcalls);
   ev_prepare_start (EV_A_ &uinet_prepare_w);
   ev_unref (EV_A); /* this prepare watcher should not keep loop alive */
+
+  uinet_in_batch = 0;
 #endif
 }
 

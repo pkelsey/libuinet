@@ -253,3 +253,21 @@ uinet_ifgenericname(uinet_ifcookie_t cookie)
 
 	return (cfg ? cfg->name : "");
 }
+
+
+int
+uinet_if_set_batch_event_handler(uinet_ifcookie_t cookie,
+				 void (*handler)(void *arg, int event),
+				 void *arg)
+{
+	struct uinet_config_if *cfg = cookie;
+	int error = EINVAL;
+
+	if (NULL != cfg) {
+		cfg->batch_event_handler = handler;
+		cfg->batch_event_handler_arg = arg;
+		error = 0;
+	}
+
+	return (error);
+}
