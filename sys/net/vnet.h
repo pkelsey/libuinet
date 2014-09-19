@@ -72,6 +72,9 @@ struct vnet {
 	u_int			 vnet_sockcnt;
 	void			*vnet_data_mem;
 	uintptr_t		 vnet_data_base;
+#ifdef UINET
+	void			*vnet_uinet;	/* corresponding uinet instance */
+#endif
 };
 #define	VNET_MAGIC_N	0x3e0d8f29
 
@@ -194,7 +197,9 @@ extern struct rwlock vnet_rwlock;
 extern struct sx vnet_sxlock;
 
 #define	VNET_LIST_RLOCK()		sx_slock(&vnet_sxlock)
+#define	VNET_LIST_TRY_RLOCK()		sx_try_slock(&vnet_sxlock)
 #define	VNET_LIST_RLOCK_NOSLEEP()	rw_rlock(&vnet_rwlock)
+#define	VNET_LIST_TRY_RLOCK_NOSLEEP()	rw_try_rlock(&vnet_rwlock)
 #define	VNET_LIST_RUNLOCK()		sx_sunlock(&vnet_sxlock)
 #define	VNET_LIST_RUNLOCK_NOSLEEP()	rw_runlock(&vnet_rwlock)
 
@@ -372,7 +377,9 @@ do {									\
 #define	CURVNET_RESTORE()
 
 #define	VNET_LIST_RLOCK()
+#define	VNET_LIST_TRY_RLOCK()		1
 #define	VNET_LIST_RLOCK_NOSLEEP()
+#define	VNET_LIST_TRY_RLOCK_NOSLEEP()	1
 #define	VNET_LIST_RUNLOCK()
 #define	VNET_LIST_RUNLOCK_NOSLEEP()
 #define	VNET_ITERATOR_DECL(arg)

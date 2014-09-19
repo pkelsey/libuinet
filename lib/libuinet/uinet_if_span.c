@@ -44,7 +44,7 @@
 
 #include <machine/atomic.h>
 
-#include "uinet_config_internal.h"
+#include "uinet_internal.h"
 #include "uinet_host_interface.h"
 #include "uinet_if_span.h"
 
@@ -69,7 +69,7 @@ struct if_span_member {
 
 struct if_span_softc {
 	struct ifnet *sc_ifp;
-	const struct uinet_config_if *cfg;
+	const struct uinet_if *uif;
 	struct ether_addr sc_addr;
 
 	struct mtx sc_mtx;
@@ -295,19 +295,19 @@ i_ether_aton_r(const char *a, struct ether_addr *e)
 }
 
 int
-if_span_attach(struct uinet_config_if *cfg)
+if_span_attach(struct uinet_if *uif)
 {
 	struct if_span_softc *sc = NULL;
 	int error = 0;
 	char *cstr = NULL, *s;
 
-	if (NULL == cfg->configstr) {
+	if (NULL == uif->configstr) {
 		error = EINVAL;
 		goto fail;
 	}
 
-	printf("%s: configstr=%s\n", __func__, cfg->configstr);
-	cstr = strdup(cfg->configstr, M_TEMP);
+	printf("%s: configstr=%s\n", __func__, uif->configstr);
+	cstr = strdup(uif->configstr, M_TEMP);
 	if (cstr == NULL) {
 		printf("%s: strdup failed\n", __func__);
 		error = ENOMEM;
@@ -322,10 +322,10 @@ if_span_attach(struct uinet_config_if *cfg)
 	}
 
 	/* Set the interface name */
-	snprintf(cfg->name, sizeof(cfg->name), "span%u", span_if_count);
+	snprintf(uif->name, sizeof(uif->name), "span%u", span_if_count);
 	span_if_count++;
 
-	sc->cfg = cfg;
+	sc->uif = uif;
 
 	/*
 	 * The ethernet path has a bunch of hard-coded
@@ -361,7 +361,7 @@ if_span_attach(struct uinet_config_if *cfg)
 	/*
 	 * Setup basic flags and such.
 	 */
-	if_initname(sc->sc_ifp, sc->cfg->name, IF_DUNIT_NONE);
+	if_initname(sc->sc_ifp, sc->uif->name, IF_DUNIT_NONE);
 	sc->sc_ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	sc->sc_ifp->if_mtu = 1500;	/* XXX verify! */
 
@@ -373,7 +373,7 @@ if_span_attach(struct uinet_config_if *cfg)
 	sc->sc_ifp->if_transmit = if_span_transmit;
 	sc->sc_ifp->if_qflush = if_span_qflush;
 
-	sc->sc_ifp->if_fib = sc->cfg->cdom;
+	sc->sc_ifp->if_fib = sc->uif->cdom;
 
 	/* Mutex protecting the span list */
 	mtx_init(&sc->sc_mtx, "if_span", NULL, MTX_DEF);
@@ -423,11 +423,11 @@ if_span_attach(struct uinet_config_if *cfg)
 	sc->sc_ifp->if_capabilities = sc->sc_ifp->if_capenable = 0;
 
 	/*
-	 * Link uinet cfg state back to the newly setup ifnet.
+	 * Link uinet uif state back to the newly setup ifnet.
 	 */
-	cfg->ifindex = sc->sc_ifp->if_index;
-	cfg->ifdata = sc;
-	cfg->ifp = sc->sc_ifp;
+	uif->ifindex = sc->sc_ifp->if_index;
+	uif->ifdata = sc;
+	uif->ifp = sc->sc_ifp;
 
 	return (0);
 
@@ -444,7 +444,7 @@ fail:
 }
 
 int
-if_span_detach(struct uinet_config_if *cfg)
+if_span_detach(struct uinet_if *uif)
 {
 	/* XXX TODO */
 	return (0);

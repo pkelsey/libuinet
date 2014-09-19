@@ -17,6 +17,10 @@ uinet_inet6_enabled
 uinet_init
 uinet_initialize_thread
 uinet_install_sighandlers
+uinet_instance_create
+uinet_instance_default
+uinet_instance_default_cfg
+uinet_instance_destroy
 uinet_interface_add_alias
 uinet_interface_create
 uinet_interface_up

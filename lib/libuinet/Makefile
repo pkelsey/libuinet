@@ -248,7 +248,8 @@ NET_SRCS+=		\
 	raw_cb.c	\
 	raw_usrreq.c	\
 	route.c		\
-	rtsock.c		
+	rtsock.c	\
+	vnet.c
 
 
 NETINET_SRCS+=		\

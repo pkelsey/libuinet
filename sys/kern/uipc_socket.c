@@ -385,9 +385,15 @@ sodealloc(struct socket *so)
  * socreate returns a socket with a ref count of 1.  The socket should be
  * closed with soclose().
  */
+#ifdef UINET
+int
+socreate(int dom, struct socket **aso, int type, int proto,
+    struct ucred *cred, struct thread *td, struct vnet *vnet)
+#else
 int
 socreate(int dom, struct socket **aso, int type, int proto,
     struct ucred *cred, struct thread *td)
+#endif
 {
 	struct protosw *prp;
 	struct socket *so;
@@ -407,7 +413,11 @@ socreate(int dom, struct socket **aso, int type, int proto,
 
 	if (prp->pr_type != type)
 		return (EPROTOTYPE);
+#ifdef UINET
+	so = soalloc(vnet);
+#else
 	so = soalloc(CRED_TO_VNET(cred));
+#endif
 	if (so == NULL)
 		return (ENOBUFS);
 

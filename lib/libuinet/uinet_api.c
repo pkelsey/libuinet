@@ -44,9 +44,9 @@
 #include <netinet/in_var.h>
 #include <netinet/in_promisc.h>
 #include <net/pfil.h>
+#include <net/vnet.h>
 
-#include "uinet_api.h"
-#include "uinet_config_internal.h"
+#include "uinet_internal.h"
 #include "uinet_host_interface.h"
 
 #include "opt_inet6.h"
@@ -123,21 +123,26 @@ uinet_finalize_thread(void)
 
 
 int
-uinet_getifstat(const char *name, struct uinet_ifstat *stat)
+uinet_getifstat(uinet_instance_t uinst, const char *name, struct uinet_ifstat *stat)
 {
-	struct uinet_config_if *ifcfg;
+	struct uinet_if *uif;
 	struct ifnet *ifp;
+	int error = 0;
 
-	ifcfg = uinet_iffind_byname(name);
-	if (NULL == ifcfg) {
+	CURVNET_SET(uinst->ui_vnet);
+
+	uif = uinet_iffind_byname(name);
+	if (NULL == uif) {
 		printf("could not find interface %s\n", name);
-		return (EINVAL);
+		error = EINVAL;
+		goto out;
 	}
 
-	ifp = ifnet_byindex_ref(ifcfg->ifindex);
+	ifp = ifnet_byindex_ref(uif->ifindex);
 	if (NULL == ifp) {
 		printf("could not find interface %s by index\n", name);
-		return (EINVAL);
+		error = EINVAL;
+		goto out;
 	}
 	
 	stat->ifi_ipackets   = ifp->if_data.ifi_ipackets;
@@ -160,14 +165,19 @@ uinet_getifstat(const char *name, struct uinet_ifstat *stat)
 
 	if_rele(ifp);
 
-	return (0);
+out:
+	CURVNET_RESTORE();
+
+	return (error);
 }
 
 
 void
-uinet_gettcpstat(struct uinet_tcpstat *stat)
+uinet_gettcpstat(uinet_instance_t uinst, struct uinet_tcpstat *stat)
 {
-	*((struct tcpstat *)stat) = tcpstat;
+	CURVNET_SET(uinst->ui_vnet);
+	*((struct tcpstat *)stat) = V_tcpstat;
+	CURVNET_RESTORE();
 }
 
 
@@ -195,25 +205,28 @@ uinet_inet_pton(int af, const char *src, void *dst)
 
 
 static int
-uinet_ifconfig_begin(struct socket **so, struct ifreq *ifr, const char *name)
+uinet_ifconfig_begin(uinet_instance_t uinst, struct socket **so,
+		     struct ifreq *ifr, const char *name)
 {
 	struct thread *td = curthread;
-	struct uinet_config_if *ifcfg;
+	struct uinet_if *uif;
 	int error;
 
-	ifcfg = uinet_iffind_byname(name);
-	if (NULL == ifcfg) {
+	CURVNET_SET(uinst->ui_vnet);
+	uif = uinet_iffind_byname(name);
+	CURVNET_RESTORE();
+	if (NULL == uif) {
 		printf("could not find interface %s\n", name);
 		return (EINVAL);
 	}
 
-	error = socreate(PF_INET, so, SOCK_DGRAM, 0, td->td_ucred, td);
+	error = socreate(PF_INET, so, SOCK_DGRAM, 0, td->td_ucred, td, uinst->ui_vnet);
 	if (0 != error) {
 		printf("ifconfig socket creation failed (%d)\n", error);
 		return (error);
 	}
 
-	snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s", ifcfg->name);
+	snprintf(ifr->ifr_name, sizeof(ifr->ifr_name), "%s", uif->name);
 	
 	return (0);
 }
@@ -240,7 +253,8 @@ uinet_ifconfig_end(struct socket *so)
 
 
 int
-uinet_interface_add_alias(const char *name, const char *addr, const char *braddr, const char *mask)
+uinet_interface_add_alias(uinet_instance_t uinst, const char *name,
+			  const char *addr, const char *braddr, const char *mask)
 {
 	struct socket *cfg_so;
 	struct in_aliasreq ina;
@@ -255,7 +269,7 @@ uinet_interface_add_alias(const char *name, const char *addr, const char *braddr
 	 * begin with the same size name field, and uinet_ifconfig_begin
 	 * only touches the name field.
 	 */
-	error = uinet_ifconfig_begin(&cfg_so, (struct ifreq *)&ina, name);
+	error = uinet_ifconfig_begin(uinst, &cfg_so, (struct ifreq *)&ina, name);
 	if (0 != error) {
 		return (error);
 	}
@@ -298,13 +312,13 @@ out:
 
 
 int
-uinet_interface_create(const char *name)
+uinet_interface_create(uinet_instance_t uinst, const char *name)
 {
 	struct socket *cfg_so;
 	struct ifreq ifr;
 	int error;
 
-	error = uinet_ifconfig_begin(&cfg_so, &ifr, name);
+	error = uinet_ifconfig_begin(uinst, &cfg_so, &ifr, name);
 	if (0 != error)
 		return (error);
 
@@ -317,13 +331,13 @@ uinet_interface_create(const char *name)
 
 
 int
-uinet_interface_up(const char *name, unsigned int promisc, unsigned int promiscinet)
+uinet_interface_up(uinet_instance_t uinst, const char *name, unsigned int promisc, unsigned int promiscinet)
 {
 	struct socket *cfg_so;
 	struct ifreq ifr;
 	int error;
 
-	error = uinet_ifconfig_begin(&cfg_so, &ifr, name);
+	error = uinet_ifconfig_begin(uinst, &cfg_so, &ifr, name);
 	if (0 != error)
 		return (error);
 	
@@ -687,11 +701,11 @@ done1:
 
 
 int
-uinet_socreate(int dom, struct uinet_socket **aso, int type, int proto)
+uinet_socreate(uinet_instance_t uinst, int dom, struct uinet_socket **aso, int type, int proto)
 {
 	struct thread *td = curthread;
 
-	return socreate(dom, (struct socket **)aso, type, proto, td->td_ucred, td);
+	return socreate(dom, (struct socket **)aso, type, proto, td->td_ucred, td, uinst->ui_vnet);
 }
 
 
@@ -716,6 +730,15 @@ uinet_sogeterror(struct uinet_socket *so)
 	struct socket *so_internal = (struct socket *)so;
 
 	return (so_internal->so_error);
+}
+
+
+uinet_instance_t
+uinet_sogetinstance(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+
+	return (so_internal->so_vnet->vnet_uinet);
 }
 
 
@@ -1255,31 +1278,38 @@ uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t 
 
 
 int
-uinet_sysctlbyname(char *name, char *oldp, size_t *oldplen,
+uinet_sysctlbyname(uinet_instance_t uinst, char *name, char *oldp, size_t *oldplen,
     char *newp, size_t newplen, size_t *retval, int flags)
 {
 	int error;
 
+	CURVNET_SET(uinst->ui_vnet);
 	error = kernel_sysctlbyname(curthread, name, oldp, oldplen,
 	    newp, newplen, retval, flags);
+	CURVNET_RESTORE();
 	return (error);
 }
 
 
 int
-uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
+uinet_sysctl(uinet_instance_t uinst, int *name, u_int namelen, void *oldp, size_t *oldplen,
     void *newp, size_t newplen, size_t *retval, int flags)
 {
 	int error;
 
+	CURVNET_SET(uinst->ui_vnet);
 	error = kernel_sysctl(curthread, name, namelen, oldp, oldplen,
 	    newp, newplen, retval, flags);
+	CURVNET_RESTORE();
 	return (error);
 }
 
-static uinet_pfil_cb_t g_uinet_pfil_cb = NULL;
-static void * g_uinet_pfil_cbdata = NULL;
-static struct ifnet *g_uinet_pfil_ifp = NULL;
+static VNET_DEFINE(uinet_pfil_cb_t, uinet_pfil_cb) = NULL;
+#define V_uinet_pfil_cb VNET(uinet_pfil_cb)
+static VNET_DEFINE(void *, uinet_pfil_cbdata) = NULL;
+#define V_uinet_pfil_cbdata VNET(uinet_pfil_cbdata)
+static VNET_DEFINE(struct ifnet *, uinet_pfil_ifp) = NULL;
+#define V_uinet_pfil_ifp VNET(uinet_pfil_ifp)
 
 /*
  * Hook for processing IPv4 frames.
@@ -1294,7 +1324,7 @@ uinet_pfil_in_hook_v4(void *arg, struct mbuf **m, struct ifnet *ifp, int dir,
 	/*
 	 * No hook? Turf out.
 	 */
-	if (g_uinet_pfil_cb == NULL)
+	if (V_uinet_pfil_cb == NULL)
 		return (0);
 
 	/*
@@ -1304,7 +1334,7 @@ uinet_pfil_in_hook_v4(void *arg, struct mbuf **m, struct ifnet *ifp, int dir,
 	 * the bridge interface (bridge0).  We may actually not want
 	 * that.
 	 */
-	if (g_uinet_pfil_ifp && (g_uinet_pfil_ifp != ifp))
+	if (V_uinet_pfil_ifp && (V_uinet_pfil_ifp != ifp))
 		return (0);
 
 	/*
@@ -1339,7 +1369,7 @@ uinet_pfil_in_hook_v4(void *arg, struct mbuf **m, struct ifnet *ifp, int dir,
 	/*
 	 * Call our callback to process the frame
 	 */
-	g_uinet_pfil_cb((const struct uinet_mbuf *) *m,
+	V_uinet_pfil_cb((const struct uinet_mbuf *) *m,
 	    l2i_tag != NULL ? &uinet_l2i : NULL);
 
 	/* Pass all for now */
@@ -1350,35 +1380,32 @@ uinet_pfil_in_hook_v4(void *arg, struct mbuf **m, struct ifnet *ifp, int dir,
  * Register a single hook for the AF_INET pfil.
  */
 int
-uinet_register_pfil_in(uinet_pfil_cb_t cb, void *arg, const char *ifname)
+uinet_register_pfil_in(uinet_instance_t uinst, uinet_pfil_cb_t cb, void *arg, const char *ifname)
 {
 	int error;
-	VNET_ITERATOR_DECL(vnet_iter);
 	struct pfil_head *pfh;
 
-	if (g_uinet_pfil_cb != NULL) {
-		printf("%s: callback already registered!\n", __func__);
+	CURVNET_SET(uinst->ui_vnet);
+	if (V_uinet_pfil_cb != NULL) {
+		printf("%s: callback already registered in this instance!\n", __func__);
+		CURVNET_RESTORE();
 		return (-1);
 	}
 
-	g_uinet_pfil_cb = cb;
-	g_uinet_pfil_cbdata = arg;
+	V_uinet_pfil_cb = cb;
+	V_uinet_pfil_cbdata = arg;
 
 	/* Take a reference to the ifnet if we're interested in it */
 	if (ifname != NULL) {
-		g_uinet_pfil_ifp = ifunit_ref(ifname);
+		V_uinet_pfil_ifp = ifunit_ref(ifname);
 	}
 
-	VNET_LIST_RLOCK();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		/* XXX TODO: ipv6 */
-		pfh = pfil_head_get(PFIL_TYPE_AF, AF_INET);
-		error = pfil_add_hook(uinet_pfil_in_hook_v4, NULL,
-		    PFIL_IN | PFIL_WAITOK, pfh);
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK();
+	/* XXX TODO: ipv6 */
+	pfh = pfil_head_get(PFIL_TYPE_AF, AF_INET);
+	error = pfil_add_hook(uinet_pfil_in_hook_v4, NULL,
+	    PFIL_IN | PFIL_WAITOK, pfh);
+
+	CURVNET_RESTORE();
 	return (0);
 }
 
@@ -1417,11 +1444,11 @@ uinet_mbuf_len(const struct uinet_mbuf *m)
  * fail.
  */
 int
-uinet_if_xmit(void *cookie, const char *buf, int len)
+uinet_if_xmit(uinet_if_t uif, const char *buf, int len)
 {
-	struct uinet_config_if *cif = cookie;
 	struct mbuf *m;
 	struct ifnet *ifp;
+	int retval;
 
 	/* Create mbuf; populate it with the given buffer */
 	m = m_getcl(M_DONTWAIT, MT_DATA, M_PKTHDR);
@@ -1434,8 +1461,11 @@ uinet_if_xmit(void *cookie, const char *buf, int len)
 	}
 
 	/* Call if_transmit() on the given interface */
-	ifp = cif->ifp;
-	return ((ifp->if_transmit)(ifp, m));
+	ifp = uif->ifp;
+	CURVNET_SET(ifp->if_vnet)
+	retval = (ifp->if_transmit)(ifp, m);
+	CURVNET_RESTORE();
+	return (retval);
 }
 
 int
@@ -1461,3 +1491,103 @@ uinet_lock_log_disable(void)
 	uhi_lock_log_disable();
 	return (0);
 }
+
+
+void
+uinet_instance_default_cfg(struct uinet_instance_cfg *cfg)
+{
+	cfg->loopback = 0;
+	cfg->userdata = NULL;
+}
+
+int
+uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
+		    struct uinet_instance_cfg *cfg)
+{
+	struct uinet_instance_cfg default_cfg;
+	int error = 0;
+
+	if (cfg == NULL) {
+		uinet_instance_default_cfg(&default_cfg);
+		cfg = &default_cfg;
+	}
+
+	uinst->ui_vnet = vnet;
+	uinst->ui_vnet->vnet_uinet = uinst;
+	uinst->ui_userdata = cfg->userdata;
+
+	/*
+	 * Don't respond with a reset to TCP segments that the stack will
+	 * not claim nor with an ICMP port unreachable message to UDP
+	 * datagrams that the stack will not claim.
+	 */
+	uinet_config_blackhole(uinst, UINET_BLACKHOLE_TCP_ALL);
+	uinet_config_blackhole(uinst, UINET_BLACKHOLE_UDP_ALL);
+
+	if (cfg->loopback) {
+		int error;
+
+		uinet_interface_up(uinst, "lo0", 0, 0);
+
+		if (0 != (error = uinet_interface_add_alias(uinst, "lo0", "127.0.0.1", "0.0.0.0", "255.0.0.0"))) {
+			printf("Loopback alias add failed %d\n", error);
+		}
+	}
+
+	return (error);
+}
+
+
+uinet_instance_t
+uinet_instance_create(struct uinet_instance_cfg *cfg)
+{
+#ifdef VIMAGE
+	struct uinet_instance *uinst;
+	struct vnet *vnet;
+
+	uinst = malloc(sizeof(struct uinet_instance), M_DEVBUF, M_WAITOK);
+	if (uinst != NULL) {
+		vnet = vnet_alloc();
+		if (vnet == NULL) {
+			free(uinst, M_DEVBUF);
+			return (NULL);
+		}
+
+		uinet_instance_init(uinst, vnet, cfg);
+	}
+
+	return (uinst);
+#else
+	return (NULL);
+#endif
+}
+
+
+uinet_instance_t
+uinet_instance_default(void)
+{
+	return (&uinst0);
+}
+
+
+void
+uinet_instance_shutdown(uinet_instance_t uinst)
+{
+#ifdef VIMAGE
+	uinet_ifdestroy_all(uinst);
+#endif
+}
+
+
+void
+uinet_instance_destroy(uinet_instance_t uinst)
+{
+	KASSERT(uinst != uinet_instance_default(), ("uinet_instance_destroy: cannot destroy default instance"));
+#ifdef VIMAGE
+	uinet_instance_shutdown(uinst);
+	vnet_destroy(uinst->ui_vnet);
+	free(uinst, M_DEVBUF);
+#endif
+}
+
+

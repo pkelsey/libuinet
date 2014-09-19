@@ -26,7 +26,7 @@
 #ifndef _UINET_IF_NETMAP_H_
 #define _UINET_IF_NETMAP_H_
 
-int if_netmap_attach(struct uinet_config_if *cfg);
-int if_netmap_detach(struct uinet_config_if *cfg);
+int if_netmap_attach(struct uinet_if *uif);
+int if_netmap_detach(struct uinet_if *uif);
 
 #endif /* _UINET_IF_NETMAP_H_ */

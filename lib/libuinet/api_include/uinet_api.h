@@ -34,23 +34,22 @@ extern "C" {
 
 #include "uinet_api_errno.h"
 #include "uinet_api_types.h"
-#include "uinet_config.h"
 #include "uinet_queue.h"
 
 void  uinet_finalize_thread(void);
 int   uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
-int   uinet_getifstat(const char *name, struct uinet_ifstat *stat);
-void  uinet_gettcpstat(struct uinet_tcpstat *stat);
+int   uinet_getifstat(uinet_instance_t uinst, const char *name, struct uinet_ifstat *stat);
+void  uinet_gettcpstat(uinet_instance_t uinst, struct uinet_tcpstat *stat);
 char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
 const char *uinet_inet_ntop(int af, const void *src, char *dst, unsigned int size);
 int   uinet_inet_pton(int af, const char *src, void *dst);
 int   uinet_inet6_enabled(void);
-int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback);
+int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_cfg *inst_cfg);
 int   uinet_initialize_thread(void);
 void  uinet_install_sighandlers(void);
-int   uinet_interface_add_alias(const char *name, const char *addr, const char *braddr, const char *mask);
-int   uinet_interface_create(const char *name);
-int   uinet_interface_up(const char *name, unsigned int promisc, unsigned int promiscinet);
+int   uinet_interface_add_alias(uinet_instance_t uinst, const char *name, const char *addr, const char *braddr, const char *mask);
+int   uinet_interface_create(uinet_instance_t uinst, const char *name);
+int   uinet_interface_up(uinet_instance_t uinst, const char *name, unsigned int promisc, unsigned int promiscinet);
 int   uinet_l2tagstack_cmp(const struct uinet_in_l2tagstack *ts1, const struct uinet_in_l2tagstack *ts2);
 uint32_t uinet_l2tagstack_hash(const struct uinet_in_l2tagstack *ts);
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
@@ -85,9 +84,10 @@ int   uinet_soallocuserctx(struct uinet_socket *so);
 int   uinet_sobind(struct uinet_socket *so, struct uinet_sockaddr *nam);
 int   uinet_soclose(struct uinet_socket *so);
 int   uinet_soconnect(struct uinet_socket *so, struct uinet_sockaddr *nam);
-int   uinet_socreate(int dom, struct uinet_socket **aso, int type, int proto);
+int   uinet_socreate(uinet_instance_t uinst, int dom, struct uinet_socket **aso, int type, int proto);
 void  uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc);
 int   uinet_sogeterror(struct uinet_socket *so);
+uinet_instance_t uinet_sogetinstance(struct uinet_socket *so);
 struct uinet_socket *uinet_sogetpassivepeer(struct uinet_socket *so);
 int   uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int *optlen);
 int   uinet_sogetstate(struct uinet_socket *so);
@@ -114,9 +114,9 @@ void  uinet_soupcall_clear_locked(struct uinet_socket *so, int which);
 void  uinet_soupcall_set(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_set_locked(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_unlock(struct uinet_socket *so, int which);
-int   uinet_sysctlbyname(char *name, char *oldp, size_t *oldplen,
+int   uinet_sysctlbyname(uinet_instance_t uinst, char *name, char *oldp, size_t *oldplen,
 			 char *newp, size_t newplen, size_t *retval, int flags);
-int   uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
+int   uinet_sysctl(uinet_instance_t uinst, int *name, u_int namelen, void *oldp, size_t *oldplen,
 		   void *newp, size_t newplen, size_t *retval, int flags);
 void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
 void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
@@ -128,15 +128,120 @@ uinet_synf_deferral_t uinet_synfilter_deferral_alloc(struct uinet_socket *so, ui
 int   uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_deferral_t deferral, int decision);
 void  uinet_synfilter_deferral_free(uinet_synf_deferral_t deferral);
 uinet_api_synfilter_cookie_t uinet_synfilter_deferral_get_cookie(uinet_synf_deferral_t deferral);
-int uinet_register_pfil_in(uinet_pfil_cb_t cb, void *arg, const char *ifname);
+int uinet_register_pfil_in(uinet_instance_t uinst, uinet_pfil_cb_t cb, void *arg, const char *ifname);
 
 const char * uinet_mbuf_data(const struct uinet_mbuf *);
 size_t uinet_mbuf_len(const struct uinet_mbuf *);
-int uinet_if_xmit(void *cookie, const char *buf, int len);
+int uinet_if_xmit(uinet_if_t uif, const char *buf, int len);
 
 int uinet_lock_log_set_file(const char *file);
 int uinet_lock_log_enable(void);
 int uinet_lock_log_disable(void);
+
+/*
+ *  Create a network interface with the given name, of the given type, in
+ *  the given connection domain, and bound to the given cpu.
+ *
+ *  type	is the type of interface to create.  This determines the
+ *		interface driver that will attach to the given configstr.
+ *
+ *  configstr	is a driver-specific configuration string.
+ *
+ *  		UINET_IFTYPE_NETMAP - vale<n>:<m> or <hostifname> or
+ *  		    <hostifname>:<qno>, where queue 0 is implied by
+ *		    a configstr of <hostifname>
+ *
+ *  alias	is any user-supplied string, or NULL.  If a string is supplied,
+ *	        it must be unique among all the other aliases and driver-assigned
+ *		names.  Passing an empty string is the same as passing NULL.
+ *
+ *  cdom	is the connection domain for ifname.  When looking up an
+ *		inbound packet on ifname, only protocol control blocks in
+ *		the same connection domain will be searched.
+ *
+ *  cpu		is the cpu number on which to perform stack processing on
+ *		packets received on ifname.  -1 means leave it up to the
+ *		scheduler.
+ *
+ *  cookie	is a pointer to an opaque reference that, if not NULL, will be
+ *		set to something that corresponds to the interface that is
+ *		created, or NULL if creation fails.
+ *
+ *
+ *  Return values:
+ *
+ *  0			Interface created successfully
+ *
+ *  UINET_ENXIO		Unable to configure the inteface
+ *
+ *  UINET_ENOMEM	No memory available for interface creation
+ *
+ *  UINET_EEXIST	An interface with the given name or cdom already exists
+ *
+ *  UINET_EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
+ */
+int uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configstr,
+		   const char *alias, unsigned int cdom, int cpu, uinet_if_t *uif);
+
+
+/*
+ *  Destroy the network interface specified by the cookie.
+ *
+ *
+ *  Return values:
+ *
+ *  0			Interface destroyed successfully
+ *
+ *  UINET_ENXIO		Unable to destroy the interface
+ *
+ *  UINET_EINVAL	Invalid cookie
+ */
+int uinet_ifdestroy(uinet_if_t uif);
+
+
+/*
+ *  Destroy the network interface with the given name.
+ *
+ *  name	can be either the user-specified alias, or the driver-assigned
+ *		name returned by uinet_ifgenericname().
+ *
+ *  Return values:
+ *
+ *  0			Interface destroyed successfully
+ *
+ *  UINET_ENXIO		Unable to destroy the interface
+ *
+ *  UINET_EINVAL	No interface with the given name found
+ */
+int uinet_ifdestroy_byname(uinet_instance_t uinst, const char *ifname);
+
+
+/*
+ *  Retrieve the user-assigned alias or driver-assigned generic name for the
+ *  interface specified by cookie.
+ *
+ *
+ *  Return values:
+ *
+ *  ""			No alias was assigned or cookie was invalid.
+ *
+ *  <non-empty string>	The alias or driver-assigned name
+ *
+ */
+const char *uinet_ifaliasname(uinet_if_t uif);
+const char *uinet_ifgenericname(uinet_if_t uif);
+
+
+/*
+ *  Configure UDP and TCP blackholing.
+ */
+int uinet_config_blackhole(uinet_instance_t uinst, uinet_blackhole_t action);
+
+
+void uinet_instance_default_cfg(struct uinet_instance_cfg *cfg);
+uinet_instance_t uinet_instance_create(struct uinet_instance_cfg *cfg);
+uinet_instance_t uinet_instance_default(void);
+void uinet_instance_destroy(uinet_instance_t uinst);
 
 #ifdef __cplusplus
 }

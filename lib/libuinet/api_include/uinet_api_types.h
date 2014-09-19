@@ -495,4 +495,34 @@ typedef void (*uinet_pool_fini)(void *mem, int size);
 #define	UINET_POOL_ALLOC_WAITOK	0x0002		/* ok to block */
 #define	UINET_POOL_ALLOC_ZERO	0x0100		/* bzero the allocation */
 
+struct uinet_instance;
+typedef struct uinet_instance *uinet_instance_t;
+
+typedef enum {
+	UINET_BLACKHOLE_TCP_NONE,	/* disable TCP blackholing (default) */
+	UINET_BLACKHOLE_TCP_SYN_ONLY,	/* only blackhole unwanted SYNs */
+	UINET_BLACKHOLE_TCP_ALL,	/* blackhole all unwanted TCP segments */
+	UINET_BLACKHOLE_UDP_NONE,	/* disable UDP blackholing (default) */
+	UINET_BLACKHOLE_UDP_ALL,	/* blackhole all unwanted UDP datagrams */
+} uinet_blackhole_t;
+
+
+typedef enum {
+	UINET_IFTYPE_LOOPBACK,
+	UINET_IFTYPE_NETMAP,
+	UINET_IFTYPE_PCAP,
+	UINET_IFTYPE_BRIDGE,
+	UINET_IFTYPE_SPAN
+} uinet_iftype_t;
+
+
+struct uinet_if;
+typedef struct uinet_if * uinet_if_t;
+
+
+struct uinet_instance_cfg {
+	unsigned int loopback;
+	void *userdata;
+};
+
 #endif /* _UINET_API_TYPES_H_ */

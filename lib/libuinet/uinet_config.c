@@ -30,43 +30,50 @@
 #include <sys/malloc.h>
 #include <sys/systm.h>
 
-#include "uinet_config.h"
-#include "uinet_config_internal.h"
+#include "uinet_internal.h"
 #include "uinet_if_netmap.h"
 #include "uinet_if_pcap.h"
 #include "uinet_if_bridge.h"
 #include "uinet_if_span.h"
 
-static TAILQ_HEAD(config_head, uinet_config_if) if_conf = TAILQ_HEAD_INITIALIZER(if_conf);
+static VNET_DEFINE(TAILQ_HEAD(config_head, uinet_if), uinet_if_list);
+#define V_uinet_if_list VNET(uinet_if_list)
 
 
-struct uinet_config_if *
+static void
+vnet_if_list_init(const void *unused __unused)
+{
+	TAILQ_INIT(&V_uinet_if_list);
+}
+VNET_SYSINIT(vnet_if_list_init, SI_SUB_VNET, SI_ORDER_ANY, vnet_if_list_init, 0);
+
+struct uinet_if *
 uinet_iffind_byname(const char *ifname)
 {
-	struct uinet_config_if *cfg;
+	struct uinet_if *uif;
 
-	TAILQ_FOREACH(cfg, &if_conf, link) {
-		if (0 == strcmp(ifname, cfg->name)) {
-			return (cfg);
+	TAILQ_FOREACH(uif, &V_uinet_if_list, link) {
+		if (0 == strcmp(ifname, uif->name)) {
+			break;
 		}
 
-		if (('\0' != cfg->alias[0]) && (0 == strcmp(ifname, cfg->alias))) {
-			return (cfg);
+		if (('\0' != uif->alias[0]) && (0 == strcmp(ifname, uif->alias))) {
+			break;
 		}
 	}
 
-	return (NULL);
+	return (uif);
 }
 
 
-static struct uinet_config_if *
+static struct uinet_if *
 uinet_iffind_bycdom(unsigned int cdom)
 {
-	struct uinet_config_if *cfg;
+	struct uinet_if *uif;
 
-	TAILQ_FOREACH(cfg, &if_conf, link) {
-		if (cdom == cfg->cdom) {
-			return (cfg);
+	TAILQ_FOREACH(uif, &V_uinet_if_list, link) {
+		if (cdom == uif->cdom) {
+			return (uif);
 		}
 	}
 
@@ -75,12 +82,14 @@ uinet_iffind_bycdom(unsigned int cdom)
 
 
 int
-uinet_ifcreate(uinet_iftype_t type, const char *configstr, const char *alias,
-	       unsigned int cdom, int cpu, uinet_ifcookie_t *cookie)
+uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configstr,
+	       const char *alias, unsigned int cdom, int cpu, uinet_if_t *uif)
 {
-	struct uinet_config_if *cfg = NULL;
+	struct uinet_if *new_uif;
 	int alias_len;
 	int error = 0;
+
+	CURVNET_SET(uinst->ui_vnet);
 
 	if (alias) {
 		alias_len = strlen(alias);
@@ -105,67 +114,68 @@ uinet_ifcreate(uinet_iftype_t type, const char *configstr, const char *alias,
 		goto out;
 	}
 
-	cfg = malloc(sizeof(struct uinet_config_if), M_DEVBUF, M_WAITOK);
-	if (NULL == cfg) {
+	new_uif = malloc(sizeof(struct uinet_if), M_DEVBUF, M_WAITOK);
+	if (NULL == new_uif) {
 		error = ENOMEM;
 		goto out;
 	}
 
-	cfg->type = type;
+	new_uif->type = type;
 
 	if (configstr) {
-		cfg->configstr = strdup(configstr, M_DEVBUF);
+		new_uif->configstr = strdup(configstr, M_DEVBUF);
 	} else {
-		cfg->configstr = NULL;
+		new_uif->configstr = NULL;
 	}
 
 	if (alias) {
 		/* copy guaranteed not to overflow the destinations due to above
 		 * checks against IF_NAMESIZE.
 		 */
-		strcpy(cfg->alias, alias);
+		strcpy(new_uif->alias, alias);
 	} else {
-		cfg->alias[0] = '\0';
+		new_uif->alias[0] = '\0';
 	}
-	cfg->cpu = cpu;
-	cfg->cdom = cdom;
-	cfg->ifdata = NULL;
+	new_uif->cpu = cpu;
+	new_uif->cdom = cdom;
+	new_uif->ifdata = NULL;
 
-	switch (cfg->type) {
+	switch (new_uif->type) {
 	case UINET_IFTYPE_NETMAP:
-		error = if_netmap_attach(cfg);
+		error = if_netmap_attach(new_uif);
 		break;
 	case UINET_IFTYPE_PCAP:
-		error = if_pcap_attach(cfg);
+		error = if_pcap_attach(new_uif);
 		break;
 	case UINET_IFTYPE_BRIDGE:
-		error = if_bridge_attach(cfg);
+		error = if_bridge_attach(new_uif);
 		break;
 	case UINET_IFTYPE_SPAN:
-		error = if_span_attach(cfg);
+		error = if_span_attach(new_uif);
 		break;
 	default:
-		printf("Error attaching interface with config %s: unknown interface type %d\n", cfg->configstr, cfg->type);
+		printf("Error attaching interface with config %s: unknown interface type %d\n", new_uif->configstr, new_uif->type);
 		error = ENXIO;
 		break;
 	}
 
 	if (0 == error) {
-		TAILQ_INSERT_TAIL(&if_conf, cfg, link);
-		if (cookie)
-			*cookie = cfg;
+		TAILQ_INSERT_TAIL(&V_uinet_if_list, new_uif, link);
+		if (uif)
+			*uif = new_uif;
 	}
 
 out:
+	CURVNET_RESTORE();
 	if (error) {
-		if (cookie)
-			*cookie = UINET_IFCOOKIE_INVALID;
+		if (uif)
+			*uif = NULL;
 
-		if (cfg) {
-			if (cfg->configstr)
-				free(cfg->configstr, M_DEVBUF);
+		if (new_uif) {
+			if (new_uif->configstr)
+				free(new_uif->configstr, M_DEVBUF);
 
-			free(cfg, M_DEVBUF);
+			free(new_uif, M_DEVBUF);
 		}
 	}
 
@@ -174,82 +184,88 @@ out:
 
 
 static int
-uinet_ifdestroy_internal(struct uinet_config_if *cfg)
+uinet_ifdestroy_internal(struct uinet_if *uif)
 {
 	int error;
 
-	switch (cfg->type) {
+	switch (uif->type) {
 	case UINET_IFTYPE_NETMAP:
-		error = if_netmap_detach(cfg);
+		error = if_netmap_detach(uif);
 		break;
 	case UINET_IFTYPE_PCAP:
-		error = if_pcap_detach(cfg);
+		error = if_pcap_detach(uif);
 		break;
 	default:
-		printf("Error detaching interface %s: unknown interface type %d\n", cfg->name, cfg->type);
+		printf("Error detaching interface %s: unknown interface type %d\n", uif->name, uif->type);
 		error = ENXIO;
 		break;
 	}
 
-	TAILQ_REMOVE(&if_conf, cfg, link);
+	TAILQ_REMOVE(&V_uinet_if_list, uif, link);
 		
-	if (cfg->configstr)
-		free(cfg->configstr, M_DEVBUF);
+	if (uif->configstr)
+		free(uif->configstr, M_DEVBUF);
 
-	free(cfg, M_DEVBUF);
+	free(uif, M_DEVBUF);
 
 	return (error);
 }
 
 
 int
-uinet_ifdestroy(uinet_ifcookie_t cookie)
+uinet_ifdestroy(uinet_if_t uif)
 {
-	struct uinet_config_if *cfg = cookie;
 	int error = EINVAL;
 
-	if (NULL != cfg)
-		error = uinet_ifdestroy_internal(cfg);
+	CURVNET_SET(uif->uinst->ui_vnet);
+
+	if (NULL != uif)
+		error = uinet_ifdestroy_internal(uif);
+
+	CURVNET_RESTORE();
 
 	return (error);
 }
 
 
 void
-uinet_ifdestroy_all(void)
+uinet_ifdestroy_all(struct uinet_instance *uinst)
 {
-	struct uinet_config_if *cfg, *tmp;
+	struct uinet_if *uif, *tmp;
 
-	TAILQ_FOREACH_SAFE(cfg, &if_conf, link, tmp) {
-		uinet_ifdestroy_internal(cfg);
+	CURVNET_SET(uinst->ui_vnet);
+	TAILQ_FOREACH_SAFE(uif, &V_uinet_if_list, link, tmp) {
+		uinet_ifdestroy_internal(uif);
 	}
+	CURVNET_RESTORE();
 }
 
 
 int
-uinet_ifdestroy_byname(const char *ifname)
+uinet_ifdestroy_byname(uinet_instance_t uinst, const char *ifname)
 {
-	struct uinet_config_if *cfg;
+	struct uinet_if *uif;
+	int error = EINVAL;
 
-	cfg = uinet_iffind_byname(ifname);
+	CURVNET_SET(uinst->ui_vnet);
+	uif = uinet_iffind_byname(ifname);
+	if (uif)
+		error = uinet_ifdestroy_internal(uif);
+	CURVNET_RESTORE();
 
-	return (uinet_ifdestroy(cfg));
+	return (error);
 }
 
 
 const char *
-uinet_ifaliasname(uinet_ifcookie_t cookie)
+uinet_ifaliasname(uinet_if_t uif)
 {
-	struct uinet_config_if *cfg = cookie;
-
-	return (cfg ? cfg->alias : "");
+	return (uif ? uif->alias : "");
 }
 
 
 const char *
-uinet_ifgenericname(uinet_ifcookie_t cookie)
+uinet_ifgenericname(uinet_if_t uif)
 {
-	struct uinet_config_if *cfg = cookie;
-
-	return (cfg ? cfg->name : "");
+	return (uif ? uif->name : "");
 }

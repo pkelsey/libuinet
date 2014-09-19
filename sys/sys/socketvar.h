@@ -373,8 +373,13 @@ int	soclose(struct socket *so);
 int	soconnect(struct socket *so, struct sockaddr *nam, struct thread *td);
 int	soconnect2(struct socket *so1, struct socket *so2);
 int	socow_setup(struct mbuf *m0, struct uio *uio);
+#ifdef UINET
+int	socreate(int dom, struct socket **aso, int type, int proto,
+	    struct ucred *cred, struct thread *td, struct vnet *vnet);
+#else
 int	socreate(int dom, struct socket **aso, int type, int proto,
 	    struct ucred *cred, struct thread *td);
+#endif
 int	sodisconnect(struct socket *so);
 struct	sockaddr *sodupsockaddr(const struct sockaddr *sa, int mflags);
 void	sofree(struct socket *so);

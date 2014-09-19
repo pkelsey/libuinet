@@ -54,6 +54,8 @@ struct echo_context {
 };
 
 struct interface_config {
+	int uinst_index;
+	uinet_instance_t uinst;
 	char *ifname;
 	char alias[UINET_IF_NAMESIZE];
 	unsigned int cdom;
@@ -118,7 +120,7 @@ echo_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 			}
 
 			assert(uio.uio_resid == 0);
-
+			printf("read %d\n", read_size);
 			uio.uio_iov = &iov;
 			iov.iov_base = buffer;
 			iov.iov_len = read_size;
@@ -219,7 +221,7 @@ create_echo(struct ev_loop *loop, struct server_config *cfg)
 		goto fail;
 	}
 
-	error = uinet_socreate(UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
+	error = uinet_socreate(cfg->interface->uinst, UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
 	if (0 != error) {
 		printf("Listen socket creation failed (%d)\n", error);
 		goto fail;
@@ -322,6 +324,7 @@ usage(const char *progname)
 
 	printf("Usage: %s [options]\n", progname);
 	printf("    -h                   show usage\n");
+	printf("    -I                   create new instance for subsequent interfaces");
 	printf("    -i ifname            specify network interface\n");
 	printf("    -l inaddr            listen address\n");
 	printf("    -P                   put interface into Promiscuous INET mode\n");
@@ -349,6 +352,9 @@ int main (int argc, char **argv)
 	struct uinet_in_addr tmpinaddr;
 	int ifnetmap_count = 0;
 	int ifpcap_count = 0;
+	int current_uinst_index = 0;
+	int current_uinst_num_interfaces = 0;
+	uinet_instance_t current_uinst;
 
 	memset(interfaces, 0, sizeof(interfaces));
 	memset(servers, 0, sizeof(servers));
@@ -361,20 +367,31 @@ int main (int argc, char **argv)
 		servers[i].listen_port = -1;
 	}
 
-	while ((ch = getopt(argc, argv, "hi:l:Pp:t:v")) != -1) {
+	while ((ch = getopt(argc, argv, "hIi:l:Pp:t:v")) != -1) {
 		switch (ch) {
 		case 'h':
 			usage(progname);
 			return (0);
+		case 'I':
+			if (current_uinst_num_interfaces == 0) {
+				printf("Cannot create a new instance if no interfaces are assigned to the previous instance\n");
+				return (1);
+			} else {
+				current_uinst_index++;
+				current_uinst_num_interfaces = 0;
+			}
+			break;
 		case 'i':
 			if (MAX_INTERFACES == num_interfaces) {
 				printf("Maximum number of interfaces is %u\n", MAX_INTERFACES);
 				return (1);
 			} else {
+				interfaces[num_interfaces].uinst_index = current_uinst_index;
 				interfaces[num_interfaces].ifname = optarg;
 				interfaces[num_interfaces].cdom = num_interfaces + 1;
 				num_interfaces++;
 				interface_server_count = 0;
+				current_uinst_num_interfaces++;
 			}
 			break;
 		case 'l':
@@ -443,6 +460,11 @@ int main (int argc, char **argv)
 		return (1);
 	}
 
+	if (current_uinst_num_interfaces == 0) {
+		printf("New instance requested with no interfaces\n");
+		return (1);
+	}
+
 	for (i = 0; i < num_servers; i++) {
 		if (-1 == servers[i].listen_port) {
 			printf("No listen port specified for interface %s, listen address %s\n",
@@ -471,10 +493,22 @@ int main (int argc, char **argv)
 	}
 	
 	
-	uinet_init(1, 128*1024, 0);
+	uinet_init(1, 128*1024, NULL);
 	uinet_install_sighandlers();
 
+	current_uinst = uinet_instance_default();
+	current_uinst_index = 0;
 	for (i = 0; i < num_interfaces; i++) {
+		if (interfaces[i].uinst_index != current_uinst_index) {
+			current_uinst = uinet_instance_create(NULL);
+			if (NULL == current_uinst) {
+				printf("Failed to create new instance\n");
+				return (1);
+			}
+			current_uinst_index++;
+		}
+		interfaces[i].uinst = current_uinst;
+
 		switch (interfaces[i].type) {
 		case UINET_IFTYPE_NETMAP:
 			interfaces[i].alias_prefix = "netmap";
@@ -500,7 +534,7 @@ int main (int argc, char **argv)
 			       interfaces[i].promisc ? interfaces[i].cdom : 0);
 		}
 
-		error = uinet_ifcreate(interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
+		error = uinet_ifcreate(interfaces[i].uinst, interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
 				       interfaces[i].promisc ? interfaces[i].cdom : 0,
 				       0, NULL);
 		if (0 != error) {
@@ -521,7 +555,7 @@ int main (int argc, char **argv)
 				printf("Adding address %s to interface %s\n", servers[i].listen_addr, servers[i].interface->alias);
 			}
 			
-			error = uinet_interface_add_alias(servers[i].interface->alias, servers[i].listen_addr, "", "");
+			error = uinet_interface_add_alias(servers[i].interface->uinst, servers[i].interface->alias, servers[i].listen_addr, "", "");
 			if (error) {
 				printf("Adding alias %s to interface %s failed (%d)\n", servers[i].listen_addr, servers[i].interface->alias, error);
 			}
@@ -551,7 +585,7 @@ int main (int argc, char **argv)
 			printf("Bringing up interface %s\n", interfaces[i].alias);
 		}
 
-		error = uinet_interface_up(interfaces[i].alias, 1, interfaces[i].promisc);
+		error = uinet_interface_up(interfaces[i].uinst, interfaces[i].alias, 1, interfaces[i].promisc);
 		if (0 != error) {
 			printf("Failed to bring up interface %s (%d)\n", interfaces[i].alias, error);
 		}

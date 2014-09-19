@@ -42,8 +42,7 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 
-#include "uinet_api.h"
-#include "uinet_config.h"
+#include "uinet_internal.h"
 #include "uinet_nv.h"
 #include "uinet_host_sysctl_api.h"
 #include "uinet_host_sysctl_api_priv.h"
@@ -344,7 +343,8 @@ passive_sysctl_reqtype_str(int ns, nvlist_t *nvl, struct u_sysctl_state_t *us)
 	 * Pass in a NULL wbuf_len if wbuf is NULL.  sysctl writing
 	 * passes in a NULL buffer and NULL oidlenp.
 	 */
-	us->error = uinet_sysctlbyname((char *) req_str,
+	us->error = uinet_sysctlbyname(uinet_instance_default(),
+	    (char *) req_str,
 	    us->oldp,
 	    us->oldp == NULL ? NULL : &us->wbuf_len,
 	    (char *) us->sbuf,
@@ -431,7 +431,8 @@ passive_sysctl_reqtype_oid(int ns, nvlist_t *nvl, struct u_sysctl_state_t *us)
 	 * Pass in a NULL wbuf_len if wbuf is NULL.  sysctl writing
 	 * passes in a NULL buffer and NULL oidlenp.
 	 */
-	us->error = uinet_sysctl((int *) req_oid,
+	us->error = uinet_sysctl(uinet_instance_default(),
+	    (int *) req_oid,
 	    req_oid_len / sizeof(int),
 	    us->oldp,
 	    us->oldp == NULL ? NULL : &us->wbuf_len,
