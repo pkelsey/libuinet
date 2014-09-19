@@ -120,7 +120,7 @@ echo_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 			}
 
 			assert(uio.uio_resid == 0);
-			printf("read %d\n", read_size);
+
 			uio.uio_iov = &iov;
 			iov.iov_base = buffer;
 			iov.iov_len = read_size;
