@@ -1859,7 +1859,13 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	} else
 		mac_syncache_create(maclabel, inp);
 #endif
-	INP_WUNLOCK(inp);
+#ifdef PROMISCUOUS_INET
+	if (synfilter)
+		INP_DOWNGRADE(inp);
+	else
+#else
+		INP_WUNLOCK(inp);
+#endif
 	INP_INFO_WUNLOCK(&V_tcbinfo);
 
 	/*
@@ -1939,6 +1945,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 			TCPSTAT_INC(tcps_sndtotal);
 		}
 		SCH_UNLOCK(sch);
+#ifdef PROMISCUOUS_INET
+		if (synfilter)
+			INP_RUNLOCK(inp);
+#endif
 		goto done;
 	}
 
@@ -1986,6 +1996,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 #endif
 		if (SYNF_ACCEPT != decision) {
 			SCH_UNLOCK(sch);
+			INP_RUNLOCK(inp);
 
 #ifdef MAC
 			/* ensure MAC label is freed on way out */
@@ -2030,6 +2041,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 				sc = &scs;
 			} else {
 				SCH_UNLOCK(sch);
+#ifdef PROMISCUOUS_INET
+				if (synfilter)
+					INP_RUNLOCK(inp);
+#endif
 				if (ipopts)
 					(void) m_free(ipopts);
 				goto done;
@@ -2172,6 +2187,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 #endif
 
 	SCH_UNLOCK(sch);
+#ifdef PROMISCUOUS_INET
+	if (synfilter)
+		INP_RUNLOCK(inp);
+#endif
 
 	/*
 	 * Do a standard 3-way handshake.

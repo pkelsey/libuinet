@@ -356,7 +356,7 @@ syn_filter_run_callback(struct inpcb *inp, struct syn_filter_cbarg *arg)
 	struct syn_filter_internal *sfi;
 	int result = SYNF_ACCEPT;
 
-	INP_RLOCK(inp);
+	INP_RLOCK_ASSERT(inp);
 
 	sfinst = (struct syn_filter_instance *)inp->inp_synf;
 	if (sfinst) {
@@ -377,8 +377,6 @@ syn_filter_run_callback(struct inpcb *inp, struct syn_filter_cbarg *arg)
 							   arg);	
 		}
 	}
-
-	INP_RUNLOCK(inp);
 
 	return (result);
 }
