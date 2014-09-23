@@ -61,5 +61,6 @@ uinet_dpcpu_init(void)
 struct pcpu *
 uinet_pcpu_get(void)
 {
+	KASSERT(curthread->td_oncpu < mp_ncpus, ("curthread->td_oncpu >= mp_ncpus"));
 	return (&pcpup[curthread->td_oncpu]);
 }

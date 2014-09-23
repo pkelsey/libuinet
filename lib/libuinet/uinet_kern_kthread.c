@@ -39,6 +39,7 @@
 #include <sys/lock.h>
 #include <sys/mutex.h>
 #include <sys/condvar.h>
+#include <sys/smp.h>
 #include <sys/ucred.h>
 
 /* XXX - should we really be picking up the host stdarg? */ 
@@ -256,7 +257,7 @@ uinet_init_thread0(void)
 	td->td_wchan = (void *)uhi_thread_self();
 
 	cpuid = uhi_thread_bound_cpu();
-	td->td_oncpu = (cpuid == -1) ? 0 : cpuid;
+	td->td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
 	
 	uinet_thread0.td = td;
 

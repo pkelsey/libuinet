@@ -28,12 +28,17 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/sched.h>
+#include <sys/smp.h>
 
 #include "uinet_host_interface.h"
 
 
 /*
  * Bind a thread to a target cpu.
+ *
+ * Note that any cpu in the host system can be bound to, but the thread's
+ * concept of its current cpu will be limited to the set of cpus that
+ * uinet_init() was told it has.
  */
 void
 sched_bind(struct thread *td, int cpu)
@@ -42,6 +47,12 @@ sched_bind(struct thread *td, int cpu)
 	
 	if (cpu >= 0) {
 		uhi_thread_bind(cpu);
-		td->td_oncpu = cpu;
+
+		/* Limit td_oncpu to the set of cpus that uinet_init() was
+		 * told we have, as that number of cpus is used to
+		 * initialize per-cpu state and td_oncpu is used to index
+		 * into that state.
+		 */
+		td->td_oncpu = cpu % mp_ncpus;
 	}
 }

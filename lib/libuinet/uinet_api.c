@@ -32,6 +32,7 @@
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/protosw.h>
+#include <sys/smp.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/sockio.h>
@@ -102,7 +103,7 @@ uinet_initialize_thread(void)
 	}
 
 	cpuid = uhi_thread_bound_cpu();
-	td->td_oncpu = (cpuid == -1) ? 0 : cpuid;
+	td->td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
 
 	return (0);
 }

@@ -448,7 +448,7 @@ void uhi_thread_bind(unsigned int cpu)
 	cpuset_t cpuset;
 
 	CPU_ZERO(&cpuset);
-	CPU_SET(cpu, &cpuset);
+	CPU_SET(cpu % CPU_SETSIZE, &cpuset);
 	pthread_setaffinity_np(pthread_self(), sizeof(cpuset_t), &cpuset);
 #endif /* __APPLE__ */
 }

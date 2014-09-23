@@ -97,12 +97,14 @@ critical_enter(void)
 	   mutex is used to prevent another thread from entering the same
 	   critical section on the current cpu.
 	 */
+	KASSERT(curthread->td_oncpu < mp_ncpus, ("curthread->td_oncpu >= mp_ncpus"));
 	mtx_lock(&uinet_pcpu_locks[curthread->td_oncpu]);
 }
 
 void
 critical_exit(void)
 {
+	KASSERT(curthread->td_oncpu < mp_ncpus, ("curthread->td_oncpu >= mp_ncpus"));
 	mtx_unlock(&uinet_pcpu_locks[curthread->td_oncpu]);
 }
 
