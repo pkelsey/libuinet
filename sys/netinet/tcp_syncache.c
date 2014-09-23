@@ -1863,9 +1863,8 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	if (synfilter)
 		INP_DOWNGRADE(inp);
 	else
-#else
-		INP_WUNLOCK(inp);
 #endif
+		INP_WUNLOCK(inp);
 	INP_INFO_WUNLOCK(&V_tcbinfo);
 
 	/*
