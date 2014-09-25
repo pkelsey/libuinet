@@ -537,7 +537,7 @@ m_copym2(struct mbuf *m, int off0, int len, int wait, int hole_break)
 	struct mbuf *n, **np;
 	int off = off0;
 	struct mbuf *top;
-	int copyhdr = 0, last_m_flags;
+	int copyhdr = 0, last_m_flags = 0;
 
 	KASSERT(off >= 0, ("m_copym, negative off %d", off));
 	KASSERT(len >= 0, ("m_copym, negative len %d", len));
@@ -858,7 +858,7 @@ struct mbuf *
 m_dup(struct mbuf *m, int how)
 {
 	struct mbuf **p, *top = NULL;
-	int remain, moff, nsize;
+	int remain, moff, nsize = 0;
 
 	MBUF_CHECKSLEEP(how);
 	/* Sanity check */

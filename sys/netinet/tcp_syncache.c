@@ -1038,7 +1038,7 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	int error;
 	char *s;
 	struct mbuf *m1;
-	struct tcphdr *th;
+	struct tcphdr *th = NULL;
 
 	so = sonewconn_passive_client(lso, SS_ISCONNECTING);
 	if (so == NULL) {
