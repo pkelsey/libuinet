@@ -157,7 +157,7 @@ kernacc(addr, len, rw)
  */
 int
 useracc(addr, len, rw)
-	void *addr;
+	const void *addr;
 	int len, rw;
 {
 	boolean_t rv;

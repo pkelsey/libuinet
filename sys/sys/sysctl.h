@@ -143,7 +143,7 @@ struct sysctl_req {
 	size_t		oldlen;
 	size_t		oldidx;
 	int		(*oldfunc)(struct sysctl_req *, const void *, size_t);
-	void		*newptr;
+	const void	*newptr;
 	size_t		newlen;
 	size_t		newidx;
 	int		(*newfunc)(struct sysctl_req *, void *, size_t);
@@ -774,16 +774,16 @@ struct	sysctl_ctx_entry *sysctl_ctx_entry_find(struct sysctl_ctx_list *clist,
 int	sysctl_ctx_entry_del(struct sysctl_ctx_list *clist,
 		struct sysctl_oid *oidp);
 
-int	kernel_sysctl(struct thread *td, int *name, u_int namelen, void *old,
-		      size_t *oldlenp, void *new, size_t newlen,
+int	kernel_sysctl(struct thread *td, const int *name, u_int namelen, void *old,
+		      size_t *oldlenp, const void *new, size_t newlen,
 		      size_t *retval, int flags);
-int	kernel_sysctlbyname(struct thread *td, char *name,
-		void *old, size_t *oldlenp, void *new, size_t newlen,
+int	kernel_sysctlbyname(struct thread *td, const char *name,
+		void *old, size_t *oldlenp, const void *new, size_t newlen,
 		size_t *retval, int flags);
-int	userland_sysctl(struct thread *td, int *name, u_int namelen, void *old,
-			size_t *oldlenp, int inkernel, void *new, size_t newlen,
+int	userland_sysctl(struct thread *td, const int *name, u_int namelen, void *old,
+			size_t *oldlenp, int inkernel, const void *new, size_t newlen,
 			size_t *retval, int flags);
-int	sysctl_find_oid(int *name, u_int namelen, struct sysctl_oid **noid,
+int	sysctl_find_oid(const int *name, u_int namelen, struct sysctl_oid **noid,
 			int *nindx, struct sysctl_req *req);
 void	sysctl_lock(void);
 void	sysctl_unlock(void);

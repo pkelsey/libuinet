@@ -1214,14 +1214,14 @@ sysctl_new_kernel(struct sysctl_req *req, void *p, size_t l)
 		return (0);
 	if (req->newlen - req->newidx < l)
 		return (EINVAL);
-	bcopy((char *)req->newptr + req->newidx, p, l);
+	bcopy((const char *)req->newptr + req->newidx, p, l);
 	req->newidx += l;
 	return (0);
 }
 
 int
-kernel_sysctl(struct thread *td, int *name, u_int namelen, void *old,
-    size_t *oldlenp, void *new, size_t newlen, size_t *retval, int flags)
+kernel_sysctl(struct thread *td, const int *name, u_int namelen, void *old,
+    size_t *oldlenp, const void *new, size_t newlen, size_t *retval, int flags)
 {
 	int error = 0;
 	struct sysctl_req req;
@@ -1250,7 +1250,7 @@ kernel_sysctl(struct thread *td, int *name, u_int namelen, void *old,
 	req.lock = REQ_UNWIRED;
 
 	SYSCTL_XLOCK();
-	error = sysctl_root(0, name, namelen, &req);
+	error = sysctl_root(0, (void *)(intptr_t)name, namelen, &req);
 	SYSCTL_XUNLOCK();
 
 	if (req.lock == REQ_WIRED && req.validlen > 0)
@@ -1269,8 +1269,8 @@ kernel_sysctl(struct thread *td, int *name, u_int namelen, void *old,
 }
 
 int
-kernel_sysctlbyname(struct thread *td, char *name, void *old, size_t *oldlenp,
-    void *new, size_t newlen, size_t *retval, int flags)
+kernel_sysctlbyname(struct thread *td, const char *name, void *old, size_t *oldlenp,
+    const void *new, size_t newlen, size_t *retval, int flags)
 {
         int oid[CTL_MAXNAME];
         size_t oidlen, plen;
@@ -1281,7 +1281,7 @@ kernel_sysctlbyname(struct thread *td, char *name, void *old, size_t *oldlenp,
 	oidlen = sizeof(oid);
 
 	error = kernel_sysctl(td, oid, 2, oid, &oidlen,
-	    (void *)name, strlen(name), &plen, flags);
+	    (const void *)name, strlen(name), &plen, flags);
 	if (error)
 		return (error);
 
@@ -1342,7 +1342,7 @@ sysctl_new_user(struct sysctl_req *req, void *p, size_t l)
 		return (EINVAL);
 	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK, NULL,
 	    "sysctl_new_user()");
-	error = copyin((char *)req->newptr + req->newidx, p, l);
+	error = copyin((const char *)req->newptr + req->newidx, p, l);
 	req->newidx += l;
 	return (error);
 }
@@ -1376,7 +1376,7 @@ sysctl_wire_old_buffer(struct sysctl_req *req, size_t len)
 }
 
 int
-sysctl_find_oid(int *name, u_int namelen, struct sysctl_oid **noid,
+sysctl_find_oid(const int *name, u_int namelen, struct sysctl_oid **noid,
     int *nindx, struct sysctl_req *req)
 {
 	struct sysctl_oid_list *lsp;
@@ -1570,8 +1570,8 @@ sys___sysctl(struct thread *td, struct sysctl_args *uap)
  * must be in kernel space.
  */
 int
-userland_sysctl(struct thread *td, int *name, u_int namelen, void *old,
-    size_t *oldlenp, int inkernel, void *new, size_t newlen, size_t *retval,
+userland_sysctl(struct thread *td, const int *name, u_int namelen, void *old,
+    size_t *oldlenp, int inkernel, const void *new, size_t newlen, size_t *retval,
     int flags)
 {
 	int error = 0, memlocked;
@@ -1626,7 +1626,7 @@ userland_sysctl(struct thread *td, int *name, u_int namelen, void *old,
 		req.oldidx = 0;
 		req.newidx = 0;
 		SYSCTL_XLOCK();
-		error = sysctl_root(0, name, namelen, &req);
+		error = sysctl_root(0, (void *)(intptr_t)name, namelen, &req);
 		SYSCTL_XUNLOCK();
 		if (error != EAGAIN)
 			break;

@@ -37,7 +37,7 @@
 
 
 int
-useracc(void *addr, int len, int rw)
+useracc(const void *addr, int len, int rw)
 {
 	return (1);
 }

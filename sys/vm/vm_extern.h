@@ -57,7 +57,7 @@ int kmem_back(vm_map_t, vm_offset_t, vm_size_t, int);
 vm_map_t kmem_suballoc(vm_map_t, vm_offset_t *, vm_offset_t *, vm_size_t,
     boolean_t);
 void swapout_procs(int);
-int useracc(void *, int, int);
+int useracc(const void *, int, int);
 int vm_fault(vm_map_t, vm_offset_t, vm_prot_t, int);
 void vm_fault_copy_entry(vm_map_t, vm_map_t, vm_map_entry_t, vm_map_entry_t,
     vm_ooffset_t *);

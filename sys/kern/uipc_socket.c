@@ -2619,7 +2619,7 @@ so_setsockopt(struct socket *so, int level, int optname, const void *optval,
 	sopt.sopt_level = level;
 	sopt.sopt_name = optname;
 	sopt.sopt_dir = SOPT_SET;
-	sopt.sopt_val = (void *)optval;
+	sopt.sopt_val = (void *)(uintptr_t)optval;
 	sopt.sopt_valsize = optlen;
 	sopt.sopt_td = NULL;
 	return (sosetopt(so, &sopt));

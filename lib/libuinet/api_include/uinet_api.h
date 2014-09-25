@@ -114,10 +114,10 @@ void  uinet_soupcall_clear_locked(struct uinet_socket *so, int which);
 void  uinet_soupcall_set(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_set_locked(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_unlock(struct uinet_socket *so, int which);
-int   uinet_sysctlbyname(char *name, char *oldp, size_t *oldplen,
-			 char *newp, size_t newplen, size_t *retval, int flags);
-int   uinet_sysctl(int *name, u_int namelen, void *oldp, size_t *oldplen,
-		   void *newp, size_t newplen, size_t *retval, int flags);
+int   uinet_sysctlbyname(const char *name, char *oldp, size_t *oldplen,
+			 const char *newp, size_t newplen, size_t *retval, int flags);
+int   uinet_sysctl(const int *name, unsigned int namelen, void *oldp, size_t *oldplen,
+		   const void *newp, size_t newplen, size_t *retval, int flags);
 void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
 void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
 void  uinet_synfilter_setl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);

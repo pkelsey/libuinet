@@ -38,7 +38,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/errno.h>
-#include <sys/endian.h>
+//#include <sys/endian.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 
@@ -344,10 +344,10 @@ passive_sysctl_reqtype_str(int ns, nvlist_t *nvl, struct u_sysctl_state_t *us)
 	 * Pass in a NULL wbuf_len if wbuf is NULL.  sysctl writing
 	 * passes in a NULL buffer and NULL oidlenp.
 	 */
-	us->error = uinet_sysctlbyname((char *) req_str,
+	us->error = uinet_sysctlbyname(req_str,
 	    us->oldp,
 	    us->oldp == NULL ? NULL : &us->wbuf_len,
-	    (char *) us->sbuf,
+	    us->sbuf,
 	    us->sbuf_len,
 	    &us->rval,
 	    0);
@@ -431,11 +431,11 @@ passive_sysctl_reqtype_oid(int ns, nvlist_t *nvl, struct u_sysctl_state_t *us)
 	 * Pass in a NULL wbuf_len if wbuf is NULL.  sysctl writing
 	 * passes in a NULL buffer and NULL oidlenp.
 	 */
-	us->error = uinet_sysctl((int *) req_oid,
+	us->error = uinet_sysctl(req_oid,
 	    req_oid_len / sizeof(int),
 	    us->oldp,
 	    us->oldp == NULL ? NULL : &us->wbuf_len,
-	    (char *) us->sbuf,
+	    us->sbuf,
 	    us->sbuf_len,
 	    &us->rval,
 	    0);
@@ -473,7 +473,6 @@ uinet_host_sysctl_listener_thread(void *arg)
 
 	bzero(&sun, sizeof(sun));
 	strcpy(sun.sun_path, path);
-	sun.sun_len = 0;
 	sun.sun_family = AF_UNIX;
 
 	printf("sysctl_listener: starting listener on %s\n", sun.sun_path);

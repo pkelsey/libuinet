@@ -3315,11 +3315,12 @@ sysctl_kern_proc_filedesc(SYSCTL_HANDLER_ARGS)
 	size_t oldidx;
 	int64_t offset;
 	void *data;
-	int error, i, *name;
+	int error, i;
+	const int *name;
 	int fd_is_cap, type, refcnt, fflags;
 	cap_rights_t fd_cap_rights;
 
-	name = (int *)arg1;
+	name = (const int *)arg1;
 	if ((p = pfind((pid_t)name[0])) == NULL)
 		return (ESRCH);
 	if ((error = p_candebug(curthread, p))) {
