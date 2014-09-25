@@ -156,7 +156,7 @@ uhi_lock_log_disable(void)
 	FILE *fp = NULL;
 
 	pthread_mutex_lock(&lock_log_mtx);
-	if (lock_log_mtx == 0) {
+	if (lock_log_enabled == 0) {
 		pthread_mutex_unlock(&lock_log_mtx);
 		return;
 	}
@@ -172,13 +172,14 @@ uhi_lock_log_disable(void)
 static void
 uhi_lock_log(const char *type, const char *what, void *lp, void *ptr, const char *file, int line)
 {
-	struct timespec ts;
 	uhi_thread_t curthr;
+	int64_t sec;
+	long nsec;
 
 	if (lock_log_enabled == 0)
 		return;
 
-	clock_gettime(CLOCK_MONOTONIC_FAST, &ts);
+	uhi_clock_gettime(UHI_CLOCK_MONOTONIC_FAST, &sec, &nsec);
 
 	curthr = uhi_thread_self();
 
@@ -190,8 +191,8 @@ uhi_lock_log(const char *type, const char *what, void *lp, void *ptr, const char
 	if (lock_log_fp != NULL) {
 		fprintf(lock_log_fp,
 		    "%llu.%06llu: lp %p tid %x type %s what %s where %s:%d ptr %p\n",
-		    (unsigned long long) (ts.tv_sec),
-		    (unsigned long long) (ts.tv_nsec / 1000),
+		    (unsigned long long) (sec),
+		    (unsigned long long) (nsec / 1000),
 		    lp,
 		    (int) curthr,
 		    type,
@@ -292,6 +293,7 @@ uhi_clock_gettime(int id, int64_t *sec, long *nsec)
 		host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &clock);
 		break;
 	case UHI_CLOCK_MONOTONIC:
+	case UHI_CLOCK_MONOTONIC_FAST:
 	default:
 		host_get_clock_service(mach_host_self(), SYSTEM_CLOCK, &clock);
 		break;
@@ -309,6 +311,11 @@ uhi_clock_gettime(int id, int64_t *sec, long *nsec)
 	case UHI_CLOCK_REALTIME:
 		host_id = CLOCK_REALTIME;
 		break;
+#ifdef CLOCK_MONOTONIC_FAST
+	case UHI_CLOCK_MONOTONIC_FAST:
+		host_id = CLOCK_MONOTONIC_FAST;
+		break;
+#endif
 	case UHI_CLOCK_MONOTONIC:
 	default:
 		host_id = CLOCK_MONOTONIC;
@@ -1159,7 +1166,9 @@ uhi_install_sighandlers(void)
 		SIGILL,
 		SIGTRAP,
 		SIGABRT,
+#if !defined(__linux__)
 		SIGEMT,
+#endif
 		SIGFPE,
 		SIGBUS,
 		SIGSEGV,
