@@ -14,47 +14,54 @@ accepted connections is available to the application.  Outbound
 connections can be bound to any IP and port, as well as any MAC
 address and VLAN tag stack.
 
+This stack can also passively reconstruct TCP streams using a copy of
+those streams' bidirectional packet flow.  Reconstruction can continue
+even in the face of packet loss (in which case zero-filled holes in
+the affected streams are reported to the application).
+
 Packet I/O is currently accomplished via netmap or libpcap (although
 the latter interface is relatively new and untested).
 
 
-Building libuinet
+Building libuinet and the sample programs
 =============================================================================
 
-The sysctl code (and likely more over time) uses libnv from FreeBSD-HEAD
-to serialise data between processes.
+GNU make is used to build libuinet and its sample programs.  Under
+Linux, this is simply 'make', while under FreeBSD, this is available
+as gmake.  The instructions that follow refer to 'gmake'.
 
-cd lib/libnv
-make
+To build everything after a clean checkout:
 
-cd lib/libuinet
-gmake
+gmake 
+
+To rebuild everything from scratch at any point:
+
+gmake clean config all
 
 If your netmap includes are not in the system include path,
 
-gmake NETMAP_INCLUDES=<path to netmap includes>
+gmake NETMAP_INCLUDES=<path to netmap includes> [targets...]
 
+The make variable DEBUG_FLAGS provides a quick way to adjust the
+optimization level and debug symbol generation.  For example:
 
-Building the sample programs
-=============================================================================
-
-The sample programs are libev-based, so in addition to building
-libuinet before building them, you must also build the libev port.
-
-To build the libev port:
-
-cd lib/libev
-./configure --with-uinet=../libuinet/api_include
-make
-
-To build the sample programs:
-
-cd bin/<prog>
-gmake
+gmake DEBUG_FLAGS="-O2 -ggdb" clean config all
 
 
 The currently functioning sample programs are:
 
 echo		A loopback server
 echo++		A C++ loopback server
+passive         A passive reconstructor
 tproxy		A transparent proxy
+
+
+Notes
+=============================================================================
+
+The sysctl code (and likely more over time) uses libnv from
+FreeBSD-HEAD to serialise data between processes.
+
+Currently, the sysctl and vmstat tools that interact with a libuinet
+instance are only buildable on FreeBSD hosts.
+
