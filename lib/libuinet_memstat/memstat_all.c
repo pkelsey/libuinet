@@ -29,6 +29,8 @@
 #include <sys/types.h>
 #include <sys/queue.h>
 
+#include <stdint.h>
+
 #include "memstat.h"
 
 /*

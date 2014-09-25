@@ -28,7 +28,9 @@
  */
 
 #include <sys/cdefs.h>
+#if defined(__FreeBSD__)
 __FBSDID("$FreeBSD: head/lib/libnv/dnvlist.c 258065 2013-11-12 19:39:14Z pjd $");
+#endif
 
 #include <stdarg.h>
 #include <stdbool.h>

@@ -29,7 +29,9 @@
  */
 
 #include <sys/cdefs.h>
+#if defined(__FreeBSD__)
 __FBSDID("$FreeBSD: head/lib/libnv/msgio.c 261408 2014-02-02 19:06:00Z pjd $");
+#endif
 
 #include <sys/types.h>
 #include <sys/socket.h>

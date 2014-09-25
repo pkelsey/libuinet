@@ -46,6 +46,10 @@ struct nvlist;
 typedef struct nvlist nvlist_t;
 #endif
 
+#ifndef __printflike
+#define	__printflike(fmtarg, firstvararg)
+#endif
+
 #define	NV_NAME_MAX	2048
 
 #define	NV_TYPE_NONE			0
