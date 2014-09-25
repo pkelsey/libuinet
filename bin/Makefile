@@ -1,5 +1,10 @@
+TOPDIR?=${CURDIR}/..
+include ${TOPDIR}/cflags.mk
 
-SUBDIRS=echo echo++ passive sysctl tproxy vmstat
+SUBDIRS=echo echo++ passive tproxy
+ifeq (${HOST_OS},FreeBSD)
+SUBDIRS+=sysctl vmstat 
+endif
 
 config:
 	for d in $(SUBDIRS); do ( cd $$d; $(MAKE) config ) ; done

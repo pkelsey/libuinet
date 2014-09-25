@@ -1,3 +1,5 @@
+HOST_OS:=$(shell uname -s)
+
 DEBUG_FLAGS	?= -O -gdwarf-2
 
 UINET_DESTDIR	?= /usr/local/

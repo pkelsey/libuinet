@@ -5,7 +5,6 @@
 include ${TOPDIR}/mk/compiler.mk
 
 MACHINE_CPUARCH:= $(shell uname -m)
-HOST_OS:=$(shell uname -s)
 
 # Convert Mac OS X name to FreeBSD one.
 ifeq (${MACHINE_CPUARCH},x86_64)
