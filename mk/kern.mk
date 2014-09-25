@@ -6,7 +6,7 @@
 #
 
 CWARNFLAGS?=	-Wall -Wnested-externs -Wstrict-prototypes \
-		-Wmissing-prototypes -Wpointer-arith -Winline -Wcast-qual \
+		-Wmissing-prototypes -Wpointer-arith -Wno-inline -Wcast-qual \
 		-Wno-pointer-sign -Wmissing-include-dirs -fdiagnostics-show-option \
 		${CWARNEXTRA}
 #
