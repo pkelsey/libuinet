@@ -1,6 +1,8 @@
 
 SUBDIRS=lib bin
 
+easy_start: config all
+
 config:
 	for d in $(SUBDIRS); do ( cd $$d; $(MAKE) config ) ; done
 
