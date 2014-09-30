@@ -38,7 +38,6 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/errno.h>
-//#include <sys/endian.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 
