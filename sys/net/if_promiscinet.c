@@ -74,7 +74,7 @@ if_promiscinet_add_tag(struct mbuf *m, struct in_l2info *l2i)
 {
 	struct ifl2info *l2info_tag;
 
-	l2info_tag = if_promsicinet_tag_alloc();
+	l2info_tag = if_promiscinet_tag_alloc();
 	if (NULL == l2info_tag) {
 		return (ENOMEM);
 	}
