@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
 #ifdef ENABLE_EXTRACT
 #include <zlib.h>
 #endif
@@ -39,6 +40,8 @@
 #include <netinet/in.h>
 
 #include "uinet_api.h"
+#include "uinet_host_sysctl_api.h"
+#include "uinet_host_sysctl_api_priv.h"
 
 #ifdef ENABLE_EXTRACT
 #include "http_parser.h"
@@ -1250,6 +1253,7 @@ int main (int argc, char **argv)
 	struct uinet_in_addr tmpinaddr;
 	int ifnetmap_count = 0;
 	int ifpcap_count = 0;
+	pthread_t sysctl_thr;
 	struct content_type *contype;
 
 	memset(interfaces, 0, sizeof(interfaces));
@@ -1517,12 +1521,21 @@ int main (int argc, char **argv)
 								    interface_thread_start, &interfaces[i]);
 	}
 
+	error = pthread_create(&sysctl_thr, NULL,
+	    uinet_host_sysctl_listener_thread, NULL);
+	if (error != 0) {
+		printf("Failed to bring up sysctl thread: %d\n", errno);
+	}
+
 	for (i = 0; i < num_interfaces; i++) {
 		if (0 == interfaces[i].thread_create_result)
 			pthread_join(interfaces[i].thread, NULL);
 	}
 
 	uinet_shutdown(0);
+
+	/* XXX only do this if we successfully started the thread! */
+	pthread_join(sysctl_thr, NULL);
 
 	return (0);
 }

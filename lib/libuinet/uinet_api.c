@@ -124,6 +124,47 @@ uinet_finalize_thread(void)
 
 
 int
+uinet_clearifstat(const char *name)
+{
+	struct uinet_config_if *ifcfg;
+	struct ifnet *ifp;
+
+	ifcfg = uinet_iffind_byname(name);
+	if (NULL == ifcfg) {
+		printf("could not find interface %s\n", name);
+		return (EINVAL);
+	}
+
+	ifp = ifnet_byindex_ref(ifcfg->ifindex);
+	if (NULL == ifp) {
+		printf("could not find interface %s by index\n", name);
+		return (EINVAL);
+	}
+
+	ifp->if_data.ifi_ipackets = 0;
+	ifp->if_data.ifi_ierrors = 0;
+	ifp->if_data.ifi_opackets = 0;
+	ifp->if_data.ifi_oerrors = 0;
+	ifp->if_data.ifi_collisions = 0;
+	ifp->if_data.ifi_ibytes = 0;
+	ifp->if_data.ifi_obytes = 0;
+	ifp->if_data.ifi_imcasts = 0;
+	ifp->if_data.ifi_omcasts = 0;
+	ifp->if_data.ifi_iqdrops = 0;
+	ifp->if_data.ifi_noproto = 0;
+	ifp->if_data.ifi_hwassist = 0;
+	ifp->if_data.ifi_epoch = 0;
+	ifp->if_data.ifi_icopies = 0;
+	ifp->if_data.ifi_izcopies = 0;
+	ifp->if_data.ifi_ocopies = 0;
+	ifp->if_data.ifi_ozcopies = 0;
+
+	if_rele(ifp);
+
+	return (0);
+}
+
+int
 uinet_getifstat(const char *name, struct uinet_ifstat *stat)
 {
 	struct uinet_config_if *ifcfg;
@@ -169,6 +210,13 @@ void
 uinet_gettcpstat(struct uinet_tcpstat *stat)
 {
 	*((struct tcpstat *)stat) = tcpstat;
+}
+
+void
+uinet_cleartcpstat(void)
+{
+
+	bzero(&tcpstat, sizeof(tcpstat));
 }
 
 

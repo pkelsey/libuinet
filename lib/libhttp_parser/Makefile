@@ -104,7 +104,7 @@ default: all
 
 all: library package
 
-clean:
+clean maintainer-clean:
 	rm -f *.o *.a tags test test_fast test_g \
 		http_parser.tar libhttp_parser.so* \
 		url_parser url_parser_g parsertrace parsertrace_g

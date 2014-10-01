@@ -575,7 +575,7 @@ tcp_input(struct mbuf *m, int off0)
 	u_char *optp = NULL;
 	int optlen = 0;
 #ifdef INET
-	int len;
+//	int len;
 #endif
 	int tlen = 0, off;
 	int drop_hdrlen;
@@ -686,6 +686,16 @@ tcp_input(struct mbuf *m, int off0)
 		th = (struct tcphdr *)((caddr_t)ip + off0);
 		tlen = ip->ip_len;
 
+		/*
+		 * TCP checksums are disabled for now.
+		 *
+		 * It's pretty stupid, but the netmap interface
+		 * doesn't seem to provide hardware checksums up to
+		 * the userland code and so this kernel code
+		 * recalculates them.  This chews a noticable
+		 * amount of CPU time for large amounts of data.
+		 */
+#if 0
 		if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID) {
 			if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
 				th->th_sum = m->m_pkthdr.csum_data;
@@ -714,6 +724,8 @@ tcp_input(struct mbuf *m, int off0)
 			TCPSTAT_INC(tcps_rcvbadsum);
 			goto drop;
 		}
+#endif
+		th->th_sum = 0;
 		/* Re-initialization for later version check */
 		ip->ip_v = IPVERSION;
 	}

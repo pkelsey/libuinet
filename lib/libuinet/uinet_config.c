@@ -185,6 +185,12 @@ uinet_ifdestroy_internal(struct uinet_config_if *cfg)
 	case UINET_IFTYPE_PCAP:
 		error = if_pcap_detach(cfg);
 		break;
+	case UINET_IFTYPE_BRIDGE:
+		error = if_bridge_detach(cfg);
+		break;
+	case UINET_IFTYPE_SPAN:
+		error = if_span_detach(cfg);
+		break;
 	default:
 		printf("Error detaching interface %s: unknown interface type %d\n", cfg->name, cfg->type);
 		error = ENXIO;

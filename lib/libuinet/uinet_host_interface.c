@@ -490,6 +490,7 @@ int uhi_thread_bound_cpu()
 	int bound_cpu;
 	int i;
 
+	bzero(&cpuset, sizeof(cpuset));
 	pthread_getaffinity_np(pthread_self(), sizeof(cpuset_t), &cpuset);
 
 	/*
@@ -1104,11 +1105,16 @@ uhi_arc4rand(void *ptr, unsigned int len, int reseed)
 {
 
 #if !defined(__APPLE__)
+	int ret;
+
 	(void)reseed;
 
 	/* XXX assuming that we don't have to manually seed this */
 
-	RAND_pseudo_bytes(ptr, len);
+	ret = RAND_pseudo_bytes(ptr, len);
+	if (ret != 1) {
+		printf("%s: didn't return random data!\n", __func__);
+	}
 #else
 	if (reseed)
 		arc4random_stir();
@@ -1121,7 +1127,7 @@ uhi_arc4rand(void *ptr, unsigned int len, int reseed)
 uint32_t
 uhi_arc4random(void)
 {
-        uint32_t ret;
+        uint32_t ret = 0;
 
         uhi_arc4rand(&ret, sizeof ret, 0);
         return ret;

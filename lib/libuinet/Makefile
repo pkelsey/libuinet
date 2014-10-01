@@ -350,8 +350,8 @@ ${OBJS}: %.o: %.c ${IMACROS_FILE}
 .m.h:
 	${AWK} -f $S/tools/makeobjops.awk $< -h
 
-.PHONY: clean
-clean:
+.PHONY: maintainer-clean clean
+maintainer-clean clean:
 	rm -f libuinet.a
 	rm -f ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS} ${PROGRAM} ${IMACROS_FILE}
 	rm -rf ${MACHINE_INCLUDES_ROOT}

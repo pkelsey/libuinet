@@ -25,6 +25,7 @@
 
 #include <assert.h>
 #include <pthread.h>
+#include <pthread_np.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -470,6 +471,13 @@ uinet_host_sysctl_listener_thread(void *arg)
 
 	(void) unlink(path);
 
+	/* Set thread title */
+#if defined(__FreeBSD__)
+	pthread_set_name_np(pthread_self(), "sysctl thread");
+#elif defined(__linux__)
+	pthread_setname_np(pthread_self(), "sysctl thread");
+#endif
+
 	bzero(&sun, sizeof(sun));
 	strcpy(sun.sun_path, path);
 	sun.sun_family = AF_UNIX;
@@ -504,6 +512,7 @@ uinet_host_sysctl_listener_thread(void *arg)
 		int ret;
 		const char *type;
 
+		sl = sizeof(sun_n);
 		ns = accept(s, (struct sockaddr *) &sun_n, &sl);
 		if (ns < 0) {
 			fprintf(stderr, "%s: accept failed: %d\n", __func__, errno);

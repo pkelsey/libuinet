@@ -17,6 +17,7 @@ endif
 
 ifdef PROG_CXX
 PROG=	${PROG_CXX}
+CXX=	c++
 endif
 
 ifndef PROG
@@ -57,7 +58,7 @@ else
 endif
 
 
-clean:
+maintainer-clean clean:
 	@rm -f ${PROG} ${OBJS}
 
 all: ${PROG}

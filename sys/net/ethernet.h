@@ -28,6 +28,16 @@
  */
 #define	ETHER_ALIGN		2	/* driver adjust for IP hdr alignment */
 
+#define	ETHER_ADDR_COPY(dst, src) \
+    do { \
+	    ((char *) dst)[0] = ((char *) src)[0]; \
+	    ((char *) dst)[1] = ((char *) src)[1]; \
+	    ((char *) dst)[2] = ((char *) src)[2]; \
+	    ((char *) dst)[3] = ((char *) src)[3]; \
+	    ((char *) dst)[4] = ((char *) src)[4]; \
+	    ((char *) dst)[5] = ((char *) src)[5]; \
+    } while (0)
+
 /*
  * Compute the maximum frame size based on ethertype (i.e. possible
  * encapsulation) and whether or not an FCS is present.
@@ -41,6 +51,8 @@
  * Ethernet-specific mbuf flags.
  */
 #define	M_HASFCS	M_PROTO5	/* FCS included at end of frame */
+#define	M_BRIDGEIF_DIR_EXT	M_PROTO6 /* Bridge traffic; from external interface */
+#define	M_BRIDGEIF_DIR_INT	M_PROTO7 /* Bridge traffic; from internal interface */
 
 /*
  * Ethernet CRC32 polynomials (big- and little-endian verions).

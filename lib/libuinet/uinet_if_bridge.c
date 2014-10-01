@@ -61,10 +61,12 @@ extern	int (*bridge_output_p)(struct ifnet *, struct mbuf *,
 		struct sockaddr *, struct rtentry *);
 
 struct if_bridge_member;
+struct if_bridge_softc;
 
 struct if_bridge_member {
 	LIST_ENTRY(if_bridge_member) bif_next;
 	struct ifnet *ifp;
+	struct if_bridge_softc *br_softc;
 	int is_inside;
 	int is_outside;
 };
@@ -90,11 +92,12 @@ static struct mbuf *
 if_bridge_input(struct ifnet *ifp, struct mbuf *m)
 {
 	struct if_bridge_softc *sc;
-	struct if_bridge_member *bif;
+	struct if_bridge_member *bif, *bif_m;
 	struct ifnet *bifp;
 	struct mbuf *mc2;
 
-	sc = ifp->if_bridge;
+	bif = ifp->if_bridge;
+	sc = bif->br_softc;
 	bifp = sc->sc_ifp;
 
 //	printf("%s: m=%p: called\n", __func__, m);
@@ -117,6 +120,14 @@ if_bridge_input(struct ifnet *ifp, struct mbuf *m)
 	 * ie, from is_input? send to only is_output.
 	 */
 
+	/* Tag the mbuf with the correct direction information */
+	m->m_flags &= ~(M_BRIDGEIF_DIR_INT | M_BRIDGEIF_DIR_EXT);
+	if (bif->is_inside) {
+		m->m_flags |= M_BRIDGEIF_DIR_INT;
+	} else if (bif->is_outside) {
+		m->m_flags |= M_BRIDGEIF_DIR_EXT;
+	}
+
 	/*
 	 * XXX TODO: don't hold the lock across sending to the two
 	 * (or more) ports - it's highly inefficient and effectively
@@ -124,37 +135,33 @@ if_bridge_input(struct ifnet *ifp, struct mbuf *m)
 	 * LOCK2REF/etc stuff to do this without holding a lock.
 	 */
 	mtx_lock(&sc->sc_mtx);
-	LIST_FOREACH(bif, &sc->sc_iflist, bif_next) {
-		if (bif->ifp == ifp)
+	LIST_FOREACH(bif_m, &sc->sc_iflist, bif_next) {
+		/* Don't send traffic back to the same interface */
+		if (bif_m->ifp == ifp)
 			continue;
+
+		/* Don't send traffic to the same interface type */
+		if (bif_m->is_inside && bif->is_inside)
+			continue;
+		if (bif_m->is_outside && bif->is_outside)
+			continue;
+
 		//mc2 = m_copypacket(m, M_DONTWAIT);
 		mc2 = m_dup(m, M_DONTWAIT);
 		/* XXX count failure */
 		if (mc2 == NULL)
 			continue;
 		/* XXX count failure */
-		(void) bif->ifp->if_transmit(bif->ifp, mc2);
+		(void) bif_m->ifp->if_transmit(bif_m->ifp, mc2);
 	}
 	mtx_unlock(&sc->sc_mtx);
 
-	/* We don't do local processing; just punt to the bridge */
-
+	/* We don't do local processing; just punt to the stack as if_bridge */
 	m->m_pkthdr.rcvif = bifp;
 	(*bifp->if_input)(bifp, m);
+
+	/* We're not passing this up the stack for local processing */
 	return (NULL);
-
-#if 0
-	/* Duplicate; pass up to the stack */
-	mc2 = m_copypacket(m, M_DONTWAIT);
-	/* XXX count failure */
-	if (mc2 != NULL) {
-		mc2->m_pkthdr.rcvif = bifp;
-		(*bifp->if_input)(bifp, mc2);
-	}
-
-	/* Return the original packet for local processing. */
-	return (m);
-#endif
 }
 
 /*
@@ -284,8 +291,12 @@ if_bridge_addm(struct if_bridge_softc *sc, const char *ifname, int isin)
 
 	/* Add to list; link back from the ifnet to the parent bridge */
 	bif->ifp = nifp;
+	/* And a link back to the bridge softc */
+	bif->br_softc = sc;
+	/* Add to the member list */
 	LIST_INSERT_HEAD(&sc->sc_iflist, bif, bif_next);
-	nifp->if_bridge = sc;
+
+	nifp->if_bridge = bif;
 
 	mtx_unlock(&sc->sc_mtx);
 

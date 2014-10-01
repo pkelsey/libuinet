@@ -9,3 +9,6 @@ LDADD+=		-lcrypto
 else
 LDADD+=		-lssl
 endif
+ifeq "${OSNAME}" "FreeBSD"
+LDADD+=		-lcrypto
+endif

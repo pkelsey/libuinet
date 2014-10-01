@@ -66,4 +66,3 @@ uinet_config_blackhole(uinet_blackhole_t action)
 				    &val, sizeof(int), NULL, 0);
 	return (error);
 }
-

@@ -424,6 +424,8 @@ struct uinet_in_l2tagstack {
 
 
 #define UINET_INL2I_TAG_ANY		0x01
+#define	UINET_INL2I_TAG_SRCIF_EXT	0x02
+#define	UINET_INL2I_TAG_SRCIF_INT	0x04
 
 struct uinet_in_l2info {
 	uint8_t inl2i_local_addr[UINET_IN_L2INFO_ADDR_MAX];

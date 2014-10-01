@@ -1,4 +1,5 @@
 TOPDIR?=${CURDIR}/../..
+include ${TOPDIR}/cflags.mk
 
 PROG=vmstat
 

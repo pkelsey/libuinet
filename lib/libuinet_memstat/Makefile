@@ -15,7 +15,7 @@ all: libuinet_memstat.a
 libuinet_memstat.a: $(OBJS)
 	$(AR) -c -r libuinet_memstat.a $(OBJS)
 
-clean:
+clean maintainer-clean:
 	$(RM) $(OBJS) libuinet_memstat.a
 
 install:

@@ -14,7 +14,7 @@ all: libuinetnv.a
 libuinetnv.a: $(OBJS)
 	$(AR) -c -r libuinetnv.a $(OBJS)
 
-clean:
+clean maintainer-clean:
 	$(RM) $(OBJS) libuinetnv.a
 
 install:

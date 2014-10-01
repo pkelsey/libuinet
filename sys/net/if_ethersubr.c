@@ -362,10 +362,10 @@ ether_output(struct ifnet *ifp, struct mbuf *m,
 		d = mtod(m, uint8_t *);
 		eh = (struct ether_header *)d;
 		
-		(void)memcpy(d, l2i->inl2i_foreign_addr, ETHER_ADDR_LEN);
+		ETHER_ADDR_COPY(d, l2i->inl2i_foreign_addr);
 		d += ETHER_ADDR_LEN;
 
-		(void)memcpy(d, l2i->inl2i_local_addr, ETHER_ADDR_LEN);
+		ETHER_ADDR_COPY(d, l2i->inl2i_local_addr);
 		d += ETHER_ADDR_LEN;
 
 		if (num_tag_bytes) {
@@ -734,8 +734,40 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		}
 	}
 
+	/*
+	 * This code is much earlier than previous code - we want
+	 * a VLAN bridge that actually just copies the mbufs before
+	 * VLAN de-encapsulation.
+	 *
+	 * It also needs to be done before the promiscinet information
+	 * is added via mbuf tags or those tags get copied into
+	 * bridge/span interface mbufs during m_copypacket() - and
+	 * that's a lot of wasted time.
+	 */
+
+	/*
+	 * Allow if_bridge(4) to claim this frame.
+	 * The BRIDGE_INPUT() macro will update ifp if the bridge changed it
+	 * and the frame should be delivered locally.
+	 */
+	if (ifp->if_bridge != NULL) {
+		m->m_flags &= ~M_PROMISC;
+		BRIDGE_INPUT(ifp, m);
+		if (m == NULL) {
+			CURVNET_RESTORE();
+			return;
+		}
+	}
 
 #ifdef PROMISCUOUS_INET
+	/*
+	 * Span mode debug - we shouldn't see PROMISCINET if if_bridge
+	 * is set.
+	 */
+	if ((ifp->if_flags & IFF_PROMISCINET) && (ifp->if_bridge != NULL)) {
+		printf("wtf?\n");
+	}
+
 	if (ifp->if_flags & IFF_PROMISCINET) {
 		struct ifl2info *l2info_tag;
 		struct in_l2info *l2info;
@@ -757,9 +789,18 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		l2info = &l2info_tag->ifl2i_info;
 		l2ts = &l2info->inl2i_tagstack;
 
-		memcpy(l2info->inl2i_local_addr, eh->ether_dhost, ETHER_ADDR_LEN);
-		memcpy(l2info->inl2i_foreign_addr, eh->ether_shost, ETHER_ADDR_LEN);
+		ETHER_ADDR_COPY(l2info->inl2i_local_addr, eh->ether_dhost);
+		ETHER_ADDR_COPY(l2info->inl2i_foreign_addr, eh->ether_shost);
 		l2ts->inl2t_cnt = 0;
+		l2info->inl2i_flags = 0;
+
+		/*
+		 * Handle the bridge mbuf flags to set interface directionality.
+		 */
+		if (m->m_flags & M_BRIDGEIF_DIR_INT)
+			l2info->inl2i_flags |= INL2I_TAG_SRCIF_INT;
+		else if (m->m_flags & M_BRIDGEIF_DIR_EXT)
+			l2info->inl2i_flags |= INL2I_TAG_SRCIF_EXT;
 
 		/* 
 		 * If the interface is in IFF_PROMISCINET mode and the hardware
@@ -899,6 +940,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 		}
 	}
 
+#if 0
 	/*
 	 * Allow if_bridge(4) to claim this frame.
 	 * The BRIDGE_INPUT() macro will update ifp if the bridge changed it
@@ -912,6 +954,8 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 			return;
 		}
 	}
+#ne
+#endif
 
 #if defined(INET) || defined(INET6)
 	/*

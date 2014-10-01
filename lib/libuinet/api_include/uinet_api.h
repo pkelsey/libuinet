@@ -37,10 +37,12 @@ extern "C" {
 #include "uinet_config.h"
 #include "uinet_queue.h"
 
+int   uinet_clearifstat(const char *name);
 void  uinet_finalize_thread(void);
 int   uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
 int   uinet_getifstat(const char *name, struct uinet_ifstat *stat);
 void  uinet_gettcpstat(struct uinet_tcpstat *stat);
+void  uinet_cleartcpstat(void);
 char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
 const char *uinet_inet_ntop(int af, const void *src, char *dst, unsigned int size);
 int   uinet_inet_pton(int af, const char *src, void *dst);
