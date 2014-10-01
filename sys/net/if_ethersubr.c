@@ -759,6 +759,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 
 		memcpy(l2info->inl2i_local_addr, eh->ether_dhost, ETHER_ADDR_LEN);
 		memcpy(l2info->inl2i_foreign_addr, eh->ether_shost, ETHER_ADDR_LEN);
+		l2info->inl2i_flags = 0;
 		l2ts->inl2t_cnt = 0;
 
 		/* 
