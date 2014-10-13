@@ -30,7 +30,7 @@ struct if_netmap_host_context;
 
 struct if_netmap_host_context *if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigned int qno);
 void if_netmap_deregister_if(struct if_netmap_host_context *ctx);
-int if_netmap_rxsync(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur, const uint32_t *reserved);
+void if_netmap_rxupdate(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur, const uint32_t *reserved);
 uint32_t if_netmap_rxavail(struct if_netmap_host_context *ctx);
 uint32_t if_netmap_rxcur(struct if_netmap_host_context *ctx);
 uint32_t if_netmap_rxreserved(struct if_netmap_host_context *ctx);

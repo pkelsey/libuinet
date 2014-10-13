@@ -179,8 +179,8 @@ if_netmap_deregister_if(struct if_netmap_host_context *ctx)
 }
 
 
-int
-if_netmap_rxsync(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur, const uint32_t *reserved)
+void
+if_netmap_rxupdate(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur, const uint32_t *reserved)
 {
 	struct netmap_ring *rxr = ctx->hw_rx_ring;
 
@@ -196,8 +196,6 @@ if_netmap_rxsync(struct if_netmap_host_context *ctx, const uint32_t *avail, cons
 			rxr->head += rxr->num_slots;
 	}
 #endif
-
-	return (ioctl(ctx->fd, NIOCRXSYNC, NULL));
 }
 
 
@@ -285,7 +283,7 @@ if_netmap_txsync(struct if_netmap_host_context *ctx, const uint32_t *avail, cons
 		txr->head = txr->cur = *cur;
 #endif
 
-	return (ioctl(ctx->fd, NIOCTXSYNC, NULL));
+	return (ioctl(ctx->fd, NIOCTXSYNC, NULL) == -1 ? errno : 0);
 }
 
 

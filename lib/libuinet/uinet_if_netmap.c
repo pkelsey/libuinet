@@ -551,16 +551,10 @@ if_netmap_send(void *arg)
 	if (sc->cfg->cpu >= 0)
 		sched_bind(sc->tx_thread.thr, sc->cfg->cpu);
 
-	rv = if_netmap_txsync(sc->nm_host_ctx, NULL, NULL);
-	if (rv == -1) {
-		printf("could not sync tx descriptors before transmit\n");
-	}
-
-	avail = if_netmap_txavail(sc->nm_host_ctx);
-
 	sc->tx_thread.last_stop_check = ticks;
 	done = 0;
 	pkts_sent = 0;
+	avail = 0;
 	do {
 		mtx_lock(&sc->tx_lock);
 		sc->tx_pkts_to_send -= pkts_sent;
@@ -615,13 +609,13 @@ if_netmap_send(void *arg)
 				IFQ_DRV_DEQUEUE(&ifp->if_snd, m);
 			}
 
-			rv = if_netmap_txsync(sc->nm_host_ctx, &avail, &cur);
-			if (rv == -1) {
-				printf("could not sync tx descriptors after transmit\n");
-			}
-			avail = if_netmap_txavail(sc->nm_host_ctx);
 		}
 
+		while (EBUSY == (rv = if_netmap_txsync(sc->nm_host_ctx, &avail, &cur)));
+		if (rv != 0) {
+			printf("could not sync tx descriptors after transmit\n");
+		}
+		avail = if_netmap_txavail(sc->nm_host_ctx);
 	} while (!done);
 
 	if_netmap_stoppable_thread_done(&sc->tx_thread);
@@ -755,12 +749,8 @@ if_netmap_receive(void *arg)
 	if (sc->cfg->cpu >= 0)
 		sched_bind(sc->rx_thread.thr, sc->cfg->cpu);
 
-	rv = if_netmap_rxsync(sc->nm_host_ctx, NULL, NULL, NULL);
-	if (rv == -1)
-		printf("could not sync rx descriptors before receive loop\n");
-
-	reserved = if_netmap_rxreserved(sc->nm_host_ctx);
-	sc->hw_rx_rsvd_begin = if_netmap_rxcur(sc->nm_host_ctx);
+	reserved = 0;
+	sc->hw_rx_rsvd_begin = 0;
 
 	sc->rx_thread.last_stop_check = ticks;
 	done = 0;
@@ -847,17 +837,14 @@ if_netmap_receive(void *arg)
 			}
 		}
 
-		avail -= n;
+		avail = 0;
 		reserved += new_reserved;
 
 		/* Return any netmap buffers freed by the stack to the ring */
 		returned = if_netmap_sweep_trail(sc);
 		reserved -= returned;
 
-		rv = if_netmap_rxsync(sc->nm_host_ctx, &avail, &cur, &reserved);
-		if (rv == -1)
-			printf("could not sync rx descriptors after receive\n");
-
+		if_netmap_rxupdate(sc->nm_host_ctx, &avail, &cur, &reserved);
 	}
 
 	if_netmap_stoppable_thread_done(&sc->rx_thread);
