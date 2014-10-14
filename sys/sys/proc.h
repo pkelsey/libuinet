@@ -196,6 +196,14 @@ struct rusage_ext {
 	uint64_t	rux_tu;         /* (c) Previous total time in usec. */
 };
 
+#ifdef UINET
+struct thread_stop_req {
+	struct mtx	tsr_lock;
+	struct cv	tsr_cv;
+	int		tsr_ack;
+};
+#endif
+
 /*
  * Kernel runnable context (thread).
  * This is what is put to sleep and reactivated.
@@ -218,6 +226,10 @@ struct thread {
 	sigqueue_t	td_sigqueue;	/* (c) Sigs arrived, not delivered. */
 #define	td_siglist	td_sigqueue.sq_signals
 	u_char		td_lend_user_pri; /* (t) Lend user pri. */
+#ifdef UINET
+	struct thread_stop_req *td_stop_req; /* (t) Stop request */
+	int		td_last_stop_check; /* (k) To rate limit stop-checking */
+#endif
 
 /* Cleared during fork1() */
 #define	td_startzero td_flags

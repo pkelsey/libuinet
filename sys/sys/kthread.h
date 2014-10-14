@@ -75,5 +75,13 @@ void	kthread_start(const void *);
 int	kthread_suspend(struct thread *, int);
 void	kthread_suspend_check(void);
 
+#ifdef UINET
+struct thread_stop_req;
+
+void	kthread_stop(struct thread *td, struct thread_stop_req *tsr);
+void	kthread_stop_wait(struct thread_stop_req *tsr);
+int	kthread_stop_check(void);
+void	kthread_stop_ack(void);
+#endif
 
 #endif /* !_SYS_KTHREAD_H_ */

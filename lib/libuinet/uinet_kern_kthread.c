@@ -32,9 +32,10 @@
 
 #include <sys/param.h>
 #include <sys/types.h>
-#include <sys/kthread.h>
+#include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/proc.h>
+#include <sys/kthread.h>
 #include <sys/systm.h>
 #include <sys/lock.h>
 #include <sys/mutex.h>
@@ -90,6 +91,8 @@ uinet_thread_alloc(struct proc *p)
 	td->td_proc = p;
 	td->td_pflags |= TDP_KTHREAD;
 	td->td_oncpu = 0;
+	td->td_stop_req = NULL;
+	td->td_last_stop_check = ticks;
 
 	utd->td = td;
 
@@ -264,4 +267,60 @@ uinet_init_thread0(void)
 	uhi_tls_set(kthread_tls_key, &uinet_thread0);
 }
 
+
+void
+kthread_stop(struct thread *td, struct thread_stop_req *tsr)
+{
+	mtx_init(&tsr->tsr_lock, "tsr_lock", NULL, MTX_DEF);
+	cv_init(&tsr->tsr_cv, "tsr_cv");
+	tsr->tsr_ack = 0;
+
+	mtx_lock(td->td_lock);
+	td->td_stop_req = tsr;
+	mtx_unlock(td->td_lock);
+}
+
+
+void
+kthread_stop_wait(struct thread_stop_req *tsr)
+{
+	mtx_lock(&tsr->tsr_lock);
+	while (!tsr->tsr_ack)
+		cv_wait(&tsr->tsr_cv, &tsr->tsr_lock);
+	mtx_unlock(&tsr->tsr_lock);
+
+	cv_destroy(&tsr->tsr_cv);
+	mtx_destroy(&tsr->tsr_lock);
+}
+
+
+int
+kthread_stop_check(void)
+{
+	int stop = 0;
+	struct thread *td = curthread;
+
+	if (ticks - td->td_last_stop_check >= hz) {
+		td->td_last_stop_check = ticks;
+		mtx_lock(td->td_lock);
+		if (td->td_stop_req)
+			stop = 1;
+		mtx_unlock(td->td_lock);
+	}
+
+	return (stop);
+}
+
+
+void
+kthread_stop_ack(void)
+{
+	struct thread *td = curthread;
+	struct thread_stop_req *tsr = td->td_stop_req;
+
+	mtx_lock(&tsr->tsr_lock);
+	tsr->tsr_ack = 1;
+	cv_signal(&tsr->tsr_cv);
+	mtx_unlock(&tsr->tsr_lock);
+}
 
