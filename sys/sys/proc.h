@@ -229,6 +229,7 @@ struct thread {
 #ifdef UINET
 	struct thread_stop_req *td_stop_req; /* (t) Stop request */
 	int		td_last_stop_check; /* (k) To rate limit stop-checking */
+	int		td_stop_check_ticks; /* (k) Min. stop check interval */
 #endif
 
 /* Cleared during fork1() */

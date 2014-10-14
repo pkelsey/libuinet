@@ -93,6 +93,7 @@ uinet_thread_alloc(struct proc *p)
 	td->td_oncpu = 0;
 	td->td_stop_req = NULL;
 	td->td_last_stop_check = ticks;
+	td->td_stop_check_ticks = hz;
 
 	utd->td = td;
 
@@ -300,7 +301,7 @@ kthread_stop_check(void)
 	int stop = 0;
 	struct thread *td = curthread;
 
-	if (ticks - td->td_last_stop_check >= hz) {
+	if (ticks - td->td_last_stop_check >= td->td_stop_check_ticks) {
 		td->td_last_stop_check = ticks;
 		mtx_lock(td->td_lock);
 		if (td->td_stop_req)
