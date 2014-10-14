@@ -92,6 +92,7 @@
 #define timermax ((loop)->timermax)
 #define timers ((loop)->timers)
 #define uinet_async_w ((loop)->uinet_async_w)
+#define uinet_in_batch ((loop)->uinet_in_batch)
 #define uinet_pend_head ((loop)->uinet_pend_head)
 #define uinet_pend_lock ((loop)->uinet_pend_lock)
 #define uinet_prepare_w ((loop)->uinet_prepare_w)
@@ -197,6 +198,7 @@
 #undef timermax
 #undef timers
 #undef uinet_async_w
+#undef uinet_in_batch
 #undef uinet_pend_head
 #undef uinet_pend_lock
 #undef uinet_prepare_w

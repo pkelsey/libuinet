@@ -126,6 +126,7 @@ struct interface_config {
 	uint64_t num_sockets;
 	uint64_t max_accept_batch;
 	int stats;
+	uinet_ifcookie_t cookie;
 };
 
 struct server_config {
@@ -1453,7 +1454,7 @@ int main (int argc, char **argv)
 
 		error = uinet_ifcreate(interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
 				       interfaces[i].promisc ? interfaces[i].cdom : 0,
-				       0, NULL);
+				       0, &interfaces[i].cookie);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", interfaces[i].alias, error);
 		}
@@ -1463,7 +1464,8 @@ int main (int argc, char **argv)
 			printf("Failed to create event loop interface %s\n", interfaces[i].alias);
 			break;
 		}
-		
+
+		ev_loop_attach_uinet_interface(interfaces[i].loop, interfaces[i].cookie);
 	}
 	
 		

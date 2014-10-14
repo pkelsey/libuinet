@@ -46,6 +46,8 @@ struct uinet_config_if {
 	unsigned int ifindex;
 	void *ifdata;			/* softc */
 	void *ifp;			/* ifnet */
+	void (*batch_event_handler)(void *arg, int event);
+	void *batch_event_handler_arg;
 };
 
 

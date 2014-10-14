@@ -866,6 +866,7 @@ EV_API_DECL struct ev_uinet_ctx *ev_uinet_attach  (struct uinet_socket *so) EV_T
 EV_API_DECL void ev_uinet_detach   (struct ev_uinet_ctx *ctx) EV_THROW;
 EV_API_DECL void ev_uinet_start    (EV_P_ ev_uinet *w) EV_THROW;
 EV_API_DECL void ev_uinet_stop     (EV_P_ ev_uinet *w) EV_THROW;
+EV_API_DECL void ev_loop_attach_uinet_interface (EV_P_ uinet_ifcookie_t cookie) EV_THROW;
 # endif
 
 #if EV_COMPAT3

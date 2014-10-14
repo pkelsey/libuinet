@@ -209,6 +209,7 @@ VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_pend_head)
 VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_prev_pend_head)
 VARx(ev_async, uinet_async_w)
 VARx(ev_prepare, uinet_prepare_w)
+VARx(int, uinet_in_batch)
 #endif
 
 #undef VARx

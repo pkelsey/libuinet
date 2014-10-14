@@ -10,6 +10,7 @@ uinet_ifcreate
 uinet_ifdestroy
 uinet_ifdestroy_byname
 uinet_ifgenericname
+uinet_if_set_batch_event_handler
 uinet_inet_ntoa
 uinet_inet_ntop
 uinet_inet_pton

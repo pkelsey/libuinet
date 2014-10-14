@@ -708,6 +708,8 @@ if_netmap_receive(void *arg)
 
 		cur = if_netmap_rxcur(sc->nm_host_ctx);
 		new_reserved = 0;
+		if (sc->cfg->batch_event_handler)
+			sc->cfg->batch_event_handler(sc->cfg->batch_event_handler_arg, UINET_BATCH_EVENT_START);
 		for (n = 0; n < avail; n++) {
 			slotbuf = if_netmap_rxslot(sc->nm_host_ctx, &cur, &pktlen, &slotindex);
 
@@ -767,6 +769,9 @@ if_netmap_receive(void *arg)
 				ifp->if_iqdrops++;				
 			}
 		}
+
+		if (sc->cfg->batch_event_handler)
+			sc->cfg->batch_event_handler(sc->cfg->batch_event_handler_arg, UINET_BATCH_EVENT_FINISH);
 
 		avail = 0;
 		reserved += new_reserved;

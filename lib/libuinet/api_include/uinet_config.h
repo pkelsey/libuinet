@@ -152,6 +152,13 @@ const char *uinet_ifgenericname(uinet_ifcookie_t cookie);
  */
 int uinet_config_blackhole(uinet_blackhole_t action);
 
+
+#define UINET_BATCH_EVENT_START  0
+#define UINET_BATCH_EVENT_FINISH 1
+int uinet_if_set_batch_event_handler(uinet_ifcookie_t cookie,
+				     void (*handler)(void *arg, int event),
+				     void *arg);
+
 #ifdef __cplusplus
 }
 #endif
