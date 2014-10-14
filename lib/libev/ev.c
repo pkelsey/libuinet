@@ -2423,10 +2423,18 @@ uinet_batch_event_handler (void *arg, int event)
   switch (event)
     {
     case UINET_BATCH_EVENT_START:
-      uinet_in_batch = 1;
+      uinet_in_batch++;
       break;
     case UINET_BATCH_EVENT_FINISH:
-      uinet_in_batch = 0;
+      uinet_in_batch--;
+      UINET_ASSERT("libev: UINET_BATCH_EVENT_FINISH without corresponding UINET_BATCH_EVENT_START",
+		   uinet_in_batch >= 0);
+
+      /*
+       * Always notify the event loop at the end of every batch so
+       * continuously overlapping batches from multiple interfaces don't
+       * result in event starvation.
+       */
       ev_async_send (EV_A_ &uinet_async_w);
       break;
     }
