@@ -1573,9 +1573,7 @@ uinet_instance_default(void)
 void
 uinet_instance_shutdown(uinet_instance_t uinst)
 {
-#ifdef VIMAGE
 	uinet_ifdestroy_all(uinst);
-#endif
 }
 
 

@@ -245,13 +245,14 @@ shutdown_helper(void *arg)
 						printf("Acquired vnet list lock\n");
 					if (!have_lock)
 						printf("Proceeding without vnet list lock\n");
+#ifdef VIMAGE
 					VNET_FOREACH(vnet_iter) {
 						uinst = vnet_iter->vnet_uinet;
-						if (uinst == uinet_instance_default())
-							uinet_instance_shutdown(uinst);
-						else
-							uinet_instance_destroy(uinst);
+						uinet_instance_shutdown(uinst);
 					}
+#else
+					uinet_instance_shutdown(uinet_instance_default());
+#endif
 					if (have_lock)
 						VNET_LIST_RUNLOCK();
 			
