@@ -44,7 +44,7 @@
 
 #include <machine/atomic.h>
 
-#include "uinet_config_internal.h"
+#include "uinet_internal.h"
 #include "uinet_host_interface.h"
 #include "uinet_if_netmap.h"
 #include "uinet_if_netmap_host.h"
@@ -101,7 +101,7 @@ struct if_netmap_bufinfo_pool {
 
 struct if_netmap_softc {
 	struct ifnet *ifp;
-	const struct uinet_config_if *cfg;
+	const struct uinet_if *uif;
 	uint8_t addr[ETHER_ADDR_LEN];
 	int isvale;
 	int fd;
@@ -252,7 +252,7 @@ if_netmap_bufinfo_free(struct if_netmap_bufinfo_pool *p, struct if_netmap_bufinf
 static int
 if_netmap_process_configstr(struct if_netmap_softc *sc)
 {
-	char *configstr = sc->cfg->configstr;
+	char *configstr = sc->uif->configstr;
 	int error = 0;
 	char *last_colon;
 	char *p;
@@ -316,7 +316,7 @@ out:
 
 
 int
-if_netmap_attach(struct uinet_config_if *cfg)
+if_netmap_attach(struct uinet_if *uif)
 {
 	struct if_netmap_softc *sc = NULL;
 	int fd = -1;
@@ -325,14 +325,14 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	uint32_t slotindex, curslotindex;
 	uint32_t bufindex, unused;
 	
-	if (NULL == cfg->configstr) {
+	if (NULL == uif->configstr) {
 		error = EINVAL;
 		goto fail;
 	}
 
-	printf("configstr is %s\n", cfg->configstr);
+	printf("configstr is %s\n", uif->configstr);
 
-	snprintf(cfg->name, sizeof(cfg->name), "netmap%u", interface_count);
+	snprintf(uif->name, sizeof(uif->name), "netmap%u", interface_count);
 	interface_count++;
 
 	sc = malloc(sizeof(struct if_netmap_softc), M_DEVBUF, M_WAITOK);
@@ -343,7 +343,7 @@ if_netmap_attach(struct uinet_config_if *cfg)
 	}
 	memset(sc, 0, sizeof(struct if_netmap_softc));
 
-	sc->cfg = cfg;
+	sc->uif = uif;
 
 	error = if_netmap_process_configstr(sc);
 	if (0 != error) {
@@ -416,9 +416,9 @@ if_netmap_attach(struct uinet_config_if *cfg)
 		goto fail;
 	}
 
-	cfg->ifindex = sc->ifp->if_index;
-	cfg->ifdata = sc;
-	cfg->ifp = sc->ifp;
+	uif->ifindex = sc->ifp->if_index;
+	uif->ifdata = sc;
+	uif->ifp = sc->ifp;
 
 	return (0);
 
@@ -483,8 +483,8 @@ if_netmap_send(void *arg)
 	int pkts_sent;
 	int poll_wait_ms;
 
-	if (sc->cfg->cpu >= 0)
-		sched_bind(sc->tx_thread, sc->cfg->cpu);
+	if (sc->uif->cpu >= 0)
+		sched_bind(sc->tx_thread, sc->uif->cpu);
 
 	done = 0;
 	pkts_sent = 0;
@@ -681,8 +681,8 @@ if_netmap_receive(void *arg)
 	sc = (struct if_netmap_softc *)arg;
 	ifp = sc->ifp;
 
-	if (sc->cfg->cpu >= 0)
-		sched_bind(sc->rx_thread, sc->cfg->cpu);
+	if (sc->uif->cpu >= 0)
+		sched_bind(sc->rx_thread, sc->uif->cpu);
 
 	reserved = 0;
 	sc->hw_rx_rsvd_begin = 0;
@@ -708,8 +708,8 @@ if_netmap_receive(void *arg)
 
 		cur = if_netmap_rxcur(sc->nm_host_ctx);
 		new_reserved = 0;
-		if (sc->cfg->batch_event_handler)
-			sc->cfg->batch_event_handler(sc->cfg->batch_event_handler_arg, UINET_BATCH_EVENT_START);
+		if (sc->uif->batch_event_handler)
+			sc->uif->batch_event_handler(sc->uif->batch_event_handler_arg, UINET_BATCH_EVENT_START);
 		for (n = 0; n < avail; n++) {
 			slotbuf = if_netmap_rxslot(sc->nm_host_ctx, &cur, &pktlen, &slotindex);
 
@@ -770,8 +770,8 @@ if_netmap_receive(void *arg)
 			}
 		}
 
-		if (sc->cfg->batch_event_handler)
-			sc->cfg->batch_event_handler(sc->cfg->batch_event_handler_arg, UINET_BATCH_EVENT_FINISH);
+		if (sc->uif->batch_event_handler)
+			sc->uif->batch_event_handler(sc->uif->batch_event_handler_arg, UINET_BATCH_EVENT_FINISH);
 
 		avail = 0;
 		reserved += new_reserved;
@@ -797,7 +797,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	ifp->if_init =  if_netmap_init;
 	ifp->if_softc = sc;
 
-	if_initname(ifp, sc->cfg->name, IF_DUNIT_NONE);
+	if_initname(ifp, sc->uif->name, IF_DUNIT_NONE);
 	ifp->if_flags = IFF_BROADCAST | IFF_SIMPLEX | IFF_MULTICAST;
 	ifp->if_ioctl = if_netmap_ioctl;
 	ifp->if_start = if_netmap_start;
@@ -808,7 +808,7 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 
 	IFQ_SET_READY(&ifp->if_snd);
 
-	ifp->if_fib = sc->cfg->cdom;
+	ifp->if_fib = sc->uif->cdom;
 
 	ether_ifattach(ifp, sc->addr);
 	ifp->if_capabilities = ifp->if_capenable = IFCAP_HWSTATS;
@@ -837,9 +837,9 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 
 
 int
-if_netmap_detach(struct uinet_config_if *cfg)
+if_netmap_detach(struct uinet_if *uif)
 {
-	struct if_netmap_softc *sc = cfg->ifdata;
+	struct if_netmap_softc *sc = uif->ifdata;
 	int i, j;
 	uint32_t slotindex;
 	uint32_t unused;
@@ -849,14 +849,14 @@ if_netmap_detach(struct uinet_config_if *cfg)
 	struct thread_stop_req tx_tsr;
 
 	if (sc) {
-		printf("%s (%s): Stopping rx thread\n", cfg->name, cfg->alias[0] != '\0' ? cfg->alias : "");
+		printf("%s (%s): Stopping rx thread\n", uif->name, uif->alias[0] != '\0' ? uif->alias : "");
 		kthread_stop(sc->rx_thread, &rx_tsr);
-		printf("%s (%s): Stopping tx thread\n", cfg->name, cfg->alias[0] != '\0' ? cfg->alias : "");
+		printf("%s (%s): Stopping tx thread\n", uif->name, uif->alias[0] != '\0' ? uif->alias : "");
 		kthread_stop(sc->tx_thread, &tx_tsr);
 
 		kthread_stop_wait(&rx_tsr);
 		kthread_stop_wait(&tx_tsr);
-		printf("%s (%s): Interface threads stopped\n", cfg->name, cfg->alias[0] != '\0' ? cfg->alias : "");
+		printf("%s (%s): Interface threads stopped\n", uif->name, uif->alias[0] != '\0' ? uif->alias : "");
 
 		if (sc->nm_buffer_indices) {
 			/*

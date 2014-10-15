@@ -27,11 +27,10 @@
 #include <sys/param.h>
 #include <sys/sysctl.h>
 
-#include "uinet_config.h"
-#include "uinet_config_internal.h"
+#include "uinet_internal.h"
 
 int
-uinet_config_blackhole(uinet_blackhole_t action)
+uinet_config_blackhole(uinet_instance_t uinst, uinet_blackhole_t action)
 {
 	int val;
 	char *name;
@@ -62,8 +61,10 @@ uinet_config_blackhole(uinet_blackhole_t action)
 		return (EINVAL);
 	}
 
+	CURVNET_SET(uinst->ui_vnet);
 	error = kernel_sysctlbyname(curthread, name, NULL, NULL,
 				    &val, sizeof(int), NULL, 0);
+	CURVNET_RESTORE();
 	return (error);
 }
 

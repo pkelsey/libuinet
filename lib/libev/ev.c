@@ -2442,7 +2442,7 @@ uinet_batch_event_handler (void *arg, int event)
 }
 
 void
-ev_loop_attach_uinet_interface (EV_P_ uinet_ifcookie_t cookie) EV_THROW
+ev_loop_attach_uinet_interface (EV_P_ uinet_if_t uif) EV_THROW
 {
 #if EV_MULTIPLICITY
   void *arg = EV_A;
@@ -2450,7 +2450,7 @@ ev_loop_attach_uinet_interface (EV_P_ uinet_ifcookie_t cookie) EV_THROW
   void *arg = NULL;
 #endif
 
-  uinet_if_set_batch_event_handler(cookie, uinet_batch_event_handler, arg);
+  uinet_if_set_batch_event_handler(uif, uinet_batch_event_handler, arg);
 }
 
 inline_size void

@@ -545,7 +545,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 		 * table lock when processing the syn filter queue in the
 		 * event loop.
 		 */
-		error = uinet_socreate(UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
+		error = uinet_socreate(uinet_instance_default(), UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
 		if (0 != error) {
 			printf("Outbound socket creation failed (%d)\n", error);
 			goto err;
@@ -775,7 +775,7 @@ create_proxy(struct ev_loop *loop, unsigned int client_fib, unsigned int server_
 	int error;
 	int async_watcher_started = 0;
 
-	error = uinet_socreate(UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
+	error = uinet_socreate(uinet_instance_default(), UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
 	if (0 != error) {
 		printf("Listen socket creation failed (%d)\n", error);
 		goto fail;
@@ -937,15 +937,15 @@ int main (int argc, char **argv)
 		return (1);
 	}
 	
-	uinet_init(1, 128*1024, 0);
+	uinet_init(1, 128*1024, NULL);
 	uinet_install_sighandlers();
 
 	for (i = 0; i < num_ifs; i++) {
-		error = uinet_ifcreate(UINET_IFTYPE_NETMAP, ifnames[i], ifnames[i], i + 1, 0, NULL);
+		error = uinet_ifcreate(uinet_instance_default(), UINET_IFTYPE_NETMAP, ifnames[i], ifnames[i], i + 1, 0, NULL);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", ifnames[i], error);
 		} else {
-			error = uinet_interface_up(ifnames[i], 1, 1);
+			error = uinet_interface_up(uinet_instance_default(), ifnames[i], 1, 1);
 			if (0 != error) {
 				printf("Failed to bring up interface %s (%d)\n", ifnames[i], error);
 			}

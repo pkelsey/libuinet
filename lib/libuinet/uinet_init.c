@@ -45,8 +45,7 @@
 #include <vm/uma.h>
 #include <vm/uma_int.h>
 
-#include "uinet_api.h"
-#include "uinet_config_internal.h"
+#include "uinet_internal.h"
 #include "uinet_host_interface.h"
 
 
@@ -71,9 +70,10 @@ pthread_cond_t init_cond;
 static struct thread *shutdown_helper_thread;
 static struct thread *at_least_one_sighandling_thread;
 static struct uhi_msg shutdown_helper_msg;
+struct uinet_instance uinst0;
 
 int
-uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
+uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_cfg *inst_cfg)
 {
 	struct thread *td;
 	char tmpbuf[32];
@@ -156,23 +156,7 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, unsigned int loopback)
 	 */
 	sleep(1);
 
-	/*
-	 * Don't respond with a reset to TCP segments that the stack will
-	 * not claim nor with an ICMP port unreachable message to UDP
-	 * datagrams that the stack will not claim.
-	 */
-	uinet_config_blackhole(UINET_BLACKHOLE_TCP_ALL);
-	uinet_config_blackhole(UINET_BLACKHOLE_UDP_ALL);
-
-	if (loopback) {
-		int error;
-
-		uinet_interface_up("lo0", 0, 0);
-
-		if (0 != (error = uinet_interface_add_alias("lo0", "127.0.0.1", "0.0.0.0", "255.0.0.0"))) {
-			printf("Loopback alias add failed %d\n", error);
-		}
-	}
+	uinet_instance_init(&uinst0, vnet0, inst_cfg);
 
 	if (uhi_msg_init(&shutdown_helper_msg, 1, 0) != 0)
 		printf("Failed to init shutdown helper message - there will be no shutdown helper thread\n");
@@ -214,6 +198,10 @@ shutdown_helper(void *arg)
 {
 	struct uhi_msg *msg = arg;
 	uint8_t signo;
+	int lock_attempts;
+	int have_lock;
+	VNET_ITERATOR_DECL(vnet_iter);
+	struct uinet_instance *uinst;
 	int shutdown_complete = 0;
 
 	if (msg) {
@@ -237,8 +225,36 @@ shutdown_helper(void *arg)
 						       signo);
 					printf("\n");
 				
-					printf("Shutting down interfaces...\n");
-					uinet_ifdestroy_all();
+					printf("Shutting down all uinet instances...\n");
+					/*
+					 * We may be shutting down as a
+					 * result of a signal occurring
+					 * while another thread is holding
+					 * the vnet list lock, so attempt to
+					 * acquire the lock in a way that
+					 * will avoid getting stuck.
+					 */ 
+					lock_attempts = 0;
+					have_lock = 0;
+					while ((lock_attempts < 5) && !(have_lock = VNET_LIST_TRY_RLOCK())) {
+						printf("Waiting for vnet list lock...\n");
+						uhi_nanosleep(UHI_NSEC_PER_SEC);
+						lock_attempts++;
+					}
+					if (lock_attempts > 0 && have_lock)
+						printf("Acquired vnet list lock\n");
+					if (!have_lock)
+						printf("Proceeding without vnet list lock\n");
+#ifdef VIMAGE
+					VNET_FOREACH(vnet_iter) {
+						uinst = vnet_iter->vnet_uinet;
+						uinet_instance_shutdown(uinst);
+					}
+#else
+					uinet_instance_shutdown(uinet_instance_default());
+#endif
+					if (have_lock)
+						VNET_LIST_RUNLOCK();
 			
 					printf("uinet shutdown complete\n");
 				

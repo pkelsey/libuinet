@@ -119,6 +119,21 @@ _sx_sunlock(struct sx *sx, const char *file, int line)
 }
 
 int
+_sx_try_slock(struct sx *sx, const char *file, int line)
+{
+	int ret;
+
+	ret = (_uhi_rwlock_trywlock(&sx->sx_lock, sx, file, line));
+
+	if (ret) {
+		WITNESS_LOCK(&sx->lock_object, LOP_TRYLOCK,
+		    file, line);
+	}
+
+	return (ret);
+}
+
+int
 _sx_try_xlock(struct sx *sx, const char *file, int line)
 {
 	int ret;

@@ -112,6 +112,7 @@ struct passive_context {
 };
 
 struct interface_config {
+	uinet_instance_t uinst;
 	char *ifname;
 	char alias[UINET_IF_NAMESIZE];
 	unsigned int cdom;
@@ -126,7 +127,7 @@ struct interface_config {
 	uint64_t num_sockets;
 	uint64_t max_accept_batch;
 	int stats;
-	uinet_ifcookie_t cookie;
+	uinet_if_t uif;
 };
 
 struct server_config {
@@ -893,7 +894,7 @@ create_passive(struct ev_loop *loop, struct server_config *cfg)
 		goto fail;
 	}
 
-	error = uinet_socreate(UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
+	error = uinet_socreate(cfg->interface->uinst, UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
 	if (0 != error) {
 		printf("Listen socket creation failed (%d)\n", error);
 		goto fail;
@@ -1009,7 +1010,7 @@ fail:
 
 
 static void
-dump_ifstat(const char *name)
+dump_ifstat(uinet_instance_t uinst, const char *name)
 {
 	struct uinet_ifstat stat;
 	int perline = 3;
@@ -1017,7 +1018,7 @@ dump_ifstat(const char *name)
 
 #define PRINT_IFSTAT(s) printf("%-26s= %-10lu%s", #s, stat.s, (index % perline == 0) ? "\n" : "  "); index++ 
 
-	uinet_getifstat(name, &stat);
+	uinet_getifstat(uinst, name, &stat);
 
 	printf("========================================================================\n");
 	printf("%s:\n", name);
@@ -1049,7 +1050,7 @@ dump_ifstat(const char *name)
 
 
 static void
-dump_tcpstat()
+dump_tcpstat(uinet_instance_t uinst)
 {
 	struct uinet_tcpstat stat;
 	int perline = 3;
@@ -1057,7 +1058,7 @@ dump_tcpstat()
 
 #define PRINT_TCPSTAT(s) printf("%-26s= %-10lu%s", #s, stat.s, (index % perline == 0) ? "\n" : "  "); index++ 
 
-	uinet_gettcpstat(&stat);
+	uinet_gettcpstat(uinst, &stat);
 
 	printf("========================================================================\n");
 
@@ -1180,10 +1181,10 @@ if_stats_timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 {
 	struct interface_config *cfg = w->data;
 
-	dump_ifstat(cfg->alias);
+	dump_ifstat(cfg->uinst, cfg->alias);
 	printf("num_sockets=%llu max_accept_batch=%llu\n", (unsigned long long)cfg->num_sockets, (unsigned long long)cfg->max_accept_batch);
 	if (cfg->do_tcpstats) {
-		dump_tcpstat();
+		dump_tcpstat(cfg->uinst);
 	}
 }
 
@@ -1418,10 +1419,12 @@ int main (int argc, char **argv)
 	}
 	
 	
-	uinet_init(1, 128*1024, 0);
+	uinet_init(1, 128*1024, NULL);
 	uinet_install_sighandlers();
 
 	for (i = 0; i < num_interfaces; i++) {
+		interfaces[i].uinst = uinet_instance_default();
+
 		switch (interfaces[i].type) {
 		case UINET_IFTYPE_NETMAP:
 			interfaces[i].alias_prefix = "netmap";
@@ -1452,9 +1455,9 @@ int main (int argc, char **argv)
 			       interfaces[i].promisc ? interfaces[i].cdom : 0);
 		}
 
-		error = uinet_ifcreate(interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
+		error = uinet_ifcreate(interfaces[i].uinst, interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
 				       interfaces[i].promisc ? interfaces[i].cdom : 0,
-				       0, &interfaces[i].cookie);
+				       0, &interfaces[i].uif);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", interfaces[i].alias, error);
 		}
@@ -1465,7 +1468,7 @@ int main (int argc, char **argv)
 			break;
 		}
 
-		ev_loop_attach_uinet_interface(interfaces[i].loop, interfaces[i].cookie);
+		ev_loop_attach_uinet_interface(interfaces[i].loop, interfaces[i].uif);
 	}
 	
 		
@@ -1475,7 +1478,7 @@ int main (int argc, char **argv)
 				printf("Adding address %s to interface %s\n", servers[i].listen_addr, servers[i].interface->alias);
 			}
 			
-			error = uinet_interface_add_alias(servers[i].interface->alias, servers[i].listen_addr, "", "");
+			error = uinet_interface_add_alias(servers[i].interface->uinst, servers[i].interface->alias, servers[i].listen_addr, "", "");
 			if (error) {
 				printf("Adding alias %s to interface %s failed (%d)\n", servers[i].listen_addr, servers[i].interface->alias, error);
 			}
@@ -1507,7 +1510,7 @@ int main (int argc, char **argv)
 			printf("Bringing up interface %s\n", interfaces[i].alias);
 		}
 
-		error = uinet_interface_up(interfaces[i].alias, 1, interfaces[i].promisc);
+		error = uinet_interface_up(interfaces[i].uinst, interfaces[i].alias, 1, interfaces[i].promisc);
 		if (0 != error) {
 			printf("Failed to bring up interface %s (%d)\n", interfaces[i].alias, error);
 		}

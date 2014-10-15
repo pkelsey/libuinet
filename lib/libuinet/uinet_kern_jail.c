@@ -49,6 +49,26 @@ struct	sx allprison_lock;
 SX_SYSINIT(allprison_lock, &allprison_lock, "allprison");
 struct	prisonlist allprison = TAILQ_HEAD_INITIALIZER(allprison);
 
+/*
+ * Find a prison that is a descendant of mypr.  Returns a locked prison or NULL.
+ */
+struct prison *
+prison_find_child(struct prison *mypr, int prid)
+{
+
+	return (NULL);
+}
+
+void
+prison_free(struct prison *pr)
+{
+}
+
+void
+prison_hold_locked(struct prison *pr)
+{
+}
+
 int
 prison_if(struct ucred *cred, struct sockaddr *sa)
 {
@@ -182,3 +202,17 @@ jailed_without_vnet(struct ucred *cred)
 
 	return (0);
 }
+
+#ifdef VIMAGE
+/*
+ * Determine whether the prison represented by cred owns
+ * its vnet rather than having it inherited.
+ *
+ * Returns 1 in case the prison owns the vnet, 0 otherwise.
+ */
+int
+prison_owns_vnet(struct ucred *cred)
+{
+	return (0);
+}
+#endif

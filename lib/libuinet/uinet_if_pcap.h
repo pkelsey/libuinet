@@ -26,7 +26,7 @@
 #ifndef _UINET_IF_PCAP_H_
 #define _UINET_IF_PCAP_H_
 
-int if_pcap_attach(struct uinet_config_if *cfg);
-int if_pcap_detach(struct uinet_config_if *cfg);
+int if_pcap_attach(struct uinet_if *uif);
+int if_pcap_detach(struct uinet_if *uif);
 
 #endif /* _UINET_IF_PCAP_H_ */

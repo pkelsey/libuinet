@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,20 +23,25 @@
  * SUCH DAMAGE.
  */
 
-
-#ifndef	_UINET_CONFIG_INTERNAL_H_
-#define	_UINET_CONFIG_INTERNAL_H_
-
+#ifndef	_UINET_INTERNAL_H_
+#define	_UINET_INTERNAL_H_
 
 #include <sys/queue.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
+#include <net/vnet.h>
 
-#include "uinet_config.h"
+#include "uinet_api.h"
 
-struct uinet_config_if {
-	TAILQ_ENTRY(uinet_config_if) link;
+struct uinet_instance {
+	struct vnet *ui_vnet;
+	void *ui_userdata;
+};
+
+struct uinet_if {
+	TAILQ_ENTRY(uinet_if) link;
+	struct uinet_instance *uinst;
 	uinet_iftype_t type;
 	char *configstr;
 	char name[IF_NAMESIZE];		/* assigned by driver */
@@ -50,9 +55,13 @@ struct uinet_config_if {
 	void *batch_event_handler_arg;
 };
 
+extern struct uinet_instance uinst0;
 
-void uinet_ifdestroy_all(void);
-struct uinet_config_if *uinet_iffind_byname(const char *ifname);
+void uinet_ifdestroy_all(struct uinet_instance *uinst);
+struct uinet_if *uinet_iffind_byname(const char *ifname);
 
+int uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet, struct uinet_instance_cfg *cfg);
+void uinet_instance_shutdown(uinet_instance_t uinst);
 
-#endif /* _UINET_CONFIG_INTERNAL_H_ */
+#endif /* _UINET_INTERNAL_H_ */
+
