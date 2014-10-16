@@ -54,7 +54,7 @@ int   uinet_l2tagstack_cmp(const struct uinet_in_l2tagstack *ts1, const struct u
 uint32_t uinet_l2tagstack_hash(const struct uinet_in_l2tagstack *ts);
 int   uinet_mac_aton(const char *macstr, uint8_t *macout);
 int   uinet_make_socket_passive(struct uinet_socket *so);
-int   uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib);
+int   uinet_make_socket_promiscuous(struct uinet_socket *so, uinet_if_t txif);
 uinet_pool_t uinet_pool_create(char *name, int size, uinet_pool_ctor ctor, uinet_pool_dtor dtor,
 			       uinet_pool_init init, uinet_pool_fini fini, int align, uint16_t flags);
 void *uinet_pool_alloc_arg(uinet_pool_t pool, void *arg, int flags);
@@ -98,6 +98,7 @@ int   uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall);
 int   uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uinet_uio *uio, int *flagsp);
 void  uinet_sosetnonblocking(struct uinet_socket *so, unsigned int nonblocking);
 int   uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int optlen);
+int   uinet_sosettxif(struct uinet_socket *so, uinet_if_t uif);
 void  uinet_sosetupcallprep(struct uinet_socket *so,
 			    void (*soup_accept)(struct uinet_socket *, void *), void *soup_accept_arg,
 			    void (*soup_receive)(struct uinet_socket *, void *, int64_t, int64_t), void *soup_receive_arg,
@@ -121,7 +122,7 @@ int   uinet_sysctl(uinet_instance_t uinst, const int *name, u_int namelen, void 
 void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
 void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
 void  uinet_synfilter_setl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
-void  uinet_synfilter_setaltfib(uinet_api_synfilter_cookie_t cookie, unsigned int altfib);
+void  uinet_synfilter_set_txif(uinet_api_synfilter_cookie_t cookie, uinet_if_t uif);
 void  uinet_synfilter_go_active_on_timeout(uinet_api_synfilter_cookie_t cookie, unsigned int ms);
 int   uinet_synfilter_install(struct uinet_socket *so, uinet_api_synfilter_callback_t callback, void *arg);
 uinet_synf_deferral_t uinet_synfilter_deferral_alloc(struct uinet_socket *so, uinet_api_synfilter_cookie_t cookie);
@@ -155,10 +156,6 @@ int uinet_lock_log_disable(void);
  *	        it must be unique among all the other aliases and driver-assigned
  *		names.  Passing an empty string is the same as passing NULL.
  *
- *  cdom	is the connection domain for ifname.  When looking up an
- *		inbound packet on ifname, only protocol control blocks in
- *		the same connection domain will be searched.
- *
  *  cpu		is the cpu number on which to perform stack processing on
  *		packets received on ifname.  -1 means leave it up to the
  *		scheduler.
@@ -176,12 +173,12 @@ int uinet_lock_log_disable(void);
  *
  *  UINET_ENOMEM	No memory available for interface creation
  *
- *  UINET_EEXIST	An interface with the given name or cdom already exists
+ *  UINET_EEXIST	An interface with the given name already exists
  *
  *  UINET_EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
  */
 int uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configstr,
-		   const char *alias, unsigned int cdom, int cpu, uinet_if_t *uif);
+		   const char *alias, int cpu, uinet_if_t *uif);
 
 
 /*

@@ -66,24 +66,9 @@ uinet_iffind_byname(const char *ifname)
 }
 
 
-static struct uinet_if *
-uinet_iffind_bycdom(unsigned int cdom)
-{
-	struct uinet_if *uif;
-
-	TAILQ_FOREACH(uif, &V_uinet_if_list, link) {
-		if (cdom == uif->cdom) {
-			return (uif);
-		}
-	}
-
-	return (NULL);
-}
-
-
 int
 uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configstr,
-	       const char *alias, unsigned int cdom, int cpu, uinet_if_t *uif)
+	       const char *alias, int cpu, uinet_if_t *uif)
 {
 	struct uinet_if *new_uif;
 	int alias_len;
@@ -102,16 +87,6 @@ uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configst
 			error = EEXIST;
 			goto out;
 		}
-	}
-
-	/*
-	 * CDOM 0 is for non-promiscuous-inet interfaces and can contain
-	 * multiple interfaces.  All other CDOMs are for promiscuous-inet
-	 * interfaces and can only contain one interface.
-	 */
-	if ((cdom != 0) && (NULL != uinet_iffind_bycdom(cdom))) {
-		error = EEXIST;
-		goto out;
 	}
 
 	new_uif = malloc(sizeof(struct uinet_if), M_DEVBUF, M_WAITOK);
@@ -137,7 +112,6 @@ uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configst
 		new_uif->alias[0] = '\0';
 	}
 	new_uif->cpu = cpu;
-	new_uif->cdom = cdom;
 	new_uif->ifdata = NULL;
 
 	switch (new_uif->type) {

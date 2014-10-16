@@ -100,11 +100,11 @@ struct syncache {
 	struct ucred	*sc_cred;		/* cred cache for jail checks */
 #ifdef PROMISCUOUS_INET
 	struct m_tag	*sc_l2tag;		/* L2 info from SYN packet */
-	uint16_t	sc_fib;			/* FIB number for this entry */
-#endif
+	struct ifnet	*sc_txif;		/* Transmit interface to use */
 #ifdef PASSIVE_INET
-	uint16_t	sc_altfib;		/* FIB for syncache responses */
-#endif
+	struct ifnet	*sc_client_txif;	/* Transmit interface to use */
+#endif /* PASSIVE_INET */
+#endif /* PROMISCUOUS_INET */
 	u_int32_t	sc_spare[2];		/* UTO */
 };
 

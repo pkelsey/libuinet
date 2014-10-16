@@ -484,6 +484,9 @@ __END_DECLS
 #define IP_SYNFILTER			90   /* syn_filter_optarg; attach/detach/query SYN filter */
 #define IP_SYNFILTER_RESULT		91   /* syn_filter_cbarg; deliver deferred filter result */
 
+/* Promiscuous INET outpu interface control */
+#define IP_TXIF				92   /* set index of interface to use for transmit */
+
 /*
  * Defaults and limits for options
  */

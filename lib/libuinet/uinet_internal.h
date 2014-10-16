@@ -47,10 +47,9 @@ struct uinet_if {
 	char name[IF_NAMESIZE];		/* assigned by driver */
 	char alias[IF_NAMESIZE];	/* assigned by user (optional) */
 	int cpu;
-	unsigned int cdom;
 	unsigned int ifindex;
 	void *ifdata;			/* softc */
-	void *ifp;			/* ifnet */
+	struct ifnet *ifp;		/* ifnet */
 	void (*batch_event_handler)(void *arg, int event);
 	void *batch_event_handler_arg;
 };

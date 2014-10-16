@@ -115,7 +115,6 @@ struct interface_config {
 	uinet_instance_t uinst;
 	char *ifname;
 	char alias[UINET_IF_NAMESIZE];
-	unsigned int cdom;
 	int thread_create_result;
 	pthread_t thread;
 	struct ev_loop *loop;
@@ -912,7 +911,7 @@ create_passive(struct ev_loop *loop, struct server_config *cfg)
 	}
 
 	if (cfg->interface->promisc) {
-		if ((error = uinet_make_socket_promiscuous(listener, cfg->interface->cdom))) {
+		if ((error = uinet_make_socket_promiscuous(listener, NULL))) {
 			printf("Failed to make listen socket promiscuous (%d)\n", error);
 			goto fail;
 		}
@@ -1312,7 +1311,6 @@ int main (int argc, char **argv)
 				return (1);
 			} else {
 				interfaces[num_interfaces].ifname = optarg;
-				interfaces[num_interfaces].cdom = num_interfaces + 1;
 				num_interfaces++;
 				interface_server_count = 0;
 			}
@@ -1450,13 +1448,11 @@ int main (int argc, char **argv)
 		snprintf(interfaces[i].alias, UINET_IF_NAMESIZE, "%s%d", interfaces[i].alias_prefix, interfaces[i].instance);
 
 		if (verbose) {
-			printf("Creating interface %s, Promiscuous INET %s, cdom=%u\n",
-			       interfaces[i].alias, interfaces[i].promisc ? "enabled" : "disabled",
-			       interfaces[i].promisc ? interfaces[i].cdom : 0);
+			printf("Creating interface %s, Promiscuous INET %s\n",
+			       interfaces[i].alias, interfaces[i].promisc ? "enabled" : "disabled");
 		}
 
 		error = uinet_ifcreate(interfaces[i].uinst, interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
-				       interfaces[i].promisc ? interfaces[i].cdom : 0,
 				       0, &interfaces[i].uif);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", interfaces[i].alias, error);

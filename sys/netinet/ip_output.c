@@ -165,37 +165,23 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 						  NULL);
 
 	if ((inp && (inp->inp_flags2 & INP_PROMISC)) || l2i_tag) {
-		unsigned int fib;
-
 		if (l2i_tag) {
 			/*
 			 * This is a packet that has been turned around
 			 * after reception, such as a TCP SYN packet being
-			 * recycled as a RST, so fib comes from the mbuf,
-			 * not the (probably nonexistent) connection
-			 * context.
+			 * recycled as a RST, or is a syncache response, so
+			 * the transmit interface comes from the mbuf, not
+			 * the (probably nonexistent) connection context.
 			 */
-			fib = M_GETFIB(m);
+			ifp = m->m_pkthdr.rcvif;
 		} else {
-#ifdef PASSIVE_INET
-			if (inp->inp_inc.inc_flags & INC_ALTFIB)
-				fib = inp->inp_altfibnum;
-			else
-#endif
-			fib = inp->inp_fibnum;
-
+			ifp = inp->inp_txif;
 			if (0 != if_promiscinet_add_tag(m, inp->inp_l2info)) {
 				goto bad;
 			}
 		}
 
-		ifp = ifnet_byfib_ref(fib);
-		if (NULL == ifp) {
-			IPSTAT_INC(ips_noroute);
-			error = EHOSTUNREACH;
-			goto bad;
-		}
-		
+		KASSERT(ifp != NULL, ("%s: transmit interface not set", __func__));
 		isbroadcast = 0;
 		ispromisc = 1;
 	}
@@ -1023,20 +1009,6 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				INP_WUNLOCK(inp);
 				error = 0;
 				break;
-			case SO_ALTFIB:
-#if defined(PROMISCUOUS_INET) && defined(PASSIVE_INET)
-				INP_WLOCK(inp);
-				if (so->so_options & SO_ALTFIB)
-					inp->inp_inc.inc_flags |= INC_ALTFIB;
-				else
-					inp->inp_inc.inc_flags &= ~INC_ALTFIB;
-				inp->inp_inc.inc_altfibnum = so->so_altfibnum;
-				INP_WUNLOCK(inp);
-				error = 0;
-#else
-				error = ENOPROTOOPT;
-#endif
-				break;
 			case SO_PASSIVE:
 #ifdef PASSIVE_INET
 				INP_WLOCK(inp);
@@ -1300,6 +1272,25 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_SYNFILTER_RESULT:
 			error = syn_filter_setopt(so, sopt);
 			break;
+
+		case IP_TXIF:
+		{
+			struct ifnet *ifp;
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+					    sizeof optval);
+			if (error)
+				break;
+
+			ifp = ifnet_byindex(optval);
+			if (ifp == NULL) {
+				error = EINVAL;
+				break;
+			}
+			INP_WLOCK(inp);
+			inp->inp_txif = ifp;
+			INP_WUNLOCK(inp);
+			break;
+		}
 #endif /* PROMISCUOUS_INET */
 
 		default:

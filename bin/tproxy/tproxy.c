@@ -85,6 +85,11 @@ struct synf_queue_entry {
 };
 
 
+struct interface_config {
+	uinet_instance_t uinst;
+	uinet_if_t uif;
+};
+
 struct proxy_context {
 	struct ev_loop *loop;
 	pthread_t thread;
@@ -95,8 +100,8 @@ struct proxy_context {
 	UINET_STAILQ_HEAD(, synf_queue_entry) synf_queue;
 	struct splice_table splicetab;
 	int verbose;
-	unsigned int client_fib;
-	unsigned int server_fib;
+	struct interface_config client_ifcfg;
+	struct interface_config server_ifcfg;
 };
 
 
@@ -432,7 +437,7 @@ process_synf_queue(struct ev_loop *loop, ev_async *w, int revents)
 
 		uinet_synfilter_getconninfo(cookie, &inc);
 
-		if ((error = uinet_make_socket_promiscuous(so, proxy->server_fib))) {
+		if ((error = uinet_make_socket_promiscuous(so, proxy->server_ifcfg.uif))) {
 			printf("Failed to make socket promiscuous (%d)\n", error);
 			goto err;
 		}
@@ -545,7 +550,7 @@ proxy_syn_filter(struct uinet_socket *lso, void *arg, uinet_api_synfilter_cookie
 		 * table lock when processing the syn filter queue in the
 		 * event loop.
 		 */
-		error = uinet_socreate(uinet_instance_default(), UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
+		error = uinet_socreate(proxy->server_ifcfg.uinst, UINET_PF_INET, &so, UINET_SOCK_STREAM, 0);
 		if (0 != error) {
 			printf("Outbound socket creation failed (%d)\n", error);
 			goto err;
@@ -765,7 +770,7 @@ fail:
 
 
 static struct proxy_context *
-create_proxy(struct ev_loop *loop, unsigned int client_fib, unsigned int server_fib,
+create_proxy(struct ev_loop *loop,  struct interface_config *client_ifcfg, struct interface_config *server_ifcfg,
 	     uinet_in_addr_t listen_addr, uinet_in_port_t listen_port, int verbose)
 {
 	struct proxy_context *proxy = NULL;
@@ -775,7 +780,7 @@ create_proxy(struct ev_loop *loop, unsigned int client_fib, unsigned int server_
 	int error;
 	int async_watcher_started = 0;
 
-	error = uinet_socreate(uinet_instance_default(), UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
+	error = uinet_socreate(client_ifcfg->uinst, UINET_PF_INET, &listener, UINET_SOCK_STREAM, 0);
 	if (0 != error) {
 		printf("Listen socket creation failed (%d)\n", error);
 		goto fail;
@@ -787,7 +792,7 @@ create_proxy(struct ev_loop *loop, unsigned int client_fib, unsigned int server_
 		goto fail;
 	}
 	
-	if ((error = uinet_make_socket_promiscuous(listener, client_fib))) {
+	if ((error = uinet_make_socket_promiscuous(listener, NULL))) {
 		printf("Failed to make listen socket promiscuous (%d)\n", error);
 		goto fail;
 	}
@@ -829,8 +834,8 @@ create_proxy(struct ev_loop *loop, unsigned int client_fib, unsigned int server_
 	proxy->loop = loop;
 	proxy->listener = listener;
 	proxy->verbose = verbose;
-	proxy->client_fib = client_fib;
-	proxy->server_fib = server_fib;
+	proxy->client_ifcfg = *client_ifcfg;
+	proxy->server_ifcfg = *server_ifcfg;
 
 	error = dobind(proxy->listener, listen_addr, htons(listen_port));
 	if (0 != error)
@@ -886,6 +891,7 @@ int main (int argc, char **argv)
 #define MAX_IFS 2
 	int num_ifs = 0;
 	char *ifnames[MAX_IFS];
+	struct interface_config ifs[MAX_IFS];
 	char *listen_addr = NULL;
 	int listen_port = -1;
 	int verbose = 0;
@@ -941,7 +947,13 @@ int main (int argc, char **argv)
 	uinet_install_sighandlers();
 
 	for (i = 0; i < num_ifs; i++) {
-		error = uinet_ifcreate(uinet_instance_default(), UINET_IFTYPE_NETMAP, ifnames[i], ifnames[i], i + 1, 0, NULL);
+		ifs[i].uinst = uinet_instance_create(NULL);
+		if (ifs[i].uinst == NULL) {
+			printf("Failed to create uinet instance %d\n", i);
+			exit(1);
+		}
+
+		error = uinet_ifcreate(ifs[i].uinst, UINET_IFTYPE_NETMAP, ifnames[i], ifnames[i], 0, &ifs[i].uif);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", ifnames[i], error);
 		} else {
@@ -963,7 +975,7 @@ int main (int argc, char **argv)
 	}
 
 	proxy = create_proxy(loop,
-			     1, 2,
+			     &ifs[0], &ifs[1],
 			     addr.s_addr, listen_port,
 			     verbose);
 

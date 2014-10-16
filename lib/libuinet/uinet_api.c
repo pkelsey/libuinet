@@ -416,7 +416,7 @@ out:
 
 
 int
-uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib)
+uinet_make_socket_promiscuous(struct uinet_socket *so, uinet_if_t txif)
 {
 	struct socket *so_internal = (struct socket *)so;
 	unsigned int optval, optlen;
@@ -428,16 +428,15 @@ uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib)
 	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_PROMISC, &optval, optlen)))
 		goto out;
 	
-	optval = fib;
-	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_SETFIB, &optval, optlen)))
-		goto out;
-
 	optval = 1;
 	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_REUSEPORT, &optval, optlen)))
 		goto out;
 	
 	optval = 1;
 	if ((error = so_setsockopt(so_internal, IPPROTO_IP, IP_BINDANY, &optval, optlen)))
+		goto out;
+
+	if ((error = uinet_sosettxif(so, txif)))
 		goto out;
 
 out:
@@ -938,6 +937,18 @@ uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval
 }
 
 
+int
+uinet_sosettxif(struct uinet_socket *so, uinet_if_t uif)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int optval, optlen;
+
+	optlen = sizeof(optval);
+	optval = uif->ifp->if_index;
+	return (so_setsockopt(so_internal, IPPROTO_IP, IP_TXIF, &optval, optlen));
+}
+
+
 void
 uinet_sosetupcallprep(struct uinet_socket *so,
 		      void (*soup_accept)(struct uinet_socket *, void *), void *soup_accept_arg,
@@ -1236,11 +1247,11 @@ uinet_synfilter_setl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l
 
 
 void
-uinet_synfilter_setaltfib(uinet_api_synfilter_cookie_t cookie, unsigned int altfib)
+uinet_synfilter_set_txif(uinet_api_synfilter_cookie_t cookie, uinet_if_t uif)
 {
 	struct syn_filter_cbarg *cbarg = cookie;
 	
-	cbarg->altfib = altfib;
+	cbarg->txif = uif->ifp;
 }
 
 

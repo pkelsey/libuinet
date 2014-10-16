@@ -481,11 +481,10 @@ syncache_timer(void *xsch)
 #ifdef PROMISCUOUS_INET
 
 static uint32_t
-syncache_hash_promisc(struct in_conninfo *inc, uint16_t fib,
-		      struct in_l2info *l2i, uint32_t mask)
+syncache_hash_promisc(struct in_conninfo *inc, struct in_l2info *l2i, uint32_t mask)
 {
-	uint32_t hash_input[2] = { inc->inc_laddr.s_addr, fib };
-	uint32_t hash_input_masks[2] = { 0xffffffff, 0xffffffff };
+	uint32_t hash_input[1] = { inc->inc_laddr.s_addr };
+	uint32_t hash_input_masks[1] = { 0xffffffff };
 	uint32_t hash;
 
 	hash = SYNCACHE_HASH(inc, mask);
@@ -506,11 +505,10 @@ syncache_hash_promisc(struct in_conninfo *inc, uint16_t fib,
 
 #ifdef INET6
 static uint32_t
-syncache_hash_promisc6(struct in_conninfo *inc, uint16_t fib,
-		       struct in_l2info *l2i, uint32_t mask)
+syncache_hash_promisc6(struct in_conninfo *inc, struct in_l2info *l2i, uint32_t mask)
 {
-	uint32_t hash_input[3] = { inc->inc6_laddr.s6_addr32[0], inc->inc6_laddr.s6_addr32[3], fib };
-	uint32_t hash_input_masks[3] = { 0xffffffff, 0xffffffff, 0xffffffff };
+	uint32_t hash_input[2] = { inc->inc6_laddr.s6_addr32[0], inc->inc6_laddr.s6_addr32[3] };
+	uint32_t hash_input_masks[2] = { 0xffffffff, 0xffffffff };
 	uint32_t hash;
 	uint32_t i;
 
@@ -551,19 +549,16 @@ syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp)
 	struct ifl2info *l2i_tag;
 	struct in_l2info *l2i;
 	struct in_l2tagstack *ts;
-	uint16_t fib;
 #endif /* PROMISCUOUS_INET */
 
 #ifdef PROMISCUOUS_INET
 	/* XXX once ICMP plumbing is complete, m should never be NULL.  for now, a bit of armor. */
 	if (m) {
-		fib = M_GETFIB(m);
 		l2i_tag = (struct ifl2info *)m_tag_locate(m,
 							  MTAG_PROMISCINET,
 							  MTAG_PROMISCINET_L2INFO,
 							  NULL);
 	} else {
-		fib = 0;
 		l2i_tag = NULL;
 	}
 	l2i = l2i_tag ? &l2i_tag->ifl2i_info : NULL;
@@ -573,7 +568,7 @@ syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp)
 #ifdef INET6
 	if (inc->inc_flags & INC_ISIPV6) {
 #ifdef PROMISCUOUS_INET
-		hashkey = syncache_hash_promisc6(inc, fib, l2i, V_tcp_syncache.hashmask);
+		hashkey = syncache_hash_promisc6(inc, l2i, V_tcp_syncache.hashmask);
 #else
 		hashkey = SYNCACHE_HASH6(inc, V_tcp_syncache.hashmask);
 #endif /* PROMISCUOUS_INET */
@@ -593,8 +588,7 @@ syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp)
 			sc_l2i = sc_l2i_tag ? &sc_l2i_tag->ifl2i_info : NULL;
 			sc_ts = sc_l2i ? &sc_l2i->inl2i_tagstack : NULL;
 
-			if ((fib != sc->sc_fib) ||
-			    (0 != in_promisc_tagcmp(ts, sc_ts)))
+			if (0 != in_promisc_tagcmp(ts, sc_ts))
 				continue;
 #endif /* PROMISCUOUS_INET */
 			if (ENDPTS6_EQ(&inc->inc_ie, &sc->sc_inc.inc_ie))
@@ -604,7 +598,7 @@ syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp)
 #endif
 	{
 #ifdef PROMISCUOUS_INET
-		hashkey = syncache_hash_promisc(inc, fib, l2i, V_tcp_syncache.hashmask);
+		hashkey = syncache_hash_promisc(inc, l2i, V_tcp_syncache.hashmask);
 #else
 		hashkey = SYNCACHE_HASH(inc, V_tcp_syncache.hashmask);
 #endif /* PROMISCUOUS_INET */
@@ -624,8 +618,7 @@ syncache_lookup(struct in_conninfo *inc, struct syncache_head **schp)
 			sc_l2i = sc_l2i_tag ? &sc_l2i_tag->ifl2i_info : NULL;
 			sc_ts = sc_l2i ? &sc_l2i->inl2i_tagstack : NULL;
 
-			if ((fib != sc->sc_fib) ||
-			    (0 != in_promisc_tagcmp(ts, sc_ts)))
+			if (0 != in_promisc_tagcmp(ts, sc_ts))
 				continue;
 #endif /* PROMISCUOUS_INET */
 
@@ -798,6 +791,10 @@ syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
 
 	if (sc && (sc->sc_flags & SCF_PASSIVE)) {
 		sc->sc_flags |= SCF_PASSIVE_SYNACK;
+
+#ifdef PROMISCUOUS_INET
+		sc->sc_client_txif = m->m_pkthdr.rcvif;
+#endif
 
 		sc->sc_iss = th->th_seq;
 
@@ -1067,6 +1064,8 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 		struct ifl2info *l2i_tag;
 		struct in_l2info *l2i, *inp_l2i;
 		
+		inp->inp_txif = sc->sc_client_txif;
+
 		l2i_tag = (struct ifl2info *)m_tag_locate(m,
 							  MTAG_PROMISCINET,
 							  MTAG_PROMISCINET_L2INFO,
@@ -1371,6 +1370,8 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 	if (inp->inp_flags2 & INP_PROMISC) {
 		struct ifl2info *l2i_tag;
 		struct in_l2info *l2i, *inp_l2i;
+
+		inp->inp_txif = sc->sc_txif;
 		
 		l2i_tag = (struct ifl2info *)m_tag_locate(m,
 							  MTAG_PROMISCINET,
@@ -1385,7 +1386,6 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 		in_promisc_l2info_copy(inp_l2i, l2i);
 		/* XXX the so copy of l2info needs to go away */
 		in_promisc_l2info_copy(so->so_l2info, l2i);
-
 	}
 #endif /* PROMISCUOUS_INET */
 
@@ -1799,11 +1799,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	int win, sb_hiwat, ip_ttl, ip_tos;
 #ifdef PASSIVE_INET
 	int passive;
-	unsigned int altfib;
 #endif
 #ifdef PROMISCUOUS_INET
 	int promisc_listen, synfilter;
 	struct m_tag *l2tag = NULL;
+	struct ifnet *txif;
 #endif
 	char *s;
 #ifdef INET6
@@ -1840,11 +1840,11 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	ltflags = (tp->t_flags & (TF_NOOPT | TF_SIGNATURE));
 #ifdef PASSIVE_INET
 	passive = inc->inc_flags & INC_PASSIVE;
-	altfib = inc->inc_fibnum;
 #endif
 #ifdef PROMISCUOUS_INET
 	promisc_listen = inp->inp_flags2 & INP_PROMISC;
 	synfilter = inp->inp_flags2 & INP_SYNFILTER;
+	txif = m->m_pkthdr.rcvif;
 #endif
 
 	/* By the time we drop the lock these should no longer be used. */
@@ -1979,7 +1979,7 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		cbarg.m = m;
 		cbarg.l2i = &l2info_tag->ifl2i_info;
 		cbarg.initial_timeout = -1;
-		cbarg.altfib = altfib;
+		cbarg.txif = txif;
 
 		decision = syn_filter_run_callback(inp, &cbarg);
 #ifdef PASSIVE_INET
@@ -1990,9 +1990,9 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 
 		if (cbarg.inc.inc_flags & INC_PASSIVE)
 			initial_timeout = cbarg.initial_timeout;
-
-		altfib = cbarg.altfib;
 #endif
+		txif = cbarg.txif;
+
 		if (SYNF_ACCEPT != decision) {
 			SCH_UNLOCK(sch);
 			INP_RUNLOCK(inp);
@@ -2074,6 +2074,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 #endif
 	sc->sc_irs = th->th_seq;
 	sc->sc_iss = arc4random();
+#ifdef PROMISCUOUS_INET
+	if (promisc_listen)
+		sc->sc_txif = txif;
+#endif
 #ifdef PASSIVE_INET
 	if (passive) {
 		sc->sc_flags = SCF_PASSIVE;
@@ -2082,7 +2086,6 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		if (inc->inc_flags & INC_CONVONTMO)
 			sc->sc_flags |= SCF_CONVERT_ON_TIMEOUT;
 	}
-	sc->sc_altfib = altfib;
 #else
 	sc->sc_flags = 0;
 #endif
@@ -2177,8 +2180,6 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 	}
 
 #ifdef PROMISCUOUS_INET
-	sc->sc_fib = M_GETFIB(m);
-	
 	if (promisc_listen && l2tag) {
 		m_tag_unlink(m, l2tag);	
 		sc->sc_l2tag = l2tag;
@@ -2279,7 +2280,11 @@ syncache_respond(struct syncache *sc)
 	m->m_data += max_linkhdr;
 	m->m_len = tlen;
 	m->m_pkthdr.len = tlen;
+#ifdef PROMISCUOUS_INET
+	m->m_pkthdr.rcvif = sc->sc_txif;
+#else
 	m->m_pkthdr.rcvif = NULL;
+#endif
 
 #ifdef INET6
 	if (sc->sc_inc.inc_flags & INC_ISIPV6) {
@@ -2386,11 +2391,7 @@ syncache_respond(struct syncache *sc)
 	} else
 		optlen = 0;
 
-#ifdef PASSIVE_INET
-	M_SETFIB(m, sc->sc_altfib);
-#else
 	M_SETFIB(m, sc->sc_inc.inc_fibnum);
-#endif
 	m->m_pkthdr.csum_data = offsetof(struct tcphdr, th_sum);
 #ifdef INET6
 	if (sc->sc_inc.inc_flags & INC_ISIPV6) {

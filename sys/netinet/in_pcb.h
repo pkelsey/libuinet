@@ -108,7 +108,6 @@ struct in_conninfo {
 	u_int8_t	inc_flags;
 	u_int8_t	inc_len;
 	u_int16_t	inc_fibnum;	/* XXX was pad, 16 bits is plenty */
-	u_int16_t	inc_altfibnum;
 	/* protocol dependent part */
 	struct	in_endpoints inc_ie;
 };
@@ -120,8 +119,7 @@ struct in_conninfo {
 #define	INC_PASSIVE	0x02		/* connection is being passively reassembled */
 #define	INC_PROMISC	0x04		/* connection is promiscuous */
 #define	INC_SYNFILTERED	0x08		/* a SYN filter has been applied */
-#define	INC_ALTFIB	0x10		/* alternate FIB is set */
-#define	INC_CONVONTMO	0x20		/* convert from passive to active on syncache timeout */
+#define	INC_CONVONTMO	0x10		/* convert from passive to active on syncache timeout */
 
 #define	inc_fport	inc_ie.ie_fport
 #define	inc_lport	inc_ie.ie_lport
@@ -185,7 +183,8 @@ struct inpcb {
 	uint32_t inp_flowid;		/* (x) flow id / queue id */
 	u_int	inp_refcount;		/* (i) refcount */
 #ifdef PROMISCUOUS_INET
-	void	*inp_pspare[3];		/* (x) route caching / general use */
+	void	*inp_pspare[2];		/* (x) route caching / general use */
+	struct	ifnet *inp_txif;	/* (i) transmit interface */
 	void	*inp_synf;		/* (i) SYN filter instance cookie */
 	struct	in_l2info *inp_l2info;	/* (i/p) L2 details */
 #else
@@ -229,7 +228,6 @@ struct inpcb {
 	struct rwlock	inp_lock;
 };
 #define	inp_fibnum	inp_inc.inc_fibnum
-#define	inp_altfibnum	inp_inc.inc_altfibnum
 #define	inp_fport	inp_inc.inc_fport
 #define	inp_lport	inp_inc.inc_lport
 #define	inp_faddr	inp_inc.inc_faddr

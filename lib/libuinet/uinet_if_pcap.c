@@ -356,11 +356,8 @@ if_pcap_setup_interface(struct if_pcap_softc *sc)
 
 	IFQ_SET_READY(&ifp->if_snd);
 
-	ifp->if_fib = sc->uif->cdom;
-
 	ether_ifattach(ifp, sc->addr);
 	ifp->if_capabilities = ifp->if_capenable = IFCAP_HWSTATS;
-
 
 	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
 
