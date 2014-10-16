@@ -55,7 +55,6 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 #include <sys/ucred.h>
 
 #include <net/if.h>
-#include <net/if_arp.h>
 #include <net/if_llatbl.h>
 #ifdef PROMISCUOUS_INET
 #include <net/if_promiscinet.h>
