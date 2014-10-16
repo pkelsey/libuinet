@@ -225,9 +225,8 @@ static void	 tcp_pulloutofband(struct socket *,
 		     struct tcphdr *, struct mbuf *, int);
 static void	 tcp_xmit_timer(struct tcpcb *, int);
 static void	 tcp_newreno_partial_ack(struct tcpcb *, struct tcphdr *);
-static void inline 	tcp_fields_to_host(struct tcphdr *);
+static void inline 	tcp_fields_copy_to_host(struct tcphdr *, const struct tcphdr *);
 #ifdef TCP_SIGNATURE
-static void inline 	tcp_fields_to_net(struct tcphdr *);
 static int inline	tcp_signature_verify_input(struct mbuf *, int, int,
 			    int, struct tcpopt *, struct tcphdr *, u_int);
 #endif
@@ -463,35 +462,27 @@ cc_post_recovery(struct tcpcb *tp, struct tcphdr *th)
 }
 
 static inline void
-tcp_fields_to_host(struct tcphdr *th)
+tcp_fields_copy_to_host(struct tcphdr *th, const struct tcphdr *mbuf_th)
 {
-
-	th->th_seq = ntohl(th->th_seq);
-	th->th_ack = ntohl(th->th_ack);
-	th->th_win = ntohs(th->th_win);
-	th->th_urp = ntohs(th->th_urp);
+	th->th_sport = mbuf_th->th_sport;
+	th->th_dport = mbuf_th->th_dport;
+	th->th_seq = ntohl(mbuf_th->th_seq);
+	th->th_ack = ntohl(mbuf_th->th_ack);
+	th->th_x2 = mbuf_th->th_x2;
+	th->th_off = mbuf_th->th_off;
+	th->th_flags = mbuf_th->th_flags;
+	th->th_win = ntohs(mbuf_th->th_win);
+	th->th_urp = ntohs(mbuf_th->th_urp);
 }
 
 #ifdef TCP_SIGNATURE
-static inline void
-tcp_fields_to_net(struct tcphdr *th)
-{
-
-	th->th_seq = htonl(th->th_seq);
-	th->th_ack = htonl(th->th_ack);
-	th->th_win = htons(th->th_win);
-	th->th_urp = htons(th->th_urp);
-}
-
 static inline int
 tcp_signature_verify_input(struct mbuf *m, int off0, int tlen, int optlen,
     struct tcpopt *to, struct tcphdr *th, u_int tcpbflag)
 {
 	int ret;
 
-	tcp_fields_to_net(th);
 	ret = tcp_signature_verify(m, off0, tlen, optlen, to, th, tcpbflag);
-	tcp_fields_to_host(th);
 	return (ret);
 }
 #endif
@@ -565,6 +556,7 @@ void
 tcp_input(struct mbuf *m, int off0)
 {
 	struct tcphdr *th = NULL;
+	struct tcphdr stack_th;
 	struct ip *ip = NULL;
 #ifdef INET
 	struct ipovly *ipov;
@@ -773,7 +765,8 @@ tcp_input(struct mbuf *m, int off0)
 	/*
 	 * Convert TCP protocol specific fields to host format.
 	 */
-	tcp_fields_to_host(th);
+	tcp_fields_copy_to_host(&stack_th, th);
+	th = &stack_th;
 
 	/*
 	 * Delay dropping TCP, IP headers, IPv6 ext headers, and TCP options.
