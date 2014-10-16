@@ -130,7 +130,6 @@ struct socket {
 	 * so_user_cookie is used by ipfw/dummynet.
 	 */
 	int so_fibnum;		/* routing domain for this socket */
-	int so_altfibnum;
 	uint32_t so_user_cookie;
 
 	struct so_upcallprep {

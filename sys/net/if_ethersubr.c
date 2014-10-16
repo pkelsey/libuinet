@@ -751,6 +751,7 @@ ether_input_internal(struct ifnet *ifp, struct mbuf *m)
 			CURVNET_RESTORE();
 			return;
 		}
+		l2info_tag->rcvif = ifp;
 
 		m_tag_prepend(m, &l2info_tag->ifl2i_mtag);
 

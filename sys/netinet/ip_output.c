@@ -55,6 +55,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 #include <sys/ucred.h>
 
 #include <net/if.h>
+#include <net/if_arp.h>
 #include <net/if_llatbl.h>
 #ifdef PROMISCUOUS_INET
 #include <net/if_promiscinet.h>
@@ -170,16 +171,19 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 			 * This is a packet that has been turned around
 			 * after reception, such as a TCP SYN packet being
 			 * recycled as a RST, or is a syncache response, so
-			 * the transmit interface comes from the mbuf, not
+			 * the transmit interface comes from the tag, not
 			 * the (probably nonexistent) connection context.
 			 */
-			ifp = m->m_pkthdr.rcvif;
+			ifp = l2i_tag->rcvif;
 		} else {
 			ifp = inp->inp_txif;
 			if (0 != if_promiscinet_add_tag(m, inp->inp_l2info)) {
 				goto bad;
 			}
 		}
+
+		/* XXX is this necessary? */
+		if_ref(ifp);
 
 		KASSERT(ifp != NULL, ("%s: transmit interface not set", __func__));
 		isbroadcast = 0;

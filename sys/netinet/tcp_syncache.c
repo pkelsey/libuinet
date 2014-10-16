@@ -1365,7 +1365,6 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 	}
 #endif
 
-
 #ifdef PROMISCUOUS_INET
 	if (inp->inp_flags2 & INP_PROMISC) {
 		struct ifl2info *l2i_tag;
@@ -1667,6 +1666,9 @@ syncache_expand(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 				    "(probably spoofed)\n", s, __func__);
 			goto failed;
 		}
+#ifdef PROMISCUOUS_INET
+		sc->sc_txif = m->m_pkthdr.rcvif;
+#endif
 	} else {
 		/* Pull out the entry to unlock the bucket row. */
 		TAILQ_REMOVE(&sch->sch_bucket, sc, sc_hash);

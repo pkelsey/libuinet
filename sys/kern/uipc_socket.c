@@ -2726,36 +2726,6 @@ sosetopt(struct socket *so, struct sockopt *sopt)
 			}
 			break;
 
-		case SO_ALTFIB:
-#if defined(PROMISCUOUS_INET) && defined(PASSIVE_INET)
-			error = sooptcopyin(sopt, &optval, sizeof optval,
-					    sizeof optval);
-			if (optval < 0)
-				so->so_options &= ~sopt->sopt_name;	
-			else if (optval >= rt_numfibs) {
-				error = EINVAL;
-				goto bad;
-			} else {
-				so->so_options |= sopt->sopt_name;
-			}
-			if (((so->so_proto->pr_domain->dom_family == PF_INET) ||
-			   (so->so_proto->pr_domain->dom_family == PF_INET6) ||
-			   (so->so_proto->pr_domain->dom_family == PF_ROUTE))) {
-				if (so->so_options & SO_ALTFIB)
-					so->so_altfibnum = optval;
-				else
-					so->so_altfibnum = 0;
-				/* Note: ignore error */
-				if (so->so_proto->pr_ctloutput)
-					(*so->so_proto->pr_ctloutput)(so, sopt);
-			} else {
-				so->so_altfibnum = 0;
-			}
-#else
-			error = EOPNOTSUPP;
-#endif
-			break;
-
 		case SO_USER_COOKIE:
 			error = sooptcopyin(sopt, &val32, sizeof val32,
 					    sizeof val32);

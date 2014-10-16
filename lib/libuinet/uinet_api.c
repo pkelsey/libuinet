@@ -436,7 +436,7 @@ uinet_make_socket_promiscuous(struct uinet_socket *so, uinet_if_t txif)
 	if ((error = so_setsockopt(so_internal, IPPROTO_IP, IP_BINDANY, &optval, optlen)))
 		goto out;
 
-	if ((error = uinet_sosettxif(so, txif)))
+	if (txif != NULL && (error = uinet_sosettxif(so, txif)))
 		goto out;
 
 out:

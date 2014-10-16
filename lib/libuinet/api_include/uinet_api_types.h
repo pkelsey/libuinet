@@ -111,7 +111,6 @@ struct uinet_in_conninfo {
 	uint8_t	inc_flags;
 	uint8_t	inc_len;
 	uint16_t	inc_fibnum;	/* XXX was pad, 16 bits is plenty */
-	uint16_t	inc_altfibnum;
 	/* protocol dependent part */
 	struct	uinet_in_endpoints inc_ie;
 };
@@ -170,8 +169,6 @@ struct uinet_uio {
 #define	UINET_SO_NO_DDP		0x00008000	/* disable direct data placement */
 #define	UINET_SO_PROMISC	0x00010000	/* socket will be used for promiscuous listen */
 #define	UINET_SO_PASSIVE	0x00020000	/* socket will be used for passive reassembly */
-#define	UINET_SO_ALTFIB		0x00080000	/* alternate FIB is set */
-
 
 
 #define	UINET_SO_SNDBUF		0x1001		/* send buffer size */
