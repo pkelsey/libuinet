@@ -346,7 +346,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	 * is understood.
 	 */
 
-	if (th->th_seq != tp->rcv_nxt &&
+	if ((th->th_seq != tp->rcv_nxt || !TCPS_HAVEESTABLISHED(tp->t_state)) &&
 	    tp->t_segqlen >= (so->so_rcv.sb_hiwat / tp->t_maxseg) + 1) {
 		V_tcp_reass_overflows++;
 #ifdef PASSIVE_INET
@@ -385,7 +385,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	 */
 	te = uma_zalloc(V_tcp_reass_zone, M_NOWAIT);
 	if (te == NULL) {
-		if (th->th_seq != tp->rcv_nxt) {
+		if (th->th_seq != tp->rcv_nxt || !TCPS_HAVEESTABLISHED(tp->t_state)) {
 #ifdef PASSIVE_INET
 			/*
 			 * In the passive case, we will deliver the leading
@@ -450,7 +450,8 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 				TCPSTAT_INC(tcps_rcvduppack);
 				TCPSTAT_ADD(tcps_rcvdupbyte, *tlenp);
 				m_freem(m);
-				uma_zfree(V_tcp_reass_zone, te);
+				if (te != &tqs)
+					uma_zfree(V_tcp_reass_zone, te);
 				tp->t_segqlen--;
 				/*
 				 * Try to present any queued data
