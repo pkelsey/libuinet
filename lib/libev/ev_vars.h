@@ -205,11 +205,12 @@ VAR (invoke_cb , void (*invoke_cb) (EV_P))
 VARx(UINET_LIST_HEAD(, ev_uinet), uinet_walk_head)
 #endif
 VARx(pthread_mutex_t, uinet_pend_lock)
+VARx(int, uinet_in_batch)
+VARx(int, uinet_num_pending)
 VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_pend_head)
 VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_prev_pend_head)
 VARx(ev_async, uinet_async_w)
 VARx(ev_prepare, uinet_prepare_w)
-VARx(int, uinet_in_batch)
 #endif
 
 #undef VARx
