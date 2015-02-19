@@ -79,6 +79,10 @@ endif
 
 CFLAGS+= -DUINET=1
 
+ifneq (${HOST_OS},Darwin)
+CFLAGS+= -DHAS_NATIVE_TLS
+endif
+
 VPATH+= $S/${MACHINE_CPUARCH}/${MACHINE_CPUARCH}
 VPATH+= $S/kern
 VPATH+= $S/crypto

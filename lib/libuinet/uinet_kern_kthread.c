@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2010 Kip Macy
  * All rights reserved.
- * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -58,10 +58,8 @@ uhi_tls_key_t kthread_tls_key;
 struct uinet_thread *
 uinet_thread_alloc(struct proc *p)
 {
-	struct uinet_thread *utd = NULL;
-	struct thread *td = NULL;
-	struct mtx *lock = NULL;
-	struct cv *cond = NULL;
+	struct uinet_thread *utd;
+	struct thread *td;
 
 	if (NULL == p) {
 		p = &proc0;
@@ -69,24 +67,19 @@ uinet_thread_alloc(struct proc *p)
 
 	utd = malloc(sizeof(struct uinet_thread), M_DEVBUF, M_ZERO | M_WAITOK);
 	if (NULL == utd)
-		goto error;
+		return(NULL);
 
-	td = malloc(sizeof(struct thread), M_DEVBUF, M_ZERO | M_WAITOK);
-	if (NULL == td)
-		goto error;
+	/*
+	 * All threads except for thread0 use the struct thread that is part
+	 * of struct uinet_thread.
+	 */
+	utd->tdptr = &utd->td;
+	td = utd->tdptr;
 
-	lock = malloc(sizeof(struct mtx), M_DEVBUF, M_WAITOK);
-	if (NULL == lock)
-		goto error;
-
-	cond = malloc(sizeof(struct cv), M_DEVBUF, M_WAITOK);
-	if (NULL == cond)
-		goto error;
-
-	cv_init(cond, "thread_sleepq");
-	mtx_init(lock, "thread_lock", NULL, MTX_DEF);
-	td->td_lock = lock;
-	td->td_sleepqueue = (struct sleepqueue *)cond;
+	cv_init(&utd->cond, "thread_sleepq");
+	mtx_init(&utd->lock, "thread_lock", NULL, MTX_DEF);
+	td->td_lock = &utd->lock;
+	td->td_sleepqueue = (struct sleepqueue *)(&utd->cond);
 	td->td_ucred = crhold(p->p_ucred);
 	td->td_proc = p;
 	td->td_pflags |= TDP_KTHREAD;
@@ -95,31 +88,18 @@ uinet_thread_alloc(struct proc *p)
 	td->td_last_stop_check = ticks;
 	td->td_stop_check_ticks = hz / 2;
 
-	utd->td = td;
-
 	return (utd);
-
-error:
-	if (utd) free(utd, M_DEVBUF);
-	if (td) free(td, M_DEVBUF);
-	if (lock) free(lock, M_DEVBUF);
-	if (cond) free(cond, M_DEVBUF);
-
-	return (NULL);
 }
 
 
 void
 uinet_thread_free(struct uinet_thread *utd)
 {
-	struct thread *td = utd->td;
+	struct thread *td = utd->tdptr;
 
 	crfree(td->td_proc->p_ucred);
-	mtx_destroy(td->td_lock);
-	free(td->td_lock, M_DEVBUF);
-	cv_destroy((struct cv *)td->td_sleepqueue);
-	free(td->td_sleepqueue, M_DEVBUF);
-	free(td, M_DEVBUF);
+	mtx_destroy(&utd->lock);
+	cv_destroy(&utd->cond);
 	free(utd, M_DEVBUF);
 }
 
@@ -154,7 +134,7 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	if (NULL == utd)
 		return (ENOMEM);
 
-	td = utd->td;
+	td = utd->tdptr;
 
 	if (tdp)
 		*tdp = td;
@@ -163,6 +143,7 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	tsa->start_routine = start_routine;
 	tsa->start_routine_arg = arg;
 	tsa->end_routine = NULL;
+	tsa->set_tls = 1;
 	tsa->tls_key = kthread_tls_key;
 	tsa->tls_data = utd;
 
@@ -212,7 +193,7 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	if (NULL == utd)
 		return (ENOMEM);
 
-	td = utd->td;
+	td = utd->tdptr;
 
 	if (tdp)
 		*tdp = td;
@@ -221,6 +202,7 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	tsa->start_routine = start_routine;
 	tsa->start_routine_arg = arg;
 	tsa->end_routine = NULL;
+	tsa->set_tls = 1;
 	tsa->tls_key = kthread_tls_key;
 	tsa->tls_data = utd;
 
@@ -263,7 +245,7 @@ uinet_init_thread0(void)
 	cpuid = uhi_thread_bound_cpu();
 	td->td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
 	
-	uinet_thread0.td = td;
+	uinet_thread0.tdptr = td;
 
 	uhi_tls_set(kthread_tls_key, &uinet_thread0);
 }

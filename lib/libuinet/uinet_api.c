@@ -90,7 +90,7 @@ uinet_initialize_thread(void)
 		if (NULL == utd)
 			return (ENOMEM);
 		
-		td = utd->td;
+		td = utd->tdptr;
 
 		KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_initialize_thread: can't safely store host thread id"));
 		td->td_wchan = (void *)uhi_thread_self();
@@ -99,7 +99,7 @@ uinet_initialize_thread(void)
 
 		uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
 	} else {
-		td = utd->td;
+		td = utd->tdptr;
 	}
 
 	cpuid = uhi_thread_bound_cpu();

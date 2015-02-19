@@ -84,6 +84,7 @@ struct uhi_thread_start_args {
 	void (*start_routine)(void *);
 	void *start_routine_arg;
 	void (*end_routine)(struct uhi_thread_start_args *);
+	int set_tls;
 	uhi_tls_key_t tls_key;
 	void *tls_data;
 	uhi_thread_t *host_thread_id;
