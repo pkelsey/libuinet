@@ -484,17 +484,17 @@ if_netmap_send(void *arg)
 	int poll_wait_ms;
 
 	if (sc->uif->cpu >= 0)
-		sched_bind(sc->tx_thread, sc->uif->cpu);
+		sched_bind(curthread, sc->uif->cpu);
 
 	done = 0;
 	pkts_sent = 0;
 	avail = 0;
-	poll_wait_ms = (sc->tx_thread->td_stop_check_ticks * 1000) / hz;
+	poll_wait_ms = (curthread->td_stop_check_ticks * 1000) / hz;
 	do {
 		mtx_lock(&sc->tx_lock);
 		sc->tx_pkts_to_send -= pkts_sent;
 		while ((sc->tx_pkts_to_send == 0) && !done)
-			if (EWOULDBLOCK == cv_timedwait(&sc->tx_cv, &sc->tx_lock, sc->tx_thread->td_stop_check_ticks))
+			if (EWOULDBLOCK == cv_timedwait(&sc->tx_cv, &sc->tx_lock, curthread->td_stop_check_ticks))
 				done = kthread_stop_check();
 		mtx_unlock(&sc->tx_lock);
 	
@@ -682,13 +682,13 @@ if_netmap_receive(void *arg)
 	ifp = sc->ifp;
 
 	if (sc->uif->cpu >= 0)
-		sched_bind(sc->rx_thread, sc->uif->cpu);
+		sched_bind(curthread, sc->uif->cpu);
 
 	reserved = 0;
 	sc->hw_rx_rsvd_begin = 0;
 
 	done = 0;
-	poll_wait_ms = (sc->tx_thread->td_stop_check_ticks * 1000) / hz;
+	poll_wait_ms = (curthread->td_stop_check_ticks * 1000) / hz;
 	for (;;) {
 		while (!done && (0 == (avail = if_netmap_rxavail(sc->nm_host_ctx)))) {
 			memset(&pfd, 0, sizeof pfd);
