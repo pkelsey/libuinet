@@ -77,6 +77,8 @@ struct	vnet;
 #include <sys/queue.h>		/* get TAILQ macros */
 
 #ifdef _KERNEL
+#include "opt_promiscinet.h"
+
 #include <sys/mbuf.h>
 #include <sys/eventhandler.h>
 #include <sys/buf_ring.h>

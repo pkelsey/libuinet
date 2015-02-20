@@ -44,6 +44,8 @@
 #include <sys/_rwlock.h>
 
 #ifdef _KERNEL
+#include "opt_promiscinet.h"
+
 #include <sys/lock.h>
 #include <sys/rwlock.h>
 #include <net/vnet.h>
