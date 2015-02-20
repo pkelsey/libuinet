@@ -532,7 +532,6 @@ pthread_start_routine(void *arg)
 {
 	struct uhi_thread_start_args *tsa = arg;
 	int error;
-	int cpuid;
 
 	/*
 	 * uinet_shutdown() waits for a message from the shutdown thread
@@ -561,15 +560,6 @@ pthread_start_routine(void *arg)
 	if (error != 0)
 		printf("Warning: unable to set uhi thread-specific data (%d)\n", error);
 
-	if (tsa->host_thread_id) {
-		*tsa->host_thread_id = (uhi_thread_t)pthread_self();
-	}
-
-	if (tsa->oncpu) {
-		cpuid = uhi_thread_bound_cpu();
-		*(tsa->oncpu) = (cpuid == -1) ? 0 : cpuid;
-	}
-
 #if defined(__FreeBSD__)
 	pthread_set_name_np(pthread_self(), tsa->name);
 #elif defined(__linux__)
@@ -577,6 +567,9 @@ pthread_start_routine(void *arg)
 #endif
 
 	uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
+
+	if (tsa->start_notify_routine)
+		tsa->start_notify_routine(tsa->start_notify_routine_arg);
 
 	tsa->start_routine(tsa->start_routine_arg);
 

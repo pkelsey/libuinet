@@ -175,6 +175,13 @@ struct pcpu *uinet_pcpu_get(void);
 
 extern uhi_tls_key_t kthread_tls_key;
 #undef curthread
-#define curthread (*((struct thread **)uhi_tls_get(kthread_tls_key)))
+
+
+#ifdef HAS_NATIVE_TLS
+extern __thread struct uinet_thread uinet_curthread;
+#define curthread ((struct thread *)(&uinet_curthread))
+#else
+#define curthread ((struct thread *)uhi_tls_get(kthread_tls_key))
+#endif
 
 #endif	/* _UINET_SYS_PCPU_H_ */
