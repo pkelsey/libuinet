@@ -1300,6 +1300,28 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_SYNFILTER_RESULT:
 			error = syn_filter_setopt(so, sopt);
 			break;
+
+		case IP_CATCHALL_LISTEN:
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+					    sizeof optval);
+			if (error)
+				break;
+
+			if (optval) {
+				if ((so->so_options & SO_ACCEPTCONN) &&
+				    (so->so_options & SO_PROMISC)) {
+					INP_HASH_WLOCK(inp->inp_pcbinfo);
+					inp->inp_pcbinfo->ipi_catchall_listen = inp;
+					INP_HASH_WUNLOCK(inp->inp_pcbinfo);
+				} else
+					error = EINVAL;
+			} else {
+				INP_HASH_WLOCK(inp->inp_pcbinfo);
+				if (inp == inp->inp_pcbinfo->ipi_catchall_listen)
+					inp->inp_pcbinfo->ipi_catchall_listen = NULL;
+				INP_HASH_WUNLOCK(inp->inp_pcbinfo);
+			}
+			break;
 #endif /* PROMISCUOUS_INET */
 
 		default:
@@ -1435,6 +1457,12 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 #ifdef PROMISCUOUS_INET
 		case IP_SYNFILTER:
 			error = syn_filter_getopt(so, sopt);
+			break;
+		case IP_CATCHALL_LISTEN:
+			INP_HASH_RLOCK(inp->inp_pcbinfo);
+			optval = (inp == inp->inp_pcbinfo->ipi_catchall_listen);
+			INP_HASH_RUNLOCK(inp->inp_pcbinfo);
+			error = sooptcopyout(sopt, &optval, sizeof optval);
 			break;
 #endif /* PROMISCUOUS_INET */
 

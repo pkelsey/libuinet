@@ -38,6 +38,10 @@
 #ifndef _NETINET_IN_PCB_H_
 #define _NETINET_IN_PCB_H_
 
+#ifdef _KERNEL
+#include "opt_promiscinet.h"
+#endif
+
 #include <sys/queue.h>
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
@@ -372,10 +376,15 @@ struct inpcbinfo {
 	 */
 	struct vnet		*ipi_vnet;		/* (c) */
 
+#ifdef PROMISCUOUS_INET
+	void			*ipi_pspare[1];
+	struct inpcb		*ipi_catchall_listen;	/* hash lock */
+#else
 	/*
 	 * general use 2
 	 */
 	void 			*ipi_pspare[2];
+#endif
 };
 
 #ifdef _KERNEL
