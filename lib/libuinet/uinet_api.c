@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -44,6 +44,7 @@
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/in_promisc.h>
+#include <netinet/tcp_syncache.h>
 #include <net/pfil.h>
 #include <net/vnet.h>
 
@@ -1499,6 +1500,7 @@ uinet_instance_default_cfg(struct uinet_instance_cfg *cfg)
 {
 	cfg->loopback = 0;
 	cfg->userdata = NULL;
+	cfg->syncache_event_cb = NULL;
 }
 
 int
@@ -1516,6 +1518,10 @@ uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
 	uinst->ui_vnet = vnet;
 	uinst->ui_vnet->vnet_uinet = uinst;
 	uinst->ui_userdata = cfg->userdata;
+
+	CURVNET_SET(uinst->ui_vnet);
+	V_syncache_event_cb = (syncache_event_callback_t)(cfg->syncache_event_cb);
+	CURVNET_RESTORE();
 
 	/*
 	 * Don't respond with a reset to TCP segments that the stack will

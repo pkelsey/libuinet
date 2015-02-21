@@ -152,5 +152,21 @@ struct tcp_syncache {
 	u_int	hash_secret;
 };
 
+#ifdef UINET
+enum syncache_event {
+	SYNCACHE_EVENT_DROP_BUCKET_FULL,
+	SYNCACHE_EVENT_DROP_REXMTS,
+	SYNCACHE_EVENT_DROP_RST,
+	SYNCACHE_EVENT_DROP_BAD_ACK,
+	SYNCACHE_EVENT_DROP_UNREACH,
+	SYNCACHE_EVENT_DROP_NOMEM
+};
+
+typedef void (*syncache_event_callback_t)(enum syncache_event e, const struct in_conninfo *inc);
+VNET_DECLARE(syncache_event_callback_t, syncache_event_cb);
+
+#define V_syncache_event_cb	VNET(syncache_event_cb)
+#endif
+
 #endif /* _KERNEL */
 #endif /* !_NETINET_TCP_SYNCACHE_H_ */

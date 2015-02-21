@@ -519,10 +519,22 @@ typedef enum {
 struct uinet_if;
 typedef struct uinet_if * uinet_if_t;
 
+enum uinet_syncache_event {
+	UINET_SYNCACHE_EVENT_DROP_BUCKET_FULL,
+	UINET_SYNCAHE_EVENT_DROP_REXMTS,
+	UINET_SYNCAHE_EVENT_DROP_RST,
+	UINET_SYNCAHE_EVENT_DROP_BAD_ACK,
+	UINET_SYNCAHE_EVENT_DROP_UNREACH,
+	UINET_SYNCAHE_EVENT_DROP_NOMEM
+};
+
+typedef void (*uinet_syncache_event_callback_t)(enum uinet_syncache_event e, const struct uinet_in_conninfo *inc);
+
 
 struct uinet_instance_cfg {
 	unsigned int loopback;
 	void *userdata;
+	uinet_syncache_event_callback_t syncache_event_cb;
 };
 
 #endif /* _UINET_API_TYPES_H_ */
