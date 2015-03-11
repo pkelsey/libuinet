@@ -1,4 +1,5 @@
 uinet_config_blackhole
+uinet_default_cfg
 uinet_errno_to_os
 uinet_finalize_thread
 uinet_free_sockaddr
@@ -7,9 +8,13 @@ uinet_getifstat
 uinet_gettcpstat
 uinet_ifaliasname
 uinet_ifcreate
+uinet_if_default_config
 uinet_ifdestroy
 uinet_ifdestroy_byname
 uinet_ifgenericname
+uinet_iftypename
+uinet_if_inject_tx_packets
+uinet_if_pd_alloc
 uinet_if_set_batch_event_handler
 uinet_inet_ntoa
 uinet_inet_ntop
@@ -30,6 +35,12 @@ uinet_l2tagstack_hash
 uinet_mac_aton
 uinet_make_socket_passive
 uinet_make_socket_promiscuous
+uinet_pd_list_alloc
+uinet_pd_list_free
+uinet_pd_ref_acquire
+uinet_pd_ref_release
+uinet_pfil_add_hook
+uinet_pfil_remove_hook
 uinet_pool_alloc_arg
 uinet_pool_create
 uinet_pool_destroy

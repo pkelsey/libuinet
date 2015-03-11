@@ -897,6 +897,7 @@ int main (int argc, char **argv)
 	int verbose = 0;
 	int i;
 	int error;
+	struct uinet_if_cfg ifcfg;
 
 	while ((ch = getopt(argc, argv, "hi:l:p:v")) != -1) {
 		switch (ch) {
@@ -942,8 +943,10 @@ int main (int argc, char **argv)
 		printf("Specify a listen port [0, 65535]\n");
 		return (1);
 	}
-	
-	uinet_init(1, 128*1024, NULL);
+
+	struct uinet_global_cfg cfg;
+	uinet_default_cfg(&cfg);
+	uinet_init(&cfg, NULL);
 	uinet_install_sighandlers();
 
 	for (i = 0; i < num_ifs; i++) {
@@ -953,7 +956,10 @@ int main (int argc, char **argv)
 			exit(1);
 		}
 
-		error = uinet_ifcreate(ifs[i].uinst, UINET_IFTYPE_NETMAP, ifnames[i], ifnames[i], 0, &ifs[i].uif);
+		uinet_if_default_config(UINET_IFTYPE_NETMAP, &ifcfg);
+		ifcfg.configstr = ifnames[i];
+		ifcfg.alias = ifnames[i];
+		error = uinet_ifcreate(ifs[i].uinst, &ifcfg, &ifs[i].uif);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", ifnames[i], error);
 		} else {

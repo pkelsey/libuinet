@@ -27,15 +27,33 @@
 #ifndef	_UINET_API_TYPES_H_
 #define	_UINET_API_TYPES_H_
 
+#include "uinet_queue.h"
+
+
 #define UINET_IF_NAMESIZE	16
 
 struct uinet_socket;
 struct uinet_mbuf;
 struct uinet_in_l2info;
+struct uinet_if;
 
 typedef void * uinet_api_synfilter_cookie_t;
 
+/* XXX to be removed */
 typedef void (*uinet_pfil_cb_t)(const struct uinet_mbuf *m, struct uinet_in_l2info *l2i);
+
+#define UINET_PFIL_IN	0x00000001
+#define UINET_PFIL_OUT	0x00000002
+#define UINET_PFIL_ALL	(UINET_PFIL_IN|UINET_PFIL_OUT)
+
+typedef int (*uinet_pfil_callback_t)(void *arg, struct uinet_mbuf **m, struct uinet_if *uif, int dir, struct uinet_in_l2info *l2i);
+
+struct uinet_pfil_cb {
+	uinet_pfil_callback_t f;
+	void *arg;
+	int flags;
+};
+
 
 typedef int (*uinet_api_synfilter_callback_t)(struct uinet_socket *, void *, uinet_api_synfilter_cookie_t);
 
@@ -504,17 +522,111 @@ typedef enum {
 } uinet_blackhole_t;
 
 
+
+#define UINET_PD_INJECT		0x0010	/* Packet will be processed via an interfaces inject method */
+#define UINET_PD_TO_STACK	0x0020	/* Packet will be sent to the stack.  Implies UINET_PD_MBUF_USED */
+#define UINET_PD_DROP		0x0040	/* Dispose of packet upon return from first-look handler */
+#define UINET_PD_EXTRA_REFS	0x0080	/* Apply extra refs during call to uinet_pd_add_refs() */
+
+struct uinet_pd_ctx;
+
+struct uinet_pd {
+	uint16_t flags;
+	uint16_t length;
+	uint16_t pool_id;
+	uintptr_t ref;
+	uint32_t *data;
+	struct uinet_pd_ctx *ctx;
+};
+
+struct uinet_pd_list {
+	uint32_t num_descs;
+	struct uinet_pd descs[0];
+};
+
+
 typedef enum {
-	UINET_IFTYPE_LOOPBACK,
 	UINET_IFTYPE_NETMAP,
 	UINET_IFTYPE_PCAP,
-	UINET_IFTYPE_BRIDGE,
-	UINET_IFTYPE_SPAN
+
+	/* always last */
+	UINET_IFTYPE_COUNT
 } uinet_iftype_t;
 
 
 struct uinet_if;
 typedef struct uinet_if * uinet_if_t;
+
+
+struct uinet_if_netmap_cfg {
+	/*
+	 * Bitmask of categories to trace.  Only effective if tracing is
+	 * enabled at compile-time.  See uinet_if_netmap.c.
+	 */
+	uint32_t trace_mask;
+
+	/* 
+	 * The number of extra netmap buffers to allocate.  This must be
+	 * greater than zero for zero-copy receive to function with vale
+	 * ports.
+	 */
+	uint32_t vale_num_extra_bufs;
+
+	/*
+	 * The maximum number of received packets to process in each receive
+	 * pass.
+	 */
+	uint32_t rx_batch_size;
+};
+
+union uinet_if_type_cfg {
+	struct uinet_if_netmap_cfg netmap;
+};
+
+struct uinet_if_cfg {
+	uinet_iftype_t type;	/* interface driver type to attach */
+
+	/*
+	 *  Driver-specific configuration string.
+	 *
+	 *  UINET_IFTYPE_NETMAP - vale<n>:<m> or <hostifname> or
+	 *  		          <hostifname>:<qno>, where queue 0 is
+	 *                        implied by a configstr of <hostifname>
+	 *
+	 *  UINET_IFTYPE_PCAP - <hostifname> or file://<filename>
+	 *
+	 */
+	const char *configstr;
+
+	/*
+	 * Any user-supplied string, or NULL.  If a string is supplied, it
+	 * must be unique among all the other aliases and driver-assigned
+	 * names.  Passing an empty string is the same as passing NULL.
+	 */
+	const char *alias;
+	
+	/*
+	 * CPU numbers to bind the driver rx and tx threads to.  Not all
+	 * drivers have both of these threads.  A value of -1 leaves the
+	 * thread floating.
+	 */
+	int rx_cpu;
+	int tx_cpu;
+
+	uint32_t tx_inject_queue_len;
+
+	void (*first_look_handler)(void *arg, struct uinet_pd_list *pkts);
+	void *first_look_handler_arg;
+
+	union uinet_if_type_cfg type_cfg;	/* type-specific config */
+};
+
+
+struct uinet_global_cfg {
+	unsigned int ncpus;
+	unsigned int nmbclusters;
+	uint32_t netmap_extra_bufs;
+};
 
 
 struct uinet_instance_cfg {

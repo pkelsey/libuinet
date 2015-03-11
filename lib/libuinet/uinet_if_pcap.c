@@ -51,9 +51,17 @@
 #include "uinet_if_pcap_host.h"
 
 
+static struct uinet_if_type_info if_pcap_type_info = {
+	.type = UINET_IFTYPE_PCAP,
+	.type_name = "pcap",
+	.default_cfg = NULL
+};
+UINET_IF_REGISTER_TYPE(PCAP, &if_pcap_type_info);
+
+
 struct if_pcap_softc {
 	struct ifnet *ifp;
-	const struct uinet_if *uif;
+	struct uinet_if *uif;
 	uint8_t addr[ETHER_ADDR_LEN];
 	int isfile;
 	char host_ifname[MAXNAMLEN];
@@ -63,6 +71,8 @@ struct if_pcap_softc {
 	struct thread *tx_thread;
 	struct thread *rx_thread;
 	struct mtx tx_lock;
+
+	STAILQ_HEAD(,uinet_pkt_desc) tx_inject_queue;
 };
 
 
@@ -153,14 +163,12 @@ if_pcap_attach(struct uinet_if *uif)
 		}
 	}
 
+	STAILQ_INIT(&sc->tx_inject_queue);
+
 	if (0 != if_pcap_setup_interface(sc)) {
 		error = ENXIO;
 		goto fail;
 	}
-
-	uif->ifindex = sc->ifp->if_index;
-	uif->ifdata = sc;
-	uif->ifp = sc->ifp;
 
 	return (0);
 
@@ -209,8 +217,8 @@ if_pcap_send(void *arg)
 	uint8_t *pkt;
 	unsigned int pktlen;
 
-	if (sc->uif->cpu >= 0)
-		sched_bind(sc->tx_thread, sc->uif->cpu);
+	if (sc->uif->tx_cpu >= 0)
+		sched_bind(sc->tx_thread, sc->uif->tx_cpu);
 
 	while (1) {
 		mtx_lock(&sc->tx_lock);
@@ -323,8 +331,8 @@ if_pcap_receive(void *arg)
 	struct if_pcap_softc *sc = (struct if_pcap_softc *)arg;
 	int result;
 
-	if (sc->uif->cpu >= 0)
-		sched_bind(sc->rx_thread, sc->uif->cpu);
+	if (sc->uif->rx_cpu >= 0)
+		sched_bind(sc->rx_thread, sc->uif->rx_cpu);
 
 	if (sc->isfile)
 		pause("pcaprx", hz);
@@ -339,9 +347,11 @@ static int
 if_pcap_setup_interface(struct if_pcap_softc *sc)
 {
 	struct ifnet *ifp;
+	struct uinet_if *uif;
 
 	ifp = sc->ifp = if_alloc(IFT_ETHER);
-
+	uif = sc->uif;
+	
 	ifp->if_init =  if_pcap_init;
 	ifp->if_softc = sc;
 
@@ -358,6 +368,8 @@ if_pcap_setup_interface(struct if_pcap_softc *sc)
 
 	ether_ifattach(ifp, sc->addr);
 	ifp->if_capabilities = ifp->if_capenable = IFCAP_HWSTATS;
+
+	uinet_if_attach(uif, sc->ifp, sc);
 
 	mtx_init(&sc->tx_lock, "txlk", NULL, MTX_DEF);
 

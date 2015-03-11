@@ -47,6 +47,7 @@
 
 #include "uinet_internal.h"
 #include "uinet_host_interface.h"
+#include "uinet_if_netmap.h"
 
 
 pid_t     getpid(void);
@@ -73,13 +74,26 @@ static struct uhi_msg shutdown_helper_msg;
 struct uinet_instance uinst0;
 
 int
-uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_cfg *inst_cfg)
+uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 {
 	struct thread *td;
 	char tmpbuf[32];
 	int boot_pages;
 	int num_hash_buckets;
 	caddr_t v;
+	struct uinet_global_cfg default_cfg;
+	unsigned int ncpus;
+	unsigned int nmbclusters;
+
+	if (cfg == NULL) {
+		uinet_default_cfg(&default_cfg);
+		cfg = &default_cfg;
+	}
+
+	if_netmap_num_extra_bufs = cfg->netmap_extra_bufs;
+
+	ncpus = cfg->ncpus;
+	nmbclusters = cfg->nmbclusters;
 
 	if (ncpus > MAXCPU) {
 		printf("Limiting number of CPUs to %u\n", MAXCPU);

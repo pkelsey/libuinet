@@ -1009,7 +1009,7 @@ fail:
 
 
 static void
-dump_ifstat(uinet_instance_t uinst, const char *name)
+dump_ifstat(uinet_if_t uif, const char *name)
 {
 	struct uinet_ifstat stat;
 	int perline = 3;
@@ -1017,7 +1017,7 @@ dump_ifstat(uinet_instance_t uinst, const char *name)
 
 #define PRINT_IFSTAT(s) printf("%-26s= %-10lu%s", #s, stat.s, (index % perline == 0) ? "\n" : "  "); index++ 
 
-	uinet_getifstat(uinst, name, &stat);
+	uinet_getifstat(uif, &stat);
 
 	printf("========================================================================\n");
 	printf("%s:\n", name);
@@ -1180,7 +1180,7 @@ if_stats_timer_cb(struct ev_loop *loop, ev_timer *w, int revents)
 {
 	struct interface_config *cfg = w->data;
 
-	dump_ifstat(cfg->uinst, cfg->alias);
+	dump_ifstat(cfg->uif, cfg->alias);
 	printf("num_sockets=%llu max_accept_batch=%llu\n", (unsigned long long)cfg->num_sockets, (unsigned long long)cfg->max_accept_batch);
 	if (cfg->do_tcpstats) {
 		dump_tcpstat(cfg->uinst);
@@ -1252,6 +1252,7 @@ int main (int argc, char **argv)
 	int ifnetmap_count = 0;
 	int ifpcap_count = 0;
 	struct content_type *contype;
+	struct uinet_if_cfg ifcfg;
 
 	memset(interfaces, 0, sizeof(interfaces));
 	memset(servers, 0, sizeof(servers));
@@ -1415,9 +1416,10 @@ int main (int argc, char **argv)
 			servers[i].interface->promisc = 1;
 		}
 	}
-	
-	
-	uinet_init(1, 128*1024, NULL);
+
+	struct uinet_global_cfg cfg;
+	uinet_default_cfg(&cfg);
+	uinet_init(&cfg, NULL);
 	uinet_install_sighandlers();
 
 	for (i = 0; i < num_interfaces; i++) {
@@ -1452,8 +1454,10 @@ int main (int argc, char **argv)
 			       interfaces[i].alias, interfaces[i].promisc ? "enabled" : "disabled");
 		}
 
-		error = uinet_ifcreate(interfaces[i].uinst, interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
-				       0, &interfaces[i].uif);
+		uinet_if_default_config(interfaces[i].type, &ifcfg);
+		ifcfg.configstr = interfaces[i].ifname;
+		ifcfg.alias = interfaces[i].alias;
+		error = uinet_ifcreate(interfaces[i].uinst, &ifcfg, &interfaces[i].uif);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", interfaces[i].alias, error);
 		}

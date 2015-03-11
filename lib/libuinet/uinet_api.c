@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -124,24 +124,16 @@ uinet_finalize_thread(void)
 
 
 int
-uinet_getifstat(uinet_instance_t uinst, const char *name, struct uinet_ifstat *stat)
+uinet_getifstat(uinet_if_t uif, struct uinet_ifstat *stat)
 {
-	struct uinet_if *uif;
 	struct ifnet *ifp;
 	int error = 0;
 
-	CURVNET_SET(uinst->ui_vnet);
-
-	uif = uinet_iffind_byname(name);
-	if (NULL == uif) {
-		printf("could not find interface %s\n", name);
-		error = EINVAL;
-		goto out;
-	}
+	CURVNET_SET(uif->uinst->ui_vnet);
 
 	ifp = ifnet_byindex_ref(uif->ifindex);
 	if (NULL == ifp) {
-		printf("could not find interface %s by index\n", name);
+		printf("could not find interface %s by index\n", uif->name);
 		error = EINVAL;
 		goto out;
 	}
@@ -1316,6 +1308,81 @@ uinet_sysctl(uinet_instance_t uinst, const int *name, u_int namelen, void *oldp,
 	return (error);
 }
 
+
+static int
+uinet_pfil_hook_wrapper(void *arg, struct mbuf **mp, struct ifnet *ifp, int dir,
+			struct inpcb *inp)
+{
+	struct uinet_pfil_cb *cb = arg;
+	struct ifl2info *l2i_tag;
+	int result;
+
+	l2i_tag = (struct ifl2info *)m_tag_locate(*mp,
+						  MTAG_PROMISCINET,
+						  MTAG_PROMISCINET_L2INFO,
+						  NULL);
+
+	result = cb->f(cb->arg, (struct uinet_mbuf **)mp, ifp ? uinet_iftouif(ifp)  : NULL, dir,
+		       l2i_tag ? (struct uinet_in_l2info *)&l2i_tag->ifl2i_info : NULL);
+	if (*mp == NULL)
+		result = ENOBUFS;
+
+	return (result);
+}
+
+
+int
+uinet_pfil_add_hook(uinet_instance_t uinst, struct uinet_pfil_cb *cb, int af)
+{
+	int error;
+	struct pfil_head *pfh;
+
+	CURVNET_SET(uinst->ui_vnet);
+	if (cb == NULL || cb->f == NULL) {
+		CURVNET_RESTORE();
+		return (EINVAL);
+	}
+
+	pfh = pfil_head_get(PFIL_TYPE_AF, af);
+	if (pfh == NULL) {
+		CURVNET_RESTORE();
+		return (EINVAL);
+	}
+
+	error = pfil_add_hook(uinet_pfil_hook_wrapper, cb,
+	    cb->flags | PFIL_WAITOK, pfh);
+
+	CURVNET_RESTORE();
+	return (error);
+}
+
+
+int
+uinet_pfil_remove_hook(uinet_instance_t uinst, struct uinet_pfil_cb *cb, int af)
+{
+	int error;
+	struct pfil_head *pfh;
+
+	CURVNET_SET(uinst->ui_vnet);
+	if (cb == NULL || cb->f == NULL) {
+		CURVNET_RESTORE();
+		return (EINVAL);
+	}
+
+	pfh = pfil_head_get(PFIL_TYPE_AF, af);
+	if (pfh == NULL) {
+		CURVNET_RESTORE();
+		return (EINVAL);
+	}
+
+	error = pfil_remove_hook(uinet_pfil_hook_wrapper, cb,
+	    cb->flags, pfh);
+
+	CURVNET_RESTORE();
+	return (error);
+}
+
+
 static VNET_DEFINE(uinet_pfil_cb_t, uinet_pfil_cb) = NULL;
 #define V_uinet_pfil_cb VNET(uinet_pfil_cb)
 static VNET_DEFINE(void *, uinet_pfil_cbdata) = NULL;
@@ -1496,12 +1563,22 @@ uinet_lock_log_enable(void)
 	return (0);
 }
 
+
 int
 uinet_lock_log_disable(void)
 {
 
 	uhi_lock_log_disable();
 	return (0);
+}
+
+
+void
+uinet_default_cfg(struct uinet_global_cfg *cfg)
+{
+	cfg->ncpus = 1;
+	cfg->nmbclusters = 128*1024;
+	cfg->netmap_extra_bufs = 10000;
 }
 
 
@@ -1601,3 +1678,240 @@ uinet_instance_destroy(uinet_instance_t uinst)
 }
 
 
+void
+uinet_if_default_config(uinet_iftype_t type, struct uinet_if_cfg *cfg)
+{
+	struct uinet_if_type_info *ti;
+
+	ti = uinet_if_get_type_info(type);
+	if (ti && cfg) {
+		cfg->type = type;
+		cfg->configstr = NULL;
+		cfg->alias = NULL;
+		cfg->rx_cpu = -1;
+		cfg->tx_cpu = -1;
+		cfg->tx_inject_queue_len = 2048;
+		cfg->first_look_handler = NULL;
+		cfg->first_look_handler_arg = NULL;
+
+		if (ti->default_cfg)
+			ti->default_cfg(&cfg->type_cfg);
+	}
+}
+
+
+int
+uinet_if_set_batch_event_handler(uinet_if_t uif,
+				 void (*handler)(void *arg, int event),
+				 void *arg)
+{
+	int error = EINVAL;
+
+	if (NULL != uif) {
+		uif->batch_event_handler = handler;
+		uif->batch_event_handler_arg = arg;
+		error = 0;
+	}
+
+	return (error);
+}
+
+
+struct uinet_pd_list *
+uinet_pd_list_alloc(uint32_t num_descs)
+{
+	struct uinet_pd_list *list;
+
+	list = malloc(sizeof(*list) + num_descs * sizeof(struct uinet_pd),
+		      M_DEVBUF, M_WAITOK);
+	if (list == NULL)
+		return (NULL);
+
+	list->num_descs = num_descs;
+	return (list);
+}
+
+
+void
+uinet_pd_list_free(struct uinet_pd_list *list)
+{
+	free(list, M_DEVBUF);
+}
+
+
+void
+uinet_if_pd_alloc(uinet_if_t uif, struct uinet_pd_list *pkts)
+{
+	UIF_PD_ALLOC(uif, pkts);
+}
+
+
+void
+uinet_if_inject_tx_packets(uinet_if_t uif, struct uinet_pd_list *pkts)
+{
+	UIF_INJECT_TX(uif, pkts);
+}
+
+
+/*
+ * Increment the refcount of each packet descriptor as required based on the
+ * descriptor flags.  This routine does not atomically increment the
+ * refcounts as it is meant to be used in first-look handler implementations
+ * - it is only safe to use to adjust the refcounts of packet descriptors
+ * that have a refcount of one (meaning the caller is the owner of the sole
+ * reference to the descriptor).
+ */
+void
+uinet_pd_ref_acquire(struct uinet_pd_list *pkts, unsigned int num_extra)
+{
+	struct uinet_pd *pd;
+	unsigned int refs;
+	uint32_t i;
+
+	for (i = 0; i < pkts->num_descs; i++) {
+		pd = &pkts->descs[i];
+
+		/*
+		 * If the packet is to be both injected into the transmit
+		 * path of another interface and sent to the stack, one
+		 * extra ref is needed.  If neither or only one of those
+		 * actions is to be taken, no extra refs are needed.
+		 */
+		refs = ((pd->flags & (UINET_PD_INJECT|UINET_PD_TO_STACK)) ==
+			(UINET_PD_INJECT|UINET_PD_TO_STACK));
+
+		if (pd->flags & UINET_PD_EXTRA_REFS)
+			refs += num_extra;
+
+		/*
+		 * Only perform the increment if refs is non-zero to avoid
+		 * pulling packet descriptor context, and possibly external
+		 * refcount storage, into the cache unnecessarily.
+		 */
+		if (refs) {
+			pd->ctx->flags &= ~UINET_PD_CTX_SINGLE_REF;
+			*(pd->ctx->refcnt) += refs;
+		}
+	}
+}
+
+
+void
+uinet_pd_ref_release(struct uinet_pd_ctx *pdctx[], uint32_t n)
+{
+	uint32_t i;
+	struct uinet_pd_ctx *cur_pdctx;
+	struct uinet_pd_ctx *free_group[UINET_PD_FREE_BATCH_SIZE];
+	struct uinet_pd_pool_info *pool;
+	unsigned int cur_pool_id;
+	uint32_t free_group_count;
+
+	/*
+	 * The list of packet descriptor contexts to free will in general
+	 * contain packet descriptor contexts originating from different
+	 * pools and having different reference counts.  This implementation
+	 * will batch up sequential (not necessarily consecutive) packet
+	 * descriptor contexts in the list that are from the same pool and
+	 * are ready to be freed and will free them in a single operation.
+	 */
+
+	cur_pool_id = 0xffffffff;
+	free_group_count = 0;
+	for (i = 0; i < n; i++) {
+		cur_pdctx = pdctx[i];
+
+		/*
+		 * The test for UINET_PD_CTX_SINGLE_REF is first so that
+		 * when it is set, the potentially costly refcnt derefence
+		 * (cache miss) and atomic_fetchadd() (inter-cpu coherency
+		 * op) are avoided.
+		 */
+		if ((cur_pdctx->flags & UINET_PD_CTX_SINGLE_REF) ||
+		    (*(cur_pdctx->refcnt) == 1) ||
+		    (atomic_fetchadd_int(cur_pdctx->refcnt, -1) == 1)) {
+			if ((cur_pdctx->pool_id != cur_pool_id) ||
+			    (free_group_count == UINET_PD_FREE_BATCH_SIZE)) {
+				if (free_group_count) {
+					pool = uinet_pd_pool_get(cur_pool_id);
+					pool->free(free_group, free_group_count);
+					free_group_count = 0;
+				}
+				cur_pool_id = cur_pdctx->pool_id;
+			}
+			free_group[free_group_count++] = cur_pdctx;
+		}
+	}
+	if (free_group_count) {
+		pool = uinet_pd_pool_get(cur_pool_id);
+		pool->free(free_group, free_group_count);
+	}
+}
+
+
+void
+uinet_pd_deliver_to_stack(struct uinet_if *uif, struct uinet_pd_list *pkts)
+{
+	struct ifnet *ifp;
+	struct uinet_pd *pd;
+	struct uinet_pd_ctx *pdctx;
+	struct mbuf *m;
+	uint32_t i;
+
+	ifp = uif->ifp;
+	for (i = 0; i < pkts->num_descs; i++) {
+		pd = &pkts->descs[i];
+
+		if (pd->flags & UINET_PD_TO_STACK) {
+			pdctx = pd->ctx;
+			pdctx->flags |= UINET_PD_CTX_MBUF_USED;
+			m = pdctx->m;
+			m->m_pkthdr.len = m->m_len = pd->length;
+			m->m_pkthdr.rcvif = ifp;
+			ifp->if_input(ifp, m);
+		}
+	}
+}
+
+
+void
+uinet_pd_drop(struct uinet_pd_list *pkts)
+{
+	uint32_t i;
+	struct uinet_pd *pd;
+	struct uinet_pd_ctx *pdctx;
+	struct uinet_pd_ctx *free_group[UINET_PD_FREE_BATCH_SIZE];
+	struct uinet_pd_pool_info *pool;
+	unsigned int cur_pool_id;
+	uint32_t free_group_count;
+
+	/*
+	 * The list of packet descriptor contexts to free will in general
+	 * contain packet descriptor contexts originating from different
+	 * pools.  This implementation will batch up sequential (not
+	 * necessarily consecutive) packet descriptor contexts in the list
+	 * that are from the same pool and are marked for drop and will free
+	 * them in a single operation.
+	 */
+	pd = &pkts->descs[0];
+	cur_pool_id = 0xffffffff;
+	free_group_count = 0;
+	for (i = 0; i < pkts->num_descs; i++, pd++) {
+		if (pd->flags & UINET_PD_DROP) {
+			pdctx = pd->ctx;
+			if ((pdctx->pool_id != cur_pool_id) ||
+			    (free_group_count == UINET_PD_FREE_BATCH_SIZE)) {
+				if (free_group_count) {
+					pool = uinet_pd_pool_get(cur_pool_id);
+					pool->free(free_group, free_group_count);
+					free_group_count = 0;
+				}
+				cur_pool_id = pdctx->pool_id;
+			}
+			free_group[free_group_count++] = pdctx;
+		}
+	}
+	if (free_group_count) {
+		pool = uinet_pd_pool_get(cur_pool_id);
+		pool->free(free_group, free_group_count);
+	}
+}

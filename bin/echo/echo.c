@@ -353,6 +353,7 @@ int main (int argc, char **argv)
 	int current_uinst_index = 0;
 	int current_uinst_num_interfaces = 0;
 	uinet_instance_t current_uinst;
+	struct uinet_if_cfg ifcfg;
 
 	memset(interfaces, 0, sizeof(interfaces));
 	memset(servers, 0, sizeof(servers));
@@ -489,8 +490,9 @@ int main (int argc, char **argv)
 		}
 	}
 	
-	
-	uinet_init(1, 128*1024, NULL);
+	struct uinet_global_cfg cfg;
+	uinet_default_cfg(&cfg);
+	uinet_init(&cfg, NULL);
 	uinet_install_sighandlers();
 
 	current_uinst = uinet_instance_default();
@@ -530,8 +532,10 @@ int main (int argc, char **argv)
 			       interfaces[i].alias, interfaces[i].promisc ? "enabled" : "disabled");
 		}
 
-		error = uinet_ifcreate(interfaces[i].uinst, interfaces[i].type, interfaces[i].ifname, interfaces[i].alias,
-				       0, &interfaces[i].uif);
+		uinet_if_default_config(interfaces[i].type, &ifcfg);
+		ifcfg.configstr = interfaces[i].ifname;
+		ifcfg.alias = interfaces[i].alias;
+		error = uinet_ifcreate(interfaces[i].uinst, &ifcfg, &interfaces[i].uif);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", interfaces[i].alias, error);
 		}

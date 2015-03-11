@@ -97,9 +97,8 @@ UINET_SRCS+=			\
 	uinet_config.c		\
 	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
-	uinet_if_bridge.c	\
+	uinet_if.c		\
 	uinet_if_pcap.c		\
-	uinet_if_span.c		\
 	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
@@ -128,6 +127,7 @@ UINET_SRCS+=			\
 	uinet_kern_timeout.c	\
 	uinet_machdep.c		\
 	uinet_dev_random.c	\
+	uinet_pkt_desc.c	\
 	uinet_sched.c		\
 	uinet_subr_bus.c	\
 	uinet_subr_kdb.c	\

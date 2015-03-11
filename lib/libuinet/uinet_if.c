@@ -23,33 +23,46 @@
  * SUCH DAMAGE.
  */
 
-#ifndef	_UINET_INTERNAL_H_
-#define	_UINET_INTERNAL_H_
 
-#include <sys/queue.h>
+#include <sys/ctype.h>
+#include <sys/param.h>
+#include <sys/kernel.h>
 #include <sys/socket.h>
 
 #include <net/if.h>
-#include <net/vnet.h>
 
-#include "uinet_api.h"
 #include "uinet_if.h"
 
-struct uinet_instance {
-	struct vnet *ui_vnet;
-	void *ui_userdata;
-};
 
 
-extern struct uinet_instance uinst0;
+static struct uinet_if_type_info *uinet_if_types[UINET_IFTYPE_COUNT];
 
-void uinet_ifdestroy_all(struct uinet_instance *uinst);
-struct uinet_if *uinet_iffind_byname(const char *ifname);
 
-int uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet, struct uinet_instance_cfg *cfg);
-void uinet_instance_shutdown(uinet_instance_t uinst);
+int
+uinet_if_attach(struct uinet_if *uif, struct ifnet *ifp, void *sc)
+{
+	uif->ifindex = ifp->if_index;
+	uif->ifdata = sc;
+	uif->ifp = ifp;
 
-int uinet_if_attach(uinet_if_t uif, struct ifnet *ifp, void *sc);
+	uinet_iftouif(ifp) = uif;
 
-#endif /* _UINET_INTERNAL_H_ */
+	return (0);
+}
 
+
+void
+uinet_if_register_type(const void *arg)
+{
+	struct uinet_if_type_info *ti;
+
+	ti = (struct uinet_if_type_info *)arg;
+	uinet_if_types[ti->type] = ti;
+}
+
+
+struct uinet_if_type_info *
+uinet_if_get_type_info(uinet_iftype_t type)
+{
+	return ((type < UINET_IFTYPE_COUNT) ? uinet_if_types[type] : NULL);
+}

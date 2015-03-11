@@ -34,17 +34,17 @@ extern "C" {
 
 #include "uinet_api_errno.h"
 #include "uinet_api_types.h"
-#include "uinet_queue.h"
 
 void  uinet_finalize_thread(void);
 int   uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
-int   uinet_getifstat(uinet_instance_t uinst, const char *name, struct uinet_ifstat *stat);
+int   uinet_getifstat(uinet_if_t uif, struct uinet_ifstat *stat);
 void  uinet_gettcpstat(uinet_instance_t uinst, struct uinet_tcpstat *stat);
 char *uinet_inet_ntoa(struct uinet_in_addr in, char *buf, unsigned int size);
 const char *uinet_inet_ntop(int af, const void *src, char *dst, unsigned int size);
 int   uinet_inet_pton(int af, const char *src, void *dst);
 int   uinet_inet6_enabled(void);
-int   uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_cfg *inst_cfg);
+void  uinet_default_cfg(struct uinet_global_cfg *cfg);
+int   uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg);
 int   uinet_initialize_thread(void);
 void  uinet_install_sighandlers(void);
 int   uinet_interface_add_alias(uinet_instance_t uinst, const char *name, const char *addr, const char *braddr, const char *mask);
@@ -130,6 +130,9 @@ int   uinet_synfilter_deferral_deliver(struct uinet_socket *so, uinet_synf_defer
 void  uinet_synfilter_deferral_free(uinet_synf_deferral_t deferral);
 uinet_api_synfilter_cookie_t uinet_synfilter_deferral_get_cookie(uinet_synf_deferral_t deferral);
 int uinet_register_pfil_in(uinet_instance_t uinst, uinet_pfil_cb_t cb, void *arg, const char *ifname);
+int uinet_pfil_add_hook(uinet_instance_t uinst, struct uinet_pfil_cb *cb, int af);
+int uinet_pfil_remove_hook(uinet_instance_t uinst, struct uinet_pfil_cb *cb, int af);
+
 
 const char * uinet_mbuf_data(const struct uinet_mbuf *);
 size_t uinet_mbuf_len(const struct uinet_mbuf *);
@@ -140,45 +143,21 @@ int uinet_lock_log_enable(void);
 int uinet_lock_log_disable(void);
 
 /*
- *  Create a network interface with the given name, of the given type, in
- *  the given connection domain, and bound to the given cpu.
- *
- *  type	is the type of interface to create.  This determines the
- *		interface driver that will attach to the given configstr.
- *
- *  configstr	is a driver-specific configuration string.
- *
- *  		UINET_IFTYPE_NETMAP - vale<n>:<m> or <hostifname> or
- *  		    <hostifname>:<qno>, where queue 0 is implied by
- *		    a configstr of <hostifname>
- *
- *  alias	is any user-supplied string, or NULL.  If a string is supplied,
- *	        it must be unique among all the other aliases and driver-assigned
- *		names.  Passing an empty string is the same as passing NULL.
- *
- *  cpu		is the cpu number on which to perform stack processing on
- *		packets received on ifname.  -1 means leave it up to the
- *		scheduler.
- *
- *  cookie	is a pointer to an opaque reference that, if not NULL, will be
- *		set to something that corresponds to the interface that is
- *		created, or NULL if creation fails.
- *
+ *  Create a new network inteface of the given type and configuration.
  *
  *  Return values:
  *
  *  0			Interface created successfully
  *
- *  UINET_ENXIO		Unable to configure the inteface
+ *  UINET_ENXIO		Unable to configure the interface
  *
  *  UINET_ENOMEM	No memory available for interface creation
  *
  *  UINET_EEXIST	An interface with the given name already exists
  *
- *  UINET_EINVAL	Malformed ifname, or cpu not in range [-1, num_cpu-1]
+ *  UINET_EINVAL	Malformed ifname
  */
-int uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configstr,
-		   const char *alias, int cpu, uinet_if_t *uif);
+int uinet_ifcreate(uinet_instance_t uinst, struct uinet_if_cfg *cfg, uinet_if_t *uif);
 
 
 /*
@@ -227,6 +206,7 @@ int uinet_ifdestroy_byname(uinet_instance_t uinst, const char *ifname);
  */
 const char *uinet_ifaliasname(uinet_if_t uif);
 const char *uinet_ifgenericname(uinet_if_t uif);
+const char *uinet_iftypename(uinet_iftype_t type);
 
 
 /*
@@ -240,12 +220,27 @@ uinet_instance_t uinet_instance_create(struct uinet_instance_cfg *cfg);
 uinet_instance_t uinet_instance_default(void);
 void uinet_instance_destroy(uinet_instance_t uinst);
 
+void uinet_if_default_config(uinet_iftype_t type, struct uinet_if_cfg *cfg);
+
 #define UINET_BATCH_EVENT_START  0
 #define UINET_BATCH_EVENT_FINISH 1
 
 int uinet_if_set_batch_event_handler(uinet_if_t uif,
 				     void (*handler)(void *arg, int event),
 				     void *arg);
+
+void uinet_if_pd_alloc(uinet_if_t uif, struct uinet_pd_list *pkts);
+void uinet_if_inject_tx_packets(uinet_if_t uif, struct uinet_pd_list *pkts);
+
+struct uinet_pd_list *uinet_pd_list_alloc(uint32_t num_descs);
+void uinet_pd_list_free(struct uinet_pd_list *list);
+
+void uinet_pd_ref_acquire(struct uinet_pd_list *pkts, unsigned int num_extra);
+void uinet_pd_ref_release(struct uinet_pd_ctx *pdctx[], uint32_t n);
+
+void uinet_pd_deliver_to_stack(struct uinet_if *uif, struct uinet_pd_list *pkts);
+void uinet_pd_drop(struct uinet_pd_list *pkts);
+
 
 #ifdef __cplusplus
 }

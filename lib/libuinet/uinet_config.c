@@ -67,8 +67,7 @@ uinet_iffind_byname(const char *ifname)
 
 
 int
-uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configstr,
-	       const char *alias, int cpu, uinet_if_t *uif)
+uinet_ifcreate(uinet_instance_t uinst, struct uinet_if_cfg *cfg, uinet_if_t *uif)
 {
 	struct uinet_if *new_uif;
 	int alias_len;
@@ -76,14 +75,14 @@ uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configst
 
 	CURVNET_SET(uinst->ui_vnet);
 
-	if (alias) {
-		alias_len = strlen(alias);
+	if (cfg->alias) {
+		alias_len = strlen(cfg->alias);
 		if (alias_len >= IF_NAMESIZE) {
 			error = EINVAL;
 			goto out;
 		}
 		
-		if ((alias_len > 0) && (NULL != uinet_iffind_byname(alias))) {
+		if ((alias_len > 0) && (NULL != uinet_iffind_byname(cfg->alias))) {
 			error = EEXIST;
 			goto out;
 		}
@@ -95,23 +94,30 @@ uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configst
 		goto out;
 	}
 
-	new_uif->type = type;
+	new_uif->uinst = uinst;
+	new_uif->type = cfg->type;
 
-	if (configstr) {
-		new_uif->configstr = strdup(configstr, M_DEVBUF);
+	if (cfg->configstr) {
+		new_uif->configstr = strdup(cfg->configstr, M_DEVBUF);
 	} else {
 		new_uif->configstr = NULL;
 	}
 
-	if (alias) {
+	if (cfg->alias) {
 		/* copy guaranteed not to overflow the destinations due to above
 		 * checks against IF_NAMESIZE.
 		 */
-		strcpy(new_uif->alias, alias);
+		strcpy(new_uif->alias, cfg->alias);
 	} else {
 		new_uif->alias[0] = '\0';
 	}
-	new_uif->cpu = cpu;
+	new_uif->rx_cpu = cfg->rx_cpu;
+	new_uif->tx_cpu = cfg->tx_cpu;
+	new_uif->tx_inject_queue_len = cfg->tx_inject_queue_len;
+	new_uif->first_look_handler = cfg->first_look_handler;
+	new_uif->first_look_handler_arg = cfg->first_look_handler_arg;
+	new_uif->type_cfg = cfg->type_cfg;
+	
 	new_uif->ifdata = NULL;
 
 	switch (new_uif->type) {
@@ -120,12 +126,6 @@ uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configst
 		break;
 	case UINET_IFTYPE_PCAP:
 		error = if_pcap_attach(new_uif);
-		break;
-	case UINET_IFTYPE_BRIDGE:
-		error = if_bridge_attach(new_uif);
-		break;
-	case UINET_IFTYPE_SPAN:
-		error = if_span_attach(new_uif);
 		break;
 	default:
 		printf("Error attaching interface with config %s: unknown interface type %d\n", new_uif->configstr, new_uif->type);
@@ -245,18 +245,17 @@ uinet_ifgenericname(uinet_if_t uif)
 }
 
 
-int
-uinet_if_set_batch_event_handler(uinet_if_t uif,
-				 void (*handler)(void *arg, int event),
-				 void *arg)
+const char *
+uinet_iftypename(uinet_iftype_t type)
 {
-	int error = EINVAL;
+	struct uinet_if_type_info *ti;
 
-	if (NULL != uif) {
-		uif->batch_event_handler = handler;
-		uif->batch_event_handler_arg = arg;
-		error = 0;
-	}
-
-	return (error);
+	ti = uinet_if_get_type_info(type);
+	if (ti == NULL)
+		return ("<unknown>");
+	else
+		return ti->type_name;
 }
+
+
+
