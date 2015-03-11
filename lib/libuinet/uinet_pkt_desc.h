@@ -68,7 +68,7 @@
  * interface requires populating its transmit ring using the information
  * from that input queue (array).  This is the leanest packet transfer
  * sequence, requiring no payload data accesses and no dereferencing of
- * struct uinet_pd_ctx data (which are in general allocated form a pool and
+ * struct uinet_pd_ctx data (which are in general allocated from a pool and
  * thus non-colocated in memory).
  *
  * If packet inspection is required in the above transfer path, then the
@@ -79,11 +79,11 @@
  * of dereferencing the struct uinet_pd_ctx pointer in struct uinet_pd is
  * added, as is the overhead of incrementing the reference count pointed to
  * by struct uinet_pd_ctx (which may or may not be contained in struct
- * uinet_pd_ctx, depending on the desciptor type).
+ * uinet_pd_ctx, depending on the descriptor type).
  *
  * If one of the packet destinations is the stack, then there is the
  * overhead of dereferencing the mbuf pointed to by struct uinet_pd_ctx (to
- * initialized its length and receive interface members).  Of course, this
+ * initialize its length and receive interface members).  Of course, this
  * path also means you are going to spend a lot in stack processing anyway.
  *
  * The allocation path for struct uinet_pd_ctx, at least for ring-based

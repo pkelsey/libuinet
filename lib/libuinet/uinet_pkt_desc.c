@@ -215,9 +215,9 @@ uinet_pd_pool_deregister(unsigned int pool_id)
 
 
 /*
- *  Attempt to allocate n mbuf packet descriptors.  The mbufs are configured
- *  to use clusters and an external reference count located in the
- *  descriptor.
+ *  Attempt to allocate n mbuf packet descriptors.  The data buffers are
+ *  mbuf clusters and the packet descriptor reference counters are the same
+ *  as the ones allocated with the clusters.
  */
 unsigned int
 uinet_pd_mbuf_alloc_descs(struct uinet_pd_list *to, uint32_t n)
