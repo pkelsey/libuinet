@@ -40,6 +40,7 @@
 #if defined(__FreeBSD__)
 #include <pthread_np.h>
 #endif /* __FreeBSD__ */
+#include <signal.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -77,6 +78,8 @@ struct interface_config {
 	uinet_if_t uif;
 };
 
+
+static volatile int shutting_down;
 
 /*
  * This is a test program for the libuinet packet descriptor innards,
@@ -150,8 +153,10 @@ first_look_handler(void *arg, struct uinet_pd_list *pkts)
 		 * multiple ways, that we need to add extra refs to
 		 */
 		flags = (ifcfg->num_bridge_to > 1) ? UINET_PD_INJECT | UINET_PD_EXTRA_REFS : UINET_PD_INJECT;
-		for (i = 0; i < pkts->num_descs; i++)
+		for (i = 0; i < pkts->num_descs; i++) {
+			pkts->descs[i].flags &= ~UINET_PD_TO_STACK;
 			pkts->descs[i].flags |= flags;
+		}
 
 		/*
 		 *  We own one reference to the packets already, so if we
@@ -170,6 +175,7 @@ first_look_handler(void *arg, struct uinet_pd_list *pkts)
 
 		free_group_count = 0;
 		for (i = 0; i < pkts->num_descs; i++) {
+			pkts->descs[i].flags &= ~UINET_PD_TO_STACK;
 			free_group[free_group_count++] = pkts->descs[i].ctx;
 			if (free_group_count == FREE_GROUP_MAX) {
 				uinet_pd_ref_release(free_group, free_group_count);
@@ -281,8 +287,9 @@ print_ifcfgs(struct interface_config *ifcfgs, unsigned int num_ifs)
 	
 	for (i = 0; i < num_ifs; i++) {
 		curifcfg = &ifcfgs[i];
-		printf("%s (%s) type=%s gen=%s len=%u", curifcfg->ucfg.alias,
+		printf("%s (%s) type=%s txiqlen=%u gen=%s len=%u", curifcfg->ucfg.alias,
 		       curifcfg->ucfg.configstr, curifcfg->type_name,
+		       curifcfg->ucfg.tx_inject_queue_len,
 		       curifcfg->generate ? "yes" : "no",
 		       curifcfg->generate ? curifcfg->gen_len : 0);
 
@@ -321,6 +328,8 @@ interface_thread(void *arg)
 	uint64_t counter;
 	uint32_t i;
 
+	uinet_initialize_thread();
+
 	ifcfg = arg;
 
 	if (ifcfg->ucfg.tx_cpu >= 0)
@@ -331,7 +340,7 @@ interface_thread(void *arg)
 
 	if (ifcfg->generate) {
 		/* XXX currenty *very* quick and dirty.  need pps option and halfway reasonable regulation loop for given rate */
-		max_pkts = 1000;
+		max_pkts = 256;
 		pkts = uinet_pd_list_alloc(max_pkts);
 		if (pkts == NULL) {
 			printf("%s (%s): Failed to allocate packet descriptor list\n", ifcfg->ucfg.alias, ifcfg->ucfg.configstr);
@@ -339,7 +348,7 @@ interface_thread(void *arg)
 		}
 
 		counter = 0;
-		while (1) {
+		while (!shutting_down) {
 			pkts->num_descs = max_pkts;
 			uinet_if_pd_alloc(ifcfg->uif, pkts);
 			if (pkts->num_descs > 0) {
@@ -356,7 +365,8 @@ interface_thread(void *arg)
 					cur_pd->flags |= UINET_PD_INJECT;
 				}
 				uinet_if_inject_tx_packets(ifcfg->uif, pkts);
-			}
+			} else 
+				printf("%s (%s): 0 pds alloced\n", ifcfg->ucfg.alias, ifcfg->ucfg.configstr);
 			usleep(1000);
 		}
 	}
@@ -368,7 +378,18 @@ interface_thread(void *arg)
 	if (pkts)
 		uinet_pd_list_free(pkts);
 
+	uinet_finalize_thread();
+
 	return (NULL);
+}
+
+
+static void
+cleanup_handler(int signo, siginfo_t *info, void *uap)
+{
+	shutting_down = 1;
+	printf("Waiting 1 second for interface threads to stop\n");
+	sleep(1);
 }
 
 
@@ -499,6 +520,7 @@ int main (int argc, char **argv)
 			return (EXIT_FAILURE);
 	}
 	
+	printf("Requested extra netmap buffers: %u\n", global_pool_size);
 	print_ifcfgs(ifcfgs, num_ifs);
 
 	struct uinet_global_cfg cfg;
@@ -507,6 +529,13 @@ int main (int argc, char **argv)
 	cfg.netmap_extra_bufs = global_pool_size;
 	uinet_init(&cfg, NULL);
 	uinet_install_sighandlers();
+
+
+	struct sigaction sa;
+	sa.sa_sigaction = cleanup_handler;
+	sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+	sigfillset(&sa.sa_mask);
+	sigaction(SIGINT, &sa, NULL);
 
 	for (i = 0; i < num_ifs; i++) {
 		curifcfg = &ifcfgs[i];
@@ -539,7 +568,7 @@ int main (int argc, char **argv)
 		}
 	}
 	
-	while (1) {
+	while (!shutting_down) {
 		sleep(1);
 		printf("==============================================================================================================================\n");
 		for (i = 0; i < num_ifs; i++) {
@@ -554,14 +583,13 @@ int main (int argc, char **argv)
 		}
 	}
 
+	uinet_shutdown(0);
 
 	for (i = 0; i < num_ifs; i++) {
 		curifcfg = &ifcfgs[i];
 		if (curifcfg->has_thread)
 			pthread_join(curifcfg->thread_id, NULL);
 	}
-
-	uinet_shutdown(0);
 
 	return (EXIT_SUCCESS);
 }

@@ -561,7 +561,7 @@ if_netmap_pd_alloc_user(struct uinet_if *uif, struct uinet_pd_list *pkts)
 	TRACE(TRACE_PD_POOL, "Allocating %u user descriptors from pool %p, %u remaining\n", alloc_size, p, p->num_free - alloc_size);
 	for (i = 0, free_list_index = p->num_free - alloc_size; i < alloc_size; i++, free_list_index++) {
 		cur_pd = &pkts->descs[i];
-		cur_pdctx =  p->free_list[free_list_index];
+		cur_pdctx = p->free_list[free_list_index];
 
 		cur_pd->flags = UINET_PD_TYPE_NETMAP;
 		cur_pd->length = p->pool_info->bufsize;
@@ -1091,8 +1091,8 @@ if_netmap_send(void *arg)
 					TRACE(TRACE_TX_RING_OPS, " tx: slot %u: copying %s data to bufindex %u\n",
 					      curslot, 
 					      (desc_type == UINET_PD_TYPE_MBUF) ? "mbuf" : 
-					      (desc_type == UINET_PD_TYPE_NETMAP) ? "netmap-from-other-pool" 
-					      (desc_type == UINET_PD_PTR) ? "ptr" : "<unknown>", bufindex);
+					      (desc_type == UINET_PD_TYPE_NETMAP) ? "netmap-from-other-pool" :
+					      (desc_type == UINET_PD_TYPE_PTR) ? "ptr" : "<unknown>", bufindex);
 
 					n_copy++;
 					memcpy(slotbuf, cur_pd->data, pktlen);
@@ -1102,7 +1102,7 @@ if_netmap_send(void *arg)
 				avail--;
 				TRACE(TRACE_TX_RING_OPS, " tx: slot %u: setting bufindex=%u ptr=%p len=%u\n",
 				      curslot, bufindex, slot_pdctx, pktlen);
-				if_netmap_txsetslot(sc->nm_host_ctx, &curslot, bufindex, slot_pdctx, pktlen, (avail == 0));
+				if_netmap_txsetslot(sc->nm_host_ctx, &curslot, bufindex, slot_pdctx, pktlen, 0);
 
 				cur_inject_take = uinet_pd_ring_next(txr, cur_inject_take);
 			}
@@ -1134,7 +1134,7 @@ if_netmap_send(void *arg)
 				m_copydata(m, 0, pktlen, (caddr_t)slotbuf); 
 				TRACE(TRACE_TX_RING_OPS, " tx: slot %u: setting bufindex=%u ptr=%p len=%u\n",
 				      curslot, bufindex, slot_pdctx, pktlen);
-				if_netmap_txsetslot(sc->nm_host_ctx, &curslot, bufindex, slot_pdctx, pktlen, (avail == 0));
+				if_netmap_txsetslot(sc->nm_host_ctx, &curslot, bufindex, slot_pdctx, pktlen, 0);
 
 				if (last_m_to_free) {
 					last_m_to_free->m_nextpkt = m;
@@ -1303,7 +1303,7 @@ if_netmap_receive(void *arg)
 				      curslot, (unsigned int)new_pd_ctx->ref, new_pd_ctx);
 				if_netmap_rxsetslot(sc->nm_host_ctx, &curslot, new_pd_ctx->ref, new_pd_ctx);
 				
-				rx_pkt_desc->flags = UINET_PD_TYPE_NETMAP;
+				rx_pkt_desc->flags = UINET_PD_TYPE_NETMAP | UINET_PD_TO_STACK;
 				rx_pkt_desc->length = pktlen;
 				rx_pkt_desc->pool_id = sc->pd_pool->pool_id;
 				rx_pkt_desc->ref = bufindex;
@@ -1327,6 +1327,7 @@ if_netmap_receive(void *arg)
 				curslot = if_netmap_rxslotnext(sc->nm_host_ctx, curslot);
 
 				/* all other rx_pkt_desc fields were initialized by uinet_pd_mbuf_alloc_descs() */
+				rx_pkt_desc->flags |= UINET_PD_TO_STACK;
 				rx_pkt_desc->length = pktlen;
 				TRACE(TRACE_RX_RING_OPS, "rx: slot %u: copying bufindex %u to mbuf\n", curslot, bufindex);
 				memcpy(rx_pkt_desc->data, slotbuf, pktlen);
@@ -1469,10 +1470,8 @@ if_netmap_detach(struct uinet_if *uif)
 		if (--pool->num_interfaces == 0) {
 			if (pool->num_extra) {
 				if_netmap_set_bufshead(sc->nm_host_ctx, pool->extra_indices[0]);
-				for (i = 0; i < pool->num_extra - 1; i++) {
+				for (i = 0; i < pool->num_extra - 1; i++)
 					if_netmap_buffer_set_next(sc->nm_host_ctx, pool->extra_indices[i], pool->extra_indices[i + 1]);
-					slotindex = if_netmap_buffer_get_next(sc->nm_host_ctx, slotindex);
-				}
 				if_netmap_buffer_set_next(sc->nm_host_ctx, pool->extra_indices[i], 0);
 			}
 		}
