@@ -1863,6 +1863,7 @@ uinet_pd_deliver_to_stack(struct uinet_if *uif, struct uinet_pd_list *pkts)
 
 		if (pd->flags & UINET_PD_TO_STACK) {
 			pdctx = pd->ctx;
+			pdctx->flags &= ~UINET_PD_CTX_SINGLE_REF;  /* no telling how many refs the stack will add */
 			pdctx->flags |= UINET_PD_CTX_MBUF_USED;
 			m = pdctx->m;
 			m->m_pkthdr.len = m->m_len = pd->length;

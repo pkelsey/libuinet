@@ -111,9 +111,6 @@ UINET_IF_REGISTER_TYPE(NETMAP, &if_netmap_type_info);
  */
 
 
-
-#define IF_NETMAP_THREAD_STOP_CHECK_MS 200
-
 #define TRACE_ENABLE 0
 
 #define TRACE_CFG		0x00000001
@@ -182,7 +179,6 @@ struct if_netmap_softc {
 	int fd;
 	char host_ifname[IF_NAMESIZE];
 	uint16_t queue;
-	int stop_check_ticks;
 	uint32_t trace_mask;
 
 	struct if_netmap_host_context *nm_host_ctx;
@@ -282,7 +278,7 @@ if_netmap_pd_ctx_init(struct uinet_pd_pool_info *pool, struct uinet_pd_ctx *pdct
 		return (-1);
 	pdctx->m = m;
 	m->m_ext.ref_cnt = &pdctx->builtin_refcnt;
-	m_extadd(m, slotbuf, pool->bufsize, if_netmap_free, pool, pdctx, M_NOFREE,
+	m_extadd(m, slotbuf, pool->bufsize, if_netmap_free, nm_pool, pdctx, M_NOFREE,
 		 EXT_EXTREF);
 	
 	return (if_netmap_pd_ctx_init_mutables(pool, pdctx));
@@ -742,9 +738,6 @@ if_netmap_attach(struct uinet_if *uif)
 	}
 
 	sc->fd = fd;
-	sc->stop_check_ticks = (IF_NETMAP_THREAD_STOP_CHECK_MS * hz) / 1000;
-	if (sc->stop_check_ticks == 0)
-		sc->stop_check_ticks = 1;
 
 	if (sc->isvale) {
 		sc->vale_num_extra_bufs = nm_cfg->vale_num_extra_bufs;
@@ -1243,7 +1236,7 @@ if_netmap_receive(void *arg)
 
 	avail = 0;
 	done = 0;
-	poll_wait_ms = (sc->tx_thread->td_stop_check_ticks * 1000) / hz;
+	poll_wait_ms = (sc->rx_thread->td_stop_check_ticks * 1000) / hz;
 
 	/*
 	 * Use the maximum number of new pd contexts as the refill size.
@@ -1292,8 +1285,8 @@ if_netmap_receive(void *arg)
 		 * Zero-copy input
 		 */
 		if (n_zero_copy > 0) {
-			for (n = 0; n < n_zero_copy; n++, rx_pkt_desc++) {
-				new_pd_ctx = sc->rx_new_pd_ctx[n];
+			for (n = 0; n < n_zero_copy; n++, rx_pkt_desc++, new_pd_ctx++) {
+				new_pd_ctx = sc->rx_new_pd_ctx[num_new_pd_ctx - n_zero_copy + n];
 				slotbuf = if_netmap_rxslot(sc->nm_host_ctx, curslot, &bufindex, (void **)&slot_pdctx, &pktlen);
 				TRACE(TRACE_RX_RING_STATE, "rx: slot %u: bufindex=%u ptr=%p pktlen=%u\n", curslot, bufindex, slot_pdctx, pktlen);
 				TRACE(TRACE_RX_PKT, "rx: pktlen=%u\n", pktlen);
