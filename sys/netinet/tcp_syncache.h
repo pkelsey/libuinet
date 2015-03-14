@@ -162,10 +162,12 @@ enum syncache_event {
 	SYNCACHE_EVENT_DROP_NOMEM
 };
 
-typedef void (*syncache_event_callback_t)(enum syncache_event e, const struct in_conninfo *inc);
+typedef void (*syncache_event_callback_t)(void * arg, enum syncache_event e, const struct in_conninfo *inc, const struct in_l2info *l2i);
 VNET_DECLARE(syncache_event_callback_t, syncache_event_cb);
+VNET_DECLARE(void *, syncache_event_cb_arg);
 
 #define V_syncache_event_cb	VNET(syncache_event_cb)
+#define V_syncache_event_cb_arg	VNET(syncache_event_cb_arg)
 #endif
 
 #endif /* _KERNEL */

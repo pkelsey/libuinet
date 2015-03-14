@@ -1501,6 +1501,7 @@ uinet_instance_default_cfg(struct uinet_instance_cfg *cfg)
 	cfg->loopback = 0;
 	cfg->userdata = NULL;
 	cfg->syncache_event_cb = NULL;
+	cfg->syncache_event_cb_arg = NULL;
 }
 
 int
@@ -1521,6 +1522,7 @@ uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
 
 	CURVNET_SET(uinst->ui_vnet);
 	V_syncache_event_cb = (syncache_event_callback_t)(cfg->syncache_event_cb);
+	V_syncache_event_cb_arg = cfg->syncache_event_cb_arg;
 	CURVNET_RESTORE();
 
 	/*

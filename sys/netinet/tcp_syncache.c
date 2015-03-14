@@ -128,14 +128,22 @@ SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, syncookies_only, CTLFLAG_RW,
 
 #ifdef UINET
 VNET_DEFINE(syncache_event_callback_t, syncache_event_cb);
+VNET_DEFINE(void *, syncache_event_cb_arg);
 
+#ifdef PROMISCUOUS_INET
 #define SYNCACHE_REPORT_EVENT(e_, sc_) do {			\
 	if (V_syncache_event_cb)				\
-		(*V_syncache_event_cb)(e_, &(sc_)->sc_inc);	\
+		(*V_syncache_event_cb)(V_syncache_event_cb_arg, e_, &(sc_)->sc_inc, &((struct ifl2info *)((sc_)->sc_l2tag))->ifl2i_info); \
 } while (0)
 #else
+#define SYNCACHE_REPORT_EVENT(e_, sc_) do {			\
+	if (V_syncache_event_cb)				\
+		(*V_syncache_event_cb)(V_syncache_event_cb_arg, e_, &(sc_)->sc_inc, NULL); \
+} while (0)
+#endif /* PROMISCUOUS_INET */
+#else
 #define SYNCACHE_REPORT_EVENT(e_, sc_)
-#endif
+#endif /* UINET */
 
 static void	 syncache_drop(struct syncache *, struct syncache_head *);
 static void	 syncache_free(struct syncache *);
