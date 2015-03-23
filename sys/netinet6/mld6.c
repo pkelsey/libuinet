@@ -107,7 +107,6 @@ static void	mli_delete_locked(const struct ifnet *);
 static void	mld_dispatch_packet(struct mbuf *);
 static void	mld_dispatch_queue(struct ifqueue *, int);
 static void	mld_final_leave(struct in6_multi *, struct mld_ifinfo *);
-static void	mld_fasttimo_vnet(void);
 static int	mld_handle_state_change(struct in6_multi *,
 		    struct mld_ifinfo *);
 static int	mld_initial_join(struct in6_multi *, struct mld_ifinfo *,
@@ -116,7 +115,6 @@ static int	mld_initial_join(struct in6_multi *, struct mld_ifinfo *,
 static char *	mld_rec_type_to_str(const int);
 #endif
 static void	mld_set_version(struct mld_ifinfo *, const int);
-static void	mld_slowtimo_vnet(void);
 static int	mld_v1_input_query(struct ifnet *, const struct ip6_hdr *,
 		    /*const*/ struct mld_hdr *);
 static int	mld_v1_input_report(struct ifnet *, const struct ip6_hdr *,
@@ -1301,30 +1299,12 @@ mld_input(struct mbuf *m, int off, int icmp6len)
 }
 
 /*
- * Fast timeout handler (global).
- * VIMAGE: Timeout handlers are expected to service all vimages.
- */
-void
-mld_fasttimo(void)
-{
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		mld_fasttimo_vnet();
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
-}
-
-/*
  * Fast timeout handler (per-vnet).
  *
  * VIMAGE: Assume caller has set up our curvnet.
  */
-static void
-mld_fasttimo_vnet(void)
+void
+mld_fasttimo(void)
 {
 	struct ifqueue		 scq;	/* State-change packets */
 	struct ifqueue		 qrq;	/* Query response packets */
@@ -1723,28 +1703,10 @@ mld_v2_cancel_link_timers(struct mld_ifinfo *mli)
 }
 
 /*
- * Global slowtimo handler.
- * VIMAGE: Timeout handlers are expected to service all vimages.
+ * Per-vnet slowtimo handler.
  */
 void
 mld_slowtimo(void)
-{
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		mld_slowtimo_vnet();
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
-}
-
-/*
- * Per-vnet slowtimo handler.
- */
-static void
-mld_slowtimo_vnet(void)
 {
 	struct mld_ifinfo *mli;
 

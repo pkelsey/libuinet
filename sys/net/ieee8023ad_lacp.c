@@ -48,6 +48,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/net/ieee8023ad_lacp.c 237669 2012-06-27 22
 #include <net/ethernet.h>
 #include <net/if_media.h>
 #include <net/if_types.h>
+#include <net/vnet.h>
 
 #include <net/if_lagg.h>
 #include <net/ieee8023ad_lacp.h>
@@ -495,7 +496,7 @@ lacp_tick(void *arg)
 		lacp_sm_tx(lp);
 		lacp_sm_ptx_tx_schedule(lp);
 	}
-	callout_reset(&lsc->lsc_callout, hz, lacp_tick, lsc);
+	vnet_callout_reset(&lsc->lsc_callout, hz, lacp_tick, lsc);
 }
 
 int
@@ -746,8 +747,8 @@ lacp_attach(struct lagg_softc *sc)
 	TAILQ_INIT(&lsc->lsc_aggregators);
 	LIST_INIT(&lsc->lsc_ports);
 
-	callout_init_mtx(&lsc->lsc_transit_callout, &lsc->lsc_mtx, 0);
-	callout_init_mtx(&lsc->lsc_callout, &lsc->lsc_mtx, 0);
+	vnet_callout_init_mtx(&lsc->lsc_transit_callout, &lsc->lsc_mtx, 0);
+	vnet_callout_init_mtx(&lsc->lsc_callout, &lsc->lsc_mtx, 0);
 
 	/* if the lagg is already up then do the same */
 	if (sc->sc_ifp->if_drv_flags & IFF_DRV_RUNNING)
@@ -767,8 +768,8 @@ lacp_detach(struct lagg_softc *sc)
 	    ("aggregator still attached"));
 
 	sc->sc_psc = NULL;
-	callout_drain(&lsc->lsc_transit_callout);
-	callout_drain(&lsc->lsc_callout);
+	vnet_callout_drain(&lsc->lsc_transit_callout);
+	vnet_callout_drain(&lsc->lsc_callout);
 
 	LACP_LOCK_DESTROY(lsc);
 	free(lsc, M_DEVBUF);
@@ -781,7 +782,7 @@ lacp_init(struct lagg_softc *sc)
 	struct lacp_softc *lsc = LACP_SOFTC(sc);
 
 	LACP_LOCK(lsc);
-	callout_reset(&lsc->lsc_callout, hz, lacp_tick, lsc);
+	vnet_callout_reset(&lsc->lsc_callout, hz, lacp_tick, lsc);
 	LACP_UNLOCK(lsc);
 }
 
@@ -791,8 +792,8 @@ lacp_stop(struct lagg_softc *sc)
 	struct lacp_softc *lsc = LACP_SOFTC(sc);
 
 	LACP_LOCK(lsc);
-	callout_stop(&lsc->lsc_transit_callout);
-	callout_stop(&lsc->lsc_callout);
+	vnet_callout_stop(&lsc->lsc_transit_callout);
+	vnet_callout_stop(&lsc->lsc_callout);
 	LACP_UNLOCK(lsc);
 }
 
@@ -852,7 +853,7 @@ lacp_suppress_distributing(struct lacp_softc *lsc, struct lacp_aggregator *la)
 	}
 
 	/* set a timeout for the marker frames */
-	callout_reset(&lsc->lsc_transit_callout,
+	vnet_callout_reset(&lsc->lsc_transit_callout,
 	    LACP_TRANSIT_DELAY * hz / 1000, lacp_transit_expire, lsc);
 }
 

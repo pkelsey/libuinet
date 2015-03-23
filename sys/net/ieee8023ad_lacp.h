@@ -239,8 +239,8 @@ struct lacp_softc {
 	struct lacp_aggregator	*lsc_active_aggregator;
 	TAILQ_HEAD(, lacp_aggregator) lsc_aggregators;
 	boolean_t		lsc_suppress_distributing;
-	struct callout		lsc_transit_callout;
-	struct callout		lsc_callout;
+	struct vnet_callout	lsc_transit_callout;
+	struct vnet_callout	lsc_callout;
 	LIST_HEAD(, lacp_port)	lsc_ports;
 	struct lacp_portmap	lsc_pmap[2];
 	volatile u_int		lsc_activemap;

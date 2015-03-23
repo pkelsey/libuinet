@@ -133,9 +133,9 @@ struct carp_softc {
 	unsigned char sc_pad[CARP_HMAC_PAD];
 	SHA1_CTX sc_sha1;
 
-	struct callout		 sc_ad_tmo;	/* advertisement timeout */
-	struct callout		 sc_md_tmo;	/* master down timeout */
-	struct callout 		 sc_md6_tmo;	/* master down timeout */
+	struct vnet_callout	 sc_ad_tmo;	/* advertisement timeout */
+	struct vnet_callout	 sc_md_tmo;	/* master down timeout */
+	struct vnet_callout	 sc_md6_tmo;	/* master down timeout */
 	
 	LIST_ENTRY(carp_softc)	 sc_next;	/* Interface clue */
 };
@@ -435,9 +435,9 @@ carp_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 	sc->sc_im6o.im6o_multicast_hlim = CARP_DFLTTL;
 #endif
 
-	callout_init(&sc->sc_ad_tmo, CALLOUT_MPSAFE);
-	callout_init(&sc->sc_md_tmo, CALLOUT_MPSAFE);
-	callout_init(&sc->sc_md6_tmo, CALLOUT_MPSAFE);
+	vnet_callout_init(&sc->sc_ad_tmo, CALLOUT_MPSAFE);
+	vnet_callout_init(&sc->sc_md_tmo, CALLOUT_MPSAFE);
+	vnet_callout_init(&sc->sc_md6_tmo, CALLOUT_MPSAFE);
 	
 	ifp->if_softc = sc;
 	if_initname(ifp, CARP_IFNAME, unit);
@@ -498,9 +498,9 @@ carpdetach(struct carp_softc *sc, int unlock)
 {
 	struct carp_if *cif;
 
-	callout_stop(&sc->sc_ad_tmo);
-	callout_stop(&sc->sc_md_tmo);
-	callout_stop(&sc->sc_md6_tmo);
+	vnet_callout_stop(&sc->sc_ad_tmo);
+	vnet_callout_stop(&sc->sc_md_tmo);
+	vnet_callout_stop(&sc->sc_md6_tmo);
 
 	if (sc->sc_suppress)
 		carp_suppress_preempt--;
@@ -804,7 +804,7 @@ carp_input_c(struct mbuf *m, struct carp_header *ch, sa_family_t af)
 		 */
 		if (timevalcmp(&sc_tv, &ch_tv, >) ||
 		    timevalcmp(&sc_tv, &ch_tv, ==)) {
-			callout_stop(&sc->sc_ad_tmo);
+			vnet_callout_stop(&sc->sc_ad_tmo);
 			CARP_LOG("%s: MASTER -> BACKUP "
 			   "(more frequent advertisement received)\n",
 			   SC2IFP(sc)->if_xname);
@@ -961,7 +961,7 @@ carp_send_ad_locked(struct carp_softc *sc)
 			CARPSTATS_INC(carps_onomem);
 			/* XXX maybe less ? */
 			if (advbase != 255 || advskew != 255)
-				callout_reset(&sc->sc_ad_tmo, tvtohz(&tv),
+				vnet_callout_reset(&sc->sc_ad_tmo, tvtohz(&tv),
 				    carp_send_ad, sc);
 			return;
 		}
@@ -1033,7 +1033,7 @@ carp_send_ad_locked(struct carp_softc *sc)
 			CARPSTATS_INC(carps_onomem);
 			/* XXX maybe less ? */
 			if (advbase != 255 || advskew != 255)
-				callout_reset(&sc->sc_ad_tmo, tvtohz(&tv),
+				vnet_callout_reset(&sc->sc_ad_tmo, tvtohz(&tv),
 				    carp_send_ad, sc);
 			return;
 		}
@@ -1102,7 +1102,7 @@ carp_send_ad_locked(struct carp_softc *sc)
 #endif /* INET6 */
 
 	if (advbase != 255 || advskew != 255)
-		callout_reset(&sc->sc_ad_tmo, tvtohz(&tv),
+		vnet_callout_reset(&sc->sc_ad_tmo, tvtohz(&tv),
 		    carp_send_ad, sc);
 
 }
@@ -1429,28 +1429,28 @@ carp_setrun(struct carp_softc *sc, sa_family_t af)
 		carp_setrun(sc, 0);
 		break;
 	case BACKUP:
-		callout_stop(&sc->sc_ad_tmo);
+		vnet_callout_stop(&sc->sc_ad_tmo);
 		tv.tv_sec = 3 * sc->sc_advbase;
 		tv.tv_usec = sc->sc_advskew * 1000000 / 256;
 		switch (af) {
 #ifdef INET
 		case AF_INET:
-			callout_reset(&sc->sc_md_tmo, tvtohz(&tv),
+			vnet_callout_reset(&sc->sc_md_tmo, tvtohz(&tv),
 			    carp_master_down, sc);
 			break;
 #endif /* INET */
 #ifdef INET6
 		case AF_INET6:
-			callout_reset(&sc->sc_md6_tmo, tvtohz(&tv),
+			vnet_callout_reset(&sc->sc_md6_tmo, tvtohz(&tv),
 			    carp_master_down, sc);
 			break;
 #endif /* INET6 */
 		default:
 			if (sc->sc_naddrs)
-				callout_reset(&sc->sc_md_tmo, tvtohz(&tv),
+				vnet_callout_reset(&sc->sc_md_tmo, tvtohz(&tv),
 				    carp_master_down, sc);
 			if (sc->sc_naddrs6)
-				callout_reset(&sc->sc_md6_tmo, tvtohz(&tv),
+				vnet_callout_reset(&sc->sc_md6_tmo, tvtohz(&tv),
 				    carp_master_down, sc);
 			break;
 		}
@@ -1458,7 +1458,7 @@ carp_setrun(struct carp_softc *sc, sa_family_t af)
 	case MASTER:
 		tv.tv_sec = sc->sc_advbase;
 		tv.tv_usec = sc->sc_advskew * 1000000 / 256;
-		callout_reset(&sc->sc_ad_tmo, tvtohz(&tv),
+		vnet_callout_reset(&sc->sc_ad_tmo, tvtohz(&tv),
 		    carp_send_ad, sc);
 		break;
 	}
@@ -1666,7 +1666,7 @@ carp_del_addr(struct carp_softc *sc, struct sockaddr_in *sin)
 		struct ip_moptions *imo = &sc->sc_imo;
 
 		CARP_LOCK(cif);
-		callout_stop(&sc->sc_ad_tmo);
+		vnet_callout_stop(&sc->sc_ad_tmo);
 		SC2IFP(sc)->if_flags &= ~IFF_UP;
 		SC2IFP(sc)->if_drv_flags &= ~IFF_DRV_RUNNING;
 		sc->sc_vhid = -1;
@@ -1872,7 +1872,7 @@ carp_del_addr6(struct carp_softc *sc, struct sockaddr_in6 *sin6)
 		struct carp_if *cif = (struct carp_if *)sc->sc_carpdev->if_carp;
 
 		CARP_LOCK(cif);
-		callout_stop(&sc->sc_ad_tmo);
+		vnet_callout_stop(&sc->sc_ad_tmo);
 		SC2IFP(sc)->if_flags &= ~IFF_UP;
 		SC2IFP(sc)->if_drv_flags &= ~IFF_DRV_RUNNING;
 		sc->sc_vhid = -1;
@@ -1973,9 +1973,9 @@ carp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 			CARP_SCLOCK(sc);
 		}
 		if (sc->sc_state != INIT && !(ifr->ifr_flags & IFF_UP)) {
- 			callout_stop(&sc->sc_ad_tmo);
- 			callout_stop(&sc->sc_md_tmo);
- 			callout_stop(&sc->sc_md6_tmo);
+ 			vnet_callout_stop(&sc->sc_ad_tmo);
+ 			vnet_callout_stop(&sc->sc_md_tmo);
+ 			vnet_callout_stop(&sc->sc_md6_tmo);
 			if (sc->sc_state == MASTER)
 				carp_send_ad_locked(sc);
 			carp_set_state(sc, INIT);
@@ -2000,7 +2000,7 @@ carp_ioctl(struct ifnet *ifp, u_long cmd, caddr_t addr)
 		if (sc->sc_state != INIT && carpr.carpr_state != sc->sc_state) {
 			switch (carpr.carpr_state) {
 			case BACKUP:
-				callout_stop(&sc->sc_ad_tmo);
+				vnet_callout_stop(&sc->sc_ad_tmo);
 				carp_set_state(sc, BACKUP);
 				carp_setrun(sc, 0);
 				carp_setroute(sc, RTM_DELETE);
@@ -2276,9 +2276,9 @@ carp_sc_state_locked(struct carp_softc *sc)
 		sc->sc_flags_backup = SC2IFP(sc)->if_flags;
 		SC2IFP(sc)->if_flags &= ~IFF_UP;
 		SC2IFP(sc)->if_drv_flags &= ~IFF_DRV_RUNNING;
-		callout_stop(&sc->sc_ad_tmo);
-		callout_stop(&sc->sc_md_tmo);
-		callout_stop(&sc->sc_md6_tmo);
+		vnet_callout_stop(&sc->sc_ad_tmo);
+		vnet_callout_stop(&sc->sc_md_tmo);
+		vnet_callout_stop(&sc->sc_md6_tmo);
 		carp_set_state(sc, INIT);
 		carp_setrun(sc, 0);
 		if (!sc->sc_suppress) {

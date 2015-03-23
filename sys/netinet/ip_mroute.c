@@ -191,7 +191,7 @@ static struct mtx vif_mtx;
 
 static eventhandler_tag if_detach_event_tag = NULL;
 
-static VNET_DEFINE(struct callout, expire_upcalls_ch);
+static VNET_DEFINE(struct vnet_callout, expire_upcalls_ch);
 #define	V_expire_upcalls_ch	VNET(expire_upcalls_ch)
 
 #define		EXPIRE_TIMEOUT	(hz / 4)	/* 4x / second		*/
@@ -208,7 +208,7 @@ static MALLOC_DEFINE(M_BWMETER, "bwmeter", "multicast upcall bw meters");
 #define	BW_METER_BUCKETS	1024
 static VNET_DEFINE(struct bw_meter*, bw_meter_timers[BW_METER_BUCKETS]);
 #define	V_bw_meter_timers	VNET(bw_meter_timers)
-static VNET_DEFINE(struct callout, bw_meter_ch);
+static VNET_DEFINE(struct vnet_callout, bw_meter_ch);
 #define	V_bw_meter_ch		VNET(bw_meter_ch)
 #define	BW_METER_PERIOD (hz)		/* periodical handling of bw meters */
 
@@ -220,7 +220,7 @@ static VNET_DEFINE(struct bw_upcall, bw_upcalls[BW_UPCALLS_MAX]);
 #define	V_bw_upcalls		VNET(bw_upcalls)
 static VNET_DEFINE(u_int, bw_upcalls_n); /* # of pending upcalls */
 #define	V_bw_upcalls_n    	VNET(bw_upcalls_n)
-static VNET_DEFINE(struct callout, bw_upcalls_ch);
+static VNET_DEFINE(struct vnet_callout, bw_upcalls_ch);
 #define	V_bw_upcalls_ch		VNET(bw_upcalls_ch)
 
 #define BW_UPCALLS_PERIOD (hz)		/* periodical flush of bw upcalls */
@@ -680,11 +680,11 @@ ip_mrouter_init(struct socket *so, int version)
     V_mfchashtbl = hashinit_flags(mfchashsize, M_MRTABLE, &V_mfchash,
 	HASH_NOWAIT);
 
-    callout_reset(&V_expire_upcalls_ch, EXPIRE_TIMEOUT, expire_upcalls,
+    vnet_callout_reset(&V_expire_upcalls_ch, EXPIRE_TIMEOUT, expire_upcalls,
 	curvnet);
-    callout_reset(&V_bw_upcalls_ch, BW_UPCALLS_PERIOD, expire_bw_upcalls_send,
+    vnet_callout_reset(&V_bw_upcalls_ch, BW_UPCALLS_PERIOD, expire_bw_upcalls_send,
 	curvnet);
-    callout_reset(&V_bw_meter_ch, BW_METER_PERIOD, expire_bw_meter_process,
+    vnet_callout_reset(&V_bw_meter_ch, BW_METER_PERIOD, expire_bw_meter_process,
 	curvnet);
 
     V_ip_mrouter = so;
@@ -746,9 +746,9 @@ X_ip_mrouter_done(void)
     
     VIF_UNLOCK();
 
-    callout_stop(&V_expire_upcalls_ch);
-    callout_stop(&V_bw_upcalls_ch);
-    callout_stop(&V_bw_meter_ch);
+    vnet_callout_stop(&V_expire_upcalls_ch);
+    vnet_callout_stop(&V_bw_upcalls_ch);
+    vnet_callout_stop(&V_bw_meter_ch);
 
     MFC_LOCK();
 
@@ -1480,7 +1480,7 @@ expire_upcalls(void *arg)
 
     MFC_UNLOCK();
 
-    callout_reset(&V_expire_upcalls_ch, EXPIRE_TIMEOUT, expire_upcalls,
+    vnet_callout_reset(&V_expire_upcalls_ch, EXPIRE_TIMEOUT, expire_upcalls,
 	curvnet);
 
     CURVNET_RESTORE();
@@ -2295,7 +2295,7 @@ expire_bw_upcalls_send(void *arg)
     bw_upcalls_send();
     MFC_UNLOCK();
 
-    callout_reset(&V_bw_upcalls_ch, BW_UPCALLS_PERIOD, expire_bw_upcalls_send,
+    vnet_callout_reset(&V_bw_upcalls_ch, BW_UPCALLS_PERIOD, expire_bw_upcalls_send,
 	curvnet);
     CURVNET_RESTORE();
 }
@@ -2312,7 +2312,7 @@ expire_bw_meter_process(void *arg)
     if (V_mrt_api_config & MRT_MFC_BW_UPCALL)
 	bw_meter_process();
 
-    callout_reset(&V_bw_meter_ch, BW_METER_PERIOD, expire_bw_meter_process,
+    vnet_callout_reset(&V_bw_meter_ch, BW_METER_PERIOD, expire_bw_meter_process,
 	curvnet);
     CURVNET_RESTORE();
 }
@@ -2817,9 +2817,9 @@ vnet_mroute_init(const void *unused __unused)
 
 	MALLOC(V_nexpire, u_char *, mfchashsize, M_MRTABLE, M_WAITOK|M_ZERO);
 	bzero(V_bw_meter_timers, sizeof(V_bw_meter_timers));
-	callout_init(&V_expire_upcalls_ch, CALLOUT_MPSAFE);
-	callout_init(&V_bw_upcalls_ch, CALLOUT_MPSAFE);
-	callout_init(&V_bw_meter_ch, CALLOUT_MPSAFE);
+	vnet_callout_init(&V_expire_upcalls_ch, CALLOUT_MPSAFE);
+	vnet_callout_init(&V_bw_upcalls_ch, CALLOUT_MPSAFE);
+	vnet_callout_init(&V_bw_meter_ch, CALLOUT_MPSAFE);
 }
 
 VNET_SYSINIT(vnet_mroute_init, SI_SUB_PSEUDO, SI_ORDER_ANY, vnet_mroute_init,

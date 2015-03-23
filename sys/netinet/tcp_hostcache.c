@@ -109,7 +109,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_hostcache.c 238259 2012-07-08 
 static VNET_DEFINE(struct tcp_hostcache, tcp_hostcache);
 #define	V_tcp_hostcache		VNET(tcp_hostcache)
 
-static VNET_DEFINE(struct callout, tcp_hc_callout);
+static VNET_DEFINE(struct vnet_callout, tcp_hc_callout);
 #define	V_tcp_hc_callout	VNET(tcp_hc_callout)
 
 static struct hc_metrics *tcp_hc_lookup(struct in_conninfo *);
@@ -227,8 +227,8 @@ tcp_hc_init(void)
 	/*
 	 * Set up periodic cache cleanup.
 	 */
-	callout_init(&V_tcp_hc_callout, CALLOUT_MPSAFE);
-	callout_reset(&V_tcp_hc_callout, V_tcp_hostcache.prune * hz,
+	vnet_callout_init(&V_tcp_hc_callout, CALLOUT_MPSAFE);
+	vnet_callout_reset(&V_tcp_hc_callout, V_tcp_hostcache.prune * hz,
 	    tcp_hc_purge, curvnet);
 }
 
@@ -238,7 +238,7 @@ tcp_hc_destroy(void)
 {
 	int i;
 
-	callout_drain(&V_tcp_hc_callout);
+	vnet_callout_drain(&V_tcp_hc_callout);
 
 	/* Purge all hc entries. */
 	tcp_hc_purge_internal(1);
@@ -685,7 +685,7 @@ tcp_hc_purge(void *arg)
 
 	tcp_hc_purge_internal(all);
 
-	callout_reset(&V_tcp_hc_callout, V_tcp_hostcache.prune * hz,
+	vnet_callout_reset(&V_tcp_hc_callout, V_tcp_hostcache.prune * hz,
 	    tcp_hc_purge, arg);
 	CURVNET_RESTORE();
 }

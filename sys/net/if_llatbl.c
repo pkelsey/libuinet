@@ -189,7 +189,7 @@ lltable_free(struct lltable *llt)
 		LIST_FOREACH_SAFE(lle, &llt->lle_head[i], lle_next, next) {
 			int canceled;
 
-			canceled = callout_drain(&lle->la_timer);
+			canceled = vnet_callout_drain(&lle->la_timer);
 			LLE_WLOCK(lle);
 			if (canceled)
 				LLE_REMREF(lle);

@@ -71,7 +71,10 @@ static void frag6_insque(struct ip6q *, struct ip6q *);
 static void frag6_remque(struct ip6q *);
 static void frag6_freef(struct ip6q *);
 
-static struct mtx ip6qlock;
+static VNET_DEFINE(struct mtx, ip6qlock);
+
+#define V_ip6qlock			VNET(ip6qlock)
+
 /*
  * These fields all protected by ip6qlock.
  */
@@ -83,11 +86,12 @@ static VNET_DEFINE(struct ip6q, ip6q);	/* ip6 reassemble queue */
 #define	V_frag6_nfrags			VNET(frag6_nfrags)
 #define	V_ip6q				VNET(ip6q)
 
-#define	IP6Q_LOCK_INIT()	mtx_init(&ip6qlock, "ip6qlock", NULL, MTX_DEF);
-#define	IP6Q_LOCK()		mtx_lock(&ip6qlock)
-#define	IP6Q_TRYLOCK()		mtx_trylock(&ip6qlock)
-#define	IP6Q_LOCK_ASSERT()	mtx_assert(&ip6qlock, MA_OWNED)
-#define	IP6Q_UNLOCK()		mtx_unlock(&ip6qlock)
+#define	IP6Q_LOCK_INIT()	mtx_init(&V_ip6qlock, "V_ip6qlock", NULL, MTX_DEF)
+#define	IP6Q_LOCK_DESTROY()	mtx_destroy(&V_ip6qlock)
+#define	IP6Q_LOCK()		mtx_lock(&V_ip6qlock)
+#define	IP6Q_TRYLOCK()		mtx_trylock(&V_ip6qlock)
+#define	IP6Q_LOCK_ASSERT()	mtx_assert(&V_ip6qlock, MA_OWNED)
+#define	IP6Q_UNLOCK()		mtx_unlock(&V_ip6qlock)
 
 static MALLOC_DEFINE(M_FTABLE, "fragment", "fragment reassembly header");
 
@@ -110,13 +114,19 @@ frag6_init(void)
 	V_ip6_maxfrags = nmbclusters / 4;
 	V_ip6q.ip6q_next = V_ip6q.ip6q_prev = &V_ip6q;
 
+	IP6Q_LOCK_INIT();
+
 	if (!IS_DEFAULT_VNET(curvnet))
 		return;
 
 	EVENTHANDLER_REGISTER(nmbclusters_change,
 	    frag6_change, NULL, EVENTHANDLER_PRI_ANY);
+}
 
-	IP6Q_LOCK_INIT();
+void
+frag6_destroy(void)
+{
+	IP6Q_LOCK_DESTROY();
 }
 
 /*
@@ -730,39 +740,32 @@ frag6_remque(struct ip6q *p6)
 void
 frag6_slowtimo(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
 	struct ip6q *q6;
 
-	VNET_LIST_RLOCK_NOSLEEP();
 	IP6Q_LOCK();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		q6 = V_ip6q.ip6q_next;
-		if (q6)
-			while (q6 != &V_ip6q) {
-				--q6->ip6q_ttl;
-				q6 = q6->ip6q_next;
-				if (q6->ip6q_prev->ip6q_ttl == 0) {
-					V_ip6stat.ip6s_fragtimeout++;
-					/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */
-					frag6_freef(q6->ip6q_prev);
-				}
+	q6 = V_ip6q.ip6q_next;
+	if (q6)
+		while (q6 != &V_ip6q) {
+			--q6->ip6q_ttl;
+			q6 = q6->ip6q_next;
+			if (q6->ip6q_prev->ip6q_ttl == 0) {
+				V_ip6stat.ip6s_fragtimeout++;
+				/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */
+				frag6_freef(q6->ip6q_prev);
 			}
-		/*
-		 * If we are over the maximum number of fragments
-		 * (due to the limit being lowered), drain off
-		 * enough to get down to the new limit.
-		 */
-		while (V_frag6_nfragpackets > (u_int)V_ip6_maxfragpackets &&
-		    V_ip6q.ip6q_prev) {
-			V_ip6stat.ip6s_fragoverflow++;
-			/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */
-			frag6_freef(V_ip6q.ip6q_prev);
 		}
-		CURVNET_RESTORE();
+	/*
+	 * If we are over the maximum number of fragments
+	 * (due to the limit being lowered), drain off
+	 * enough to get down to the new limit.
+	 */
+	while (V_frag6_nfragpackets > (u_int)V_ip6_maxfragpackets &&
+	       V_ip6q.ip6q_prev) {
+		V_ip6stat.ip6s_fragoverflow++;
+		/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */
+		frag6_freef(V_ip6q.ip6q_prev);
 	}
 	IP6Q_UNLOCK();
-	VNET_LIST_RUNLOCK_NOSLEEP();
 }
 
 /*
@@ -771,22 +774,13 @@ frag6_slowtimo(void)
 void
 frag6_drain(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	if (IP6Q_TRYLOCK() == 0) {
-		VNET_LIST_RUNLOCK_NOSLEEP();
+	if (IP6Q_TRYLOCK() == 0)
 		return;
-	}
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		while (V_ip6q.ip6q_next != &V_ip6q) {
-			V_ip6stat.ip6s_fragdropped++;
-			/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */
-			frag6_freef(V_ip6q.ip6q_next);
-		}
-		CURVNET_RESTORE();
+
+	while (V_ip6q.ip6q_next != &V_ip6q) {
+		V_ip6stat.ip6s_fragdropped++;
+		/* XXX in6_ifstat_inc(ifp, ifs6_reass_fail) */
+		frag6_freef(V_ip6q.ip6q_next);
 	}
 	IP6Q_UNLOCK();
-	VNET_LIST_RUNLOCK_NOSLEEP();
 }

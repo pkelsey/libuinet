@@ -163,15 +163,17 @@ SYSCTL_VNET_STRUCT(_net_inet_ip, IPCTL_STATS, stats, CTLFLAG_RW,
 
 static VNET_DEFINE(uma_zone_t, ipq_zone);
 static VNET_DEFINE(TAILQ_HEAD(ipqhead, ipq), ipq[IPREASS_NHASH]);
-static struct mtx ipqlock;
+static VNET_DEFINE(struct mtx, ipqlock);
 
 #define	V_ipq_zone		VNET(ipq_zone)
 #define	V_ipq			VNET(ipq)
+#define V_ipqlock		VNET(ipqlock)
 
-#define	IPQ_LOCK()	mtx_lock(&ipqlock)
-#define	IPQ_UNLOCK()	mtx_unlock(&ipqlock)
-#define	IPQ_LOCK_INIT()	mtx_init(&ipqlock, "ipqlock", NULL, MTX_DEF)
-#define	IPQ_LOCK_ASSERT()	mtx_assert(&ipqlock, MA_OWNED)
+#define	IPQ_LOCK()	mtx_lock(&V_ipqlock)
+#define	IPQ_UNLOCK()	mtx_unlock(&V_ipqlock)
+#define	IPQ_LOCK_INIT()	mtx_init(&V_ipqlock, "V_ipqlock", NULL, MTX_DEF)
+#define	IPQ_LOCK_DESTROY()	mtx_destroy(&V_ipqlock)
+#define	IPQ_LOCK_ASSERT()	mtx_assert(&V_ipqlock, MA_OWNED)
 
 static void	maxnipq_update(void);
 static void	ipq_zone_change(void *);
@@ -323,6 +325,8 @@ ip_init(void)
 	V_ip_ft = flowtable_alloc("ipv4", V_ip_output_flowtable_size, FL_PCPU);
 #endif
 
+	IPQ_LOCK_INIT();
+
 	/* Skip initialization of globals for non-default instances. */
 	if (!IS_DEFAULT_VNET(curvnet))
 		return;
@@ -351,7 +355,6 @@ ip_init(void)
 		NULL, EVENTHANDLER_PRI_ANY);
 
 	/* Initialize various other remaining things. */
-	IPQ_LOCK_INIT();
 	netisr_register(&ip_nh);
 }
 
@@ -366,6 +369,8 @@ ip_destroy(void)
 	IPQ_LOCK();
 	ip_drain_locked();
 	IPQ_UNLOCK();
+
+	IPQ_LOCK_DESTROY();
 
 	uma_zdestroy(V_ipq_zone);
 }
@@ -1190,47 +1195,40 @@ ip_freef(struct ipqhead *fhp, struct ipq *fp)
 void
 ip_slowtimo(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
 	struct ipq *fp;
 	int i;
 
-	VNET_LIST_RLOCK_NOSLEEP();
 	IPQ_LOCK();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		for (i = 0; i < IPREASS_NHASH; i++) {
-			for(fp = TAILQ_FIRST(&V_ipq[i]); fp;) {
-				struct ipq *fpp;
+	for (i = 0; i < IPREASS_NHASH; i++) {
+		for(fp = TAILQ_FIRST(&V_ipq[i]); fp;) {
+			struct ipq *fpp;
 
-				fpp = fp;
-				fp = TAILQ_NEXT(fp, ipq_list);
-				if(--fpp->ipq_ttl == 0) {
-					IPSTAT_ADD(ips_fragtimeout,
-					    fpp->ipq_nfrags);
-					ip_freef(&V_ipq[i], fpp);
-				}
+			fpp = fp;
+			fp = TAILQ_NEXT(fp, ipq_list);
+			if(--fpp->ipq_ttl == 0) {
+				IPSTAT_ADD(ips_fragtimeout,
+				    fpp->ipq_nfrags);
+				ip_freef(&V_ipq[i], fpp);
 			}
 		}
-		/*
-		 * If we are over the maximum number of fragments
-		 * (due to the limit being lowered), drain off
-		 * enough to get down to the new limit.
-		 */
-		if (V_maxnipq >= 0 && V_nipq > V_maxnipq) {
-			for (i = 0; i < IPREASS_NHASH; i++) {
-				while (V_nipq > V_maxnipq &&
-				    !TAILQ_EMPTY(&V_ipq[i])) {
-					IPSTAT_ADD(ips_fragdropped,
-					    TAILQ_FIRST(&V_ipq[i])->ipq_nfrags);
-					ip_freef(&V_ipq[i],
-					    TAILQ_FIRST(&V_ipq[i]));
-				}
+	}
+	/*
+	 * If we are over the maximum number of fragments
+	 * (due to the limit being lowered), drain off
+	 * enough to get down to the new limit.
+	 */
+	if (V_maxnipq >= 0 && V_nipq > V_maxnipq) {
+		for (i = 0; i < IPREASS_NHASH; i++) {
+			while (V_nipq > V_maxnipq &&
+			       !TAILQ_EMPTY(&V_ipq[i])) {
+				IPSTAT_ADD(ips_fragdropped,
+				    TAILQ_FIRST(&V_ipq[i])->ipq_nfrags);
+				ip_freef(&V_ipq[i],
+				    TAILQ_FIRST(&V_ipq[i]));
 			}
 		}
-		CURVNET_RESTORE();
 	}
 	IPQ_UNLOCK();
-	VNET_LIST_RUNLOCK_NOSLEEP();
 }
 
 /*
@@ -1255,17 +1253,10 @@ ip_drain_locked(void)
 void
 ip_drain(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
 	IPQ_LOCK();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		ip_drain_locked();
-		CURVNET_RESTORE();
-	}
+	ip_drain_locked();
 	IPQ_UNLOCK();
-	VNET_LIST_RUNLOCK_NOSLEEP();
+
 	in_rtqdrain();
 }
 

@@ -41,6 +41,8 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_mbuf.c 209390 2010-06-21 09:55:5
 #include <sys/smp.h>
 #include <sys/sysctl.h>
 
+#include <net/vnet.h>
+
 #ifdef MAC
 #include <security/mac/mac_framework.h>
 #endif /* MAC */
@@ -683,14 +685,9 @@ m_pkthdr_init(struct mbuf *m, int how)
 static void
 mb_reclaim(void *junk)
 {
-	struct domain *dp;
-	struct protosw *pr;
 
 	WITNESS_WARN(WARN_GIANTOK | WARN_SLEEPOK | WARN_PANIC, NULL,
 	    "mb_reclaim()");
 
-	for (dp = domains; dp != NULL; dp = dp->dom_next)
-		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
-			if (pr->pr_drain != NULL)
-				(*pr->pr_drain)();
+	pfdrain();
 }

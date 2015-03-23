@@ -735,13 +735,13 @@ tcp_newtcpcb(struct inpcb *inp)
 		V_tcp_mssdflt;
 
 	/* Set up our timeouts. */
-	callout_init(&tp->t_timers->tt_rexmt, CALLOUT_MPSAFE);
-	callout_init(&tp->t_timers->tt_persist, CALLOUT_MPSAFE);
-	callout_init(&tp->t_timers->tt_keep, CALLOUT_MPSAFE);
-	callout_init(&tp->t_timers->tt_2msl, CALLOUT_MPSAFE);
-	callout_init(&tp->t_timers->tt_delack, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_rexmt, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_persist, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_keep, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_2msl, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_delack, CALLOUT_MPSAFE);
 #ifdef PASSIVE_INET
-	callout_init(&tp->t_timers->tt_reassdl, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_reassdl, CALLOUT_MPSAFE);
 #endif
 
 	if (V_tcp_do_rfc1323)
@@ -788,6 +788,7 @@ tcp_ccalgounload(struct cc_algo *unload_algo)
 	struct inpcb *inp;
 	struct tcpcb *tp;
 	VNET_ITERATOR_DECL(vnet_iter);
+	int sts_count = 0;
 
 	/*
 	 * Check all active control blocks across all network stacks and change
@@ -797,6 +798,10 @@ tcp_ccalgounload(struct cc_algo *unload_algo)
 	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
+		if (VNET_IS_STS()) {
+			sts_count++;
+			continue;
+		}
 		INP_INFO_RLOCK(&V_tcbinfo);
 		/*
 		 * New connections already part way through being initialised
@@ -832,7 +837,7 @@ tcp_ccalgounload(struct cc_algo *unload_algo)
 	}
 	VNET_LIST_RUNLOCK();
 
-	return (0);
+	return (sts_count ? EBUSY : 0);
 }
 
 /*
@@ -886,13 +891,13 @@ tcp_discardcb(struct tcpcb *tp)
 	 * will be required to ensure that no further processing takes place
 	 * on the tcpcb, even though it hasn't been freed (a flag?).
 	 */
-	callout_stop(&tp->t_timers->tt_rexmt);
-	callout_stop(&tp->t_timers->tt_persist);
-	callout_stop(&tp->t_timers->tt_keep);
-	callout_stop(&tp->t_timers->tt_2msl);
-	callout_stop(&tp->t_timers->tt_delack);
+	vnet_callout_stop(&tp->t_timers->tt_rexmt);
+	vnet_callout_stop(&tp->t_timers->tt_persist);
+	vnet_callout_stop(&tp->t_timers->tt_keep);
+	vnet_callout_stop(&tp->t_timers->tt_2msl);
+	vnet_callout_stop(&tp->t_timers->tt_delack);
 #ifdef PASSIVE_INET
-	callout_stop(&tp->t_timers->tt_reassdl);
+	vnet_callout_stop(&tp->t_timers->tt_reassdl);
 #endif
 
 	/*
@@ -1013,16 +1018,11 @@ tcp_close(struct tcpcb *tp)
 void
 tcp_drain(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
-
 	if (!do_tcpdrain)
 		return;
 
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		struct inpcb *inpb;
-		struct tcpcb *tcpb;
+	struct inpcb *inpb;
+	struct tcpcb *tcpb;
 
 	/*
 	 * Walk the tcpbs, if existing, and flush the reassembly queue,
@@ -1032,21 +1032,18 @@ tcp_drain(void)
 	 *	where we're really low on mbufs, this is potentially
 	 *	usefull.
 	 */
-		INP_INFO_RLOCK(&V_tcbinfo);
-		LIST_FOREACH(inpb, V_tcbinfo.ipi_listhead, inp_list) {
-			if (inpb->inp_flags & INP_TIMEWAIT)
-				continue;
-			INP_WLOCK(inpb);
-			if ((tcpb = intotcpcb(inpb)) != NULL) {
-				tcp_reass_flush(tcpb);
-				tcp_clean_sackreport(tcpb);
-			}
-			INP_WUNLOCK(inpb);
+	INP_INFO_RLOCK(&V_tcbinfo);
+	LIST_FOREACH(inpb, V_tcbinfo.ipi_listhead, inp_list) {
+		if (inpb->inp_flags & INP_TIMEWAIT)
+			continue;
+		INP_WLOCK(inpb);
+		if ((tcpb = intotcpcb(inpb)) != NULL) {
+			tcp_reass_flush(tcpb);
+			tcp_clean_sackreport(tcpb);
 		}
-		INP_INFO_RUNLOCK(&V_tcbinfo);
-		CURVNET_RESTORE();
+		INP_WUNLOCK(inpb);
 	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
+	INP_INFO_RUNLOCK(&V_tcbinfo);
 }
 
 /*

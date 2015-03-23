@@ -239,7 +239,7 @@ cc_deregister_algo(struct cc_algo *remove_cc)
 		 * - If we add CC framework support for protocols other than
 		 *   TCP, we may want a more generic way to handle this step.
 		 */
-		tcp_ccalgounload(remove_cc);
+		err = tcp_ccalgounload(remove_cc);
 
 	return (err);
 }

@@ -47,6 +47,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/net/vnet.c 217265 2011-01-11 13:59:06Z jhb
 #include <sys/sdt.h>
 #include <sys/systm.h>
 #include <sys/sysctl.h>
+#include <sys/protosw.h>
 #include <sys/eventhandler.h>
 #include <sys/lock.h>
 #include <sys/malloc.h>
@@ -104,6 +105,7 @@ struct sx		vnet_sxlock;
 
 struct vnet_list_head vnet_head;
 struct vnet *vnet0;
+struct vnet_sts vnet0_sts;
 
 /*
  * The virtual network stack allocator provides storage for virtualized
@@ -227,7 +229,7 @@ static void db_show_vnet_print_vs(struct vnet_sysinit *, int);
  * Allocate a virtual network stack.
  */
 struct vnet *
-vnet_alloc(void)
+vnet_alloc(struct vnet_sts *sts)
 {
 	struct vnet *vnet;
 
@@ -235,6 +237,18 @@ vnet_alloc(void)
 	vnet = malloc(sizeof(struct vnet), M_VNET, M_WAITOK | M_ZERO);
 	vnet->vnet_magic_n = VNET_MAGIC_N;
 	SDT_PROBE2(vnet, functions, vnet_alloc, alloc, __LINE__, vnet);
+
+#if defined(VIMAGE_STS) || defined(VIMAGE_STS_ONLY)
+	if (sts && sts->sts_enabled)
+		vnet->vnet_sts = *sts;
+#if defined(VIMAGE_STS_ONLY)
+	else {
+		SDT_PROBE2(vnet, functions, vnet_alloc, return, __LINE__, NULL);
+		free(vnet, M_DEEVBUF);
+		return (NULL);
+	}	
+#endif
+#endif
 
 	/*
 	 * Allocate storage for virtualized global variables and copy in
@@ -329,9 +343,9 @@ vnet0_init(void *arg)
 	 * otherwise CURVNET_SET() macros would scream about unnecessary
 	 * curvnet recursions.
 	 */
-	curvnet = prison0.pr_vnet = vnet0 = vnet_alloc();
+	curvnet = prison0.pr_vnet = vnet0 = vnet_alloc(arg);
 }
-SYSINIT(vnet0_init, SI_SUB_VNET, SI_ORDER_FIRST, vnet0_init, NULL);
+SYSINIT(vnet0_init, SI_SUB_VNET, SI_ORDER_FIRST, vnet0_init, &vnet0_sts);
 
 static void
 vnet_init_done(void *unused)
@@ -668,6 +682,25 @@ vnet_global_eventhandler_iterator_func(void *arg, ...)
 	}
 	VNET_LIST_RUNLOCK();
 }
+
+#if defined(VIMAGE_STS) || defined(VIMAGE_STS_ONLY)
+void
+vnet_sts_events_process(struct vnet *vnet)
+{
+	unsigned int events;
+
+	events = vnet->vnet_sts.sts_events;
+	if (!events)
+		return;
+
+	CURVNET_SET(vnet);
+	if (events & VNET_STS_EVENT_PR_DRAIN)
+		_pfdrain_vnet();
+
+	atomic_clear_int(&curvnet->vnet_sts.sts_events, events);
+	CURVNET_RESTORE();
+}
+#endif
 
 #ifdef VNET_DEBUG
 struct vnet_recursion {

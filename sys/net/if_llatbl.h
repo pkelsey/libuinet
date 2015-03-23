@@ -33,6 +33,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/net/if_llatbl.h 225698 2011-09-20 20:27:26
 #include "opt_ofed.h"
 
 #include <sys/_rwlock.h>
+#include <net/vnet.h>
 #include <netinet/in.h>
 
 struct ifnet;
@@ -82,8 +83,8 @@ struct llentry {
 
 	/* XXX af-private? */
 	union {
-		struct callout	ln_timer_ch;
-		struct callout  la_timer;
+		struct vnet_callout  ln_timer_ch;
+		struct vnet_callout  la_timer;
 	} lle_timer;
 	/* NB: struct sockaddr must immediately follow */
 };

@@ -140,17 +140,9 @@ SYSCTL_INT(_net_inet_tcp, OID_AUTO, per_cpu_timers, CTLFLAG_RW,
 void
 tcp_slowtimo(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		INP_INFO_WLOCK(&V_tcbinfo);
-		(void) tcp_tw_2msl_scan(0);
-		INP_INFO_WUNLOCK(&V_tcbinfo);
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
+	INP_INFO_WLOCK(&V_tcbinfo);
+	(void) tcp_tw_2msl_scan(0);
+	INP_INFO_WUNLOCK(&V_tcbinfo);
 }
 
 int	tcp_syn_backoff[TCP_MAXRXTSHIFT + 1] =
@@ -190,13 +182,13 @@ tcp_timer_delack(void *xtp)
 		return;
 	}
 	INP_WLOCK(inp);
-	if ((inp->inp_flags & INP_DROPPED) || callout_pending(&tp->t_timers->tt_delack)
-	    || !callout_active(&tp->t_timers->tt_delack)) {
+	if ((inp->inp_flags & INP_DROPPED) || vnet_callout_pending(&tp->t_timers->tt_delack)
+	    || !vnet_callout_active(&tp->t_timers->tt_delack)) {
 		INP_WUNLOCK(inp);
 		CURVNET_RESTORE();
 		return;
 	}
-	callout_deactivate(&tp->t_timers->tt_delack);
+	vnet_callout_deactivate(&tp->t_timers->tt_delack);
 
 	tp->t_flags |= TF_ACKNOW;
 	TCPSTAT_INC(tcps_delack);
@@ -236,14 +228,14 @@ tcp_timer_2msl(void *xtp)
 	}
 	INP_WLOCK(inp);
 	tcp_free_sackholes(tp);
-	if ((inp->inp_flags & INP_DROPPED) || callout_pending(&tp->t_timers->tt_2msl) ||
-	    !callout_active(&tp->t_timers->tt_2msl)) {
+	if ((inp->inp_flags & INP_DROPPED) || vnet_callout_pending(&tp->t_timers->tt_2msl) ||
+	    !vnet_callout_active(&tp->t_timers->tt_2msl)) {
 		INP_WUNLOCK(tp->t_inpcb);
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 		CURVNET_RESTORE();
 		return;
 	}
-	callout_deactivate(&tp->t_timers->tt_2msl);
+	vnet_callout_deactivate(&tp->t_timers->tt_2msl);
 	/*
 	 * 2 MSL timeout in shutdown went off.  If we're closed but
 	 * still waiting for peer to close and connection has been idle
@@ -262,7 +254,7 @@ tcp_timer_2msl(void *xtp)
 	} else {
 		if (tp->t_state != TCPS_TIME_WAIT &&
 		   ticks - tp->t_rcvtime <= TP_MAXIDLE(tp))
-		       callout_reset_on(&tp->t_timers->tt_2msl,
+		       vnet_callout_reset_on(&tp->t_timers->tt_2msl,
 			   TP_KEEPINTVL(tp), tcp_timer_2msl, tp, INP_CPU(inp));
 	       else
 		       tp = tcp_close(tp);
@@ -307,14 +299,14 @@ tcp_timer_keep(void *xtp)
 		return;
 	}
 	INP_WLOCK(inp);
-	if ((inp->inp_flags & INP_DROPPED) || callout_pending(&tp->t_timers->tt_keep)
-	    || !callout_active(&tp->t_timers->tt_keep)) {
+	if ((inp->inp_flags & INP_DROPPED) || vnet_callout_pending(&tp->t_timers->tt_keep)
+	    || !vnet_callout_active(&tp->t_timers->tt_keep)) {
 		INP_WUNLOCK(inp);
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 		CURVNET_RESTORE();
 		return;
 	}
-	callout_deactivate(&tp->t_timers->tt_keep);
+	vnet_callout_deactivate(&tp->t_timers->tt_keep);
 	/*
 	 * Keep-alive timer went off; send something
 	 * or drop connection if idle for too long.
@@ -346,10 +338,10 @@ tcp_timer_keep(void *xtp)
 				    tp->rcv_nxt, tp->snd_una - 1, 0);
 			free(t_template, M_TEMP);
 		}
-		callout_reset_on(&tp->t_timers->tt_keep, TP_KEEPINTVL(tp),
+		vnet_callout_reset_on(&tp->t_timers->tt_keep, TP_KEEPINTVL(tp),
 		    tcp_timer_keep, tp, INP_CPU(inp));
 	} else
-		callout_reset_on(&tp->t_timers->tt_keep, TP_KEEPIDLE(tp),
+		vnet_callout_reset_on(&tp->t_timers->tt_keep, TP_KEEPIDLE(tp),
 		    tcp_timer_keep, tp, INP_CPU(inp));
 
 #ifdef TCPDEBUG
@@ -404,14 +396,14 @@ tcp_timer_persist(void *xtp)
 		return;
 	}
 	INP_WLOCK(inp);
-	if ((inp->inp_flags & INP_DROPPED) || callout_pending(&tp->t_timers->tt_persist)
-	    || !callout_active(&tp->t_timers->tt_persist)) {
+	if ((inp->inp_flags & INP_DROPPED) || vnet_callout_pending(&tp->t_timers->tt_persist)
+	    || !vnet_callout_active(&tp->t_timers->tt_persist)) {
 		INP_WUNLOCK(inp);
 		INP_INFO_WUNLOCK(&V_tcbinfo);
 		CURVNET_RESTORE();
 		return;
 	}
-	callout_deactivate(&tp->t_timers->tt_persist);
+	vnet_callout_deactivate(&tp->t_timers->tt_persist);
 	/*
 	 * Persistance timer into zero window.
 	 * Force a byte to be output, if possible.
@@ -476,14 +468,14 @@ tcp_timer_rexmt(void * xtp)
 		return;
 	}
 	INP_WLOCK(inp);
-	if ((inp->inp_flags & INP_DROPPED) || callout_pending(&tp->t_timers->tt_rexmt)
-	    || !callout_active(&tp->t_timers->tt_rexmt)) {
+	if ((inp->inp_flags & INP_DROPPED) || vnet_callout_pending(&tp->t_timers->tt_rexmt)
+	    || !vnet_callout_active(&tp->t_timers->tt_rexmt)) {
 		INP_WUNLOCK(inp);
 		INP_INFO_RUNLOCK(&V_tcbinfo);
 		CURVNET_RESTORE();
 		return;
 	}
-	callout_deactivate(&tp->t_timers->tt_rexmt);
+	vnet_callout_deactivate(&tp->t_timers->tt_rexmt);
 	tcp_free_sackholes(tp);
 	/*
 	 * Retransmission timer went off.  Message has not
@@ -623,13 +615,13 @@ tcp_timer_reassdl(void *xtp)
 		return;
 	}
 	INP_WLOCK(inp);
-	if ((inp->inp_flags & INP_DROPPED) || callout_pending(&tp->t_timers->tt_reassdl)
-	    || !callout_active(&tp->t_timers->tt_reassdl)) {
+	if ((inp->inp_flags & INP_DROPPED) || vnet_callout_pending(&tp->t_timers->tt_reassdl)
+	    || !vnet_callout_active(&tp->t_timers->tt_reassdl)) {
 		INP_WUNLOCK(inp);
 		CURVNET_RESTORE();
 		return;
 	}
-	callout_deactivate(&tp->t_timers->tt_reassdl);
+	vnet_callout_deactivate(&tp->t_timers->tt_reassdl);
 
 	tcp_reass_deliver_holes(tp);
 	
@@ -641,7 +633,7 @@ tcp_timer_reassdl(void *xtp)
 void
 tcp_timer_activate(struct tcpcb *tp, int timer_type, u_int delta)
 {
-	struct callout *t_callout;
+	struct vnet_callout *t_callout;
 	void *f_callout;
 	struct inpcb *inp = tp->t_inpcb;
 	int cpu = INP_CPU(inp);
@@ -677,16 +669,16 @@ tcp_timer_activate(struct tcpcb *tp, int timer_type, u_int delta)
 			panic("bad timer_type");
 		}
 	if (delta == 0) {
-		callout_stop(t_callout);
+		vnet_callout_stop(t_callout);
 	} else {
-		callout_reset_on(t_callout, delta, f_callout, tp, cpu);
+		vnet_callout_reset_on(t_callout, delta, f_callout, tp, cpu);
 	}
 }
 
 int
 tcp_timer_active(struct tcpcb *tp, int timer_type)
 {
-	struct callout *t_callout;
+	struct vnet_callout *t_callout;
 
 	switch (timer_type) {
 		case TT_DELACK:
@@ -712,7 +704,7 @@ tcp_timer_active(struct tcpcb *tp, int timer_type)
 		default:
 			panic("bad timer_type");
 		}
-	return callout_active(t_callout);
+	return vnet_callout_active(t_callout);
 }
 
 #define	ticks_to_msecs(t)	(1000*(t) / hz)
@@ -723,15 +715,15 @@ tcp_timer_to_xtimer(struct tcpcb *tp, struct tcp_timer *timer, struct xtcp_timer
 	bzero(xtimer, sizeof(struct xtcp_timer));
 	if (timer == NULL)
 		return;
-	if (callout_active(&timer->tt_delack))
-		xtimer->tt_delack = ticks_to_msecs(timer->tt_delack.c_time - ticks);
-	if (callout_active(&timer->tt_rexmt))
-		xtimer->tt_rexmt = ticks_to_msecs(timer->tt_rexmt.c_time - ticks);
-	if (callout_active(&timer->tt_persist))
-		xtimer->tt_persist = ticks_to_msecs(timer->tt_persist.c_time - ticks);
-	if (callout_active(&timer->tt_keep))
-		xtimer->tt_keep = ticks_to_msecs(timer->tt_keep.c_time - ticks);
-	if (callout_active(&timer->tt_2msl))
-		xtimer->tt_2msl = ticks_to_msecs(timer->tt_2msl.c_time - ticks);
+	if (vnet_callout_active(&timer->tt_delack))
+		xtimer->tt_delack = vnet_callout_msecs_remaining(&timer->tt_delack);
+	if (vnet_callout_active(&timer->tt_rexmt))
+		xtimer->tt_rexmt = vnet_callout_msecs_remaining(&timer->tt_rexmt);
+	if (vnet_callout_active(&timer->tt_persist))
+		xtimer->tt_persist = vnet_callout_msecs_remaining(&timer->tt_persist);
+	if (vnet_callout_active(&timer->tt_keep))
+		xtimer->tt_keep = vnet_callout_msecs_remaining(&timer->tt_keep);
+	if (vnet_callout_active(&timer->tt_2msl))
+		xtimer->tt_2msl = vnet_callout_msecs_remaining(&timer->tt_2msl);
 	xtimer->t_rcvtime = ticks_to_msecs(ticks - tp->t_rcvtime);
 }

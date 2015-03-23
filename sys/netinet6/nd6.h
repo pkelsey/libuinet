@@ -342,7 +342,7 @@ VNET_DECLARE(int, nd6_onlink_ns_rfc4861);
 
 #define nd6log(x)	do { if (V_nd6_debug) log x; } while (/*CONSTCOND*/ 0)
 
-VNET_DECLARE(struct callout, nd6_timer_ch);
+VNET_DECLARE(struct vnet_callout, nd6_timer_ch);
 #define	V_nd6_timer_ch			VNET(nd6_timer_ch)
 
 /* nd6_rtr.c */

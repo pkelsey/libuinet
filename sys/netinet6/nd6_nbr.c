@@ -1176,7 +1176,7 @@ struct dadq {
 	int dad_ns_ocount;	/* NS sent so far */
 	int dad_ns_icount;
 	int dad_na_icount;
-	struct callout dad_timer_ch;
+	struct vnet_callout dad_timer_ch;
 	struct vnet *dad_vnet;
 };
 
@@ -1201,7 +1201,7 @@ static void
 nd6_dad_starttimer(struct dadq *dp, int ticks)
 {
 
-	callout_reset(&dp->dad_timer_ch, ticks,
+	vnet_callout_reset(&dp->dad_timer_ch, ticks,
 	    (void (*)(void *))nd6_dad_timer, (void *)dp);
 }
 
@@ -1209,7 +1209,7 @@ static void
 nd6_dad_stoptimer(struct dadq *dp)
 {
 
-	callout_stop(&dp->dad_timer_ch);
+	vnet_callout_stop(&dp->dad_timer_ch);
 }
 
 /*
@@ -1270,7 +1270,7 @@ nd6_dad_start(struct ifaddr *ifa, int delay)
 		return;
 	}
 	bzero(dp, sizeof(*dp));
-	callout_init(&dp->dad_timer_ch, 0);
+	vnet_callout_init(&dp->dad_timer_ch, 0);
 #ifdef VIMAGE
 	dp->dad_vnet = curvnet;
 #endif

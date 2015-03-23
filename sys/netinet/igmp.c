@@ -89,7 +89,6 @@ static struct igmp_ifinfo *
 		igi_alloc_locked(struct ifnet *);
 static void	igi_delete_locked(const struct ifnet *);
 static void	igmp_dispatch_queue(struct ifqueue *, int, const int);
-static void	igmp_fasttimo_vnet(void);
 static void	igmp_final_leave(struct in_multi *, struct igmp_ifinfo *);
 static int	igmp_handle_state_change(struct in_multi *,
 		    struct igmp_ifinfo *);
@@ -114,7 +113,6 @@ static struct mbuf *
 static char *	igmp_rec_type_to_str(const int);
 #endif
 static void	igmp_set_version(struct igmp_ifinfo *, const int);
-static void	igmp_slowtimo_vnet(void);
 static int	igmp_v1v2_queue_report(struct in_multi *, const int);
 static void	igmp_v1v2_process_group_timer(struct in_multi *, const int);
 static void	igmp_v1v2_process_querier_timers(struct igmp_ifinfo *);
@@ -1613,31 +1611,13 @@ igmp_input(struct mbuf *m, int off)
 
 
 /*
- * Fast timeout handler (global).
- * VIMAGE: Timeout handlers are expected to service all vimages.
- */
-void
-igmp_fasttimo(void)
-{
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		igmp_fasttimo_vnet();
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
-}
-
-/*
  * Fast timeout handler (per-vnet).
  * Sends are shuffled off to a netisr to deal with Giant.
  *
  * VIMAGE: Assume caller has set up our curvnet.
  */
-static void
-igmp_fasttimo_vnet(void)
+void
+igmp_fasttimo(void)
 {
 	struct ifqueue		 scq;	/* State-change packets */
 	struct ifqueue		 qrq;	/* Query response packets */
@@ -2153,28 +2133,10 @@ igmp_v1v2_process_querier_timers(struct igmp_ifinfo *igi)
 }
 
 /*
- * Global slowtimo handler.
- * VIMAGE: Timeout handlers are expected to service all vimages.
+ * Per-vnet slowtimo handler.
  */
 void
 igmp_slowtimo(void)
-{
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		igmp_slowtimo_vnet();
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
-}
-
-/*
- * Per-vnet slowtimo handler.
- */
-static void
-igmp_slowtimo_vnet(void)
 {
 	struct igmp_ifinfo *igi;
 

@@ -63,12 +63,22 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/uipc_domain.c 237296 2012-06-20 09:38
 static void domaininit(void *);
 SYSINIT(domain, SI_SUB_PROTO_DOMAININIT, SI_ORDER_ANY, domaininit, NULL);
 
+static void vnet_domaininit(void *);
+VNET_SYSINIT(vnet_domain, SI_SUB_PROTO_DOMAININIT, SI_ORDER_ANY, vnet_domaininit, NULL);
+
 static void domainfinalize(void *);
 SYSINIT(domainfin, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_FIRST, domainfinalize,
     NULL);
 
-static struct callout pffast_callout;
-static struct callout pfslow_callout;
+static void vnet_domainfinalize(void *);
+VNET_SYSINIT(vnet_domainfin, SI_SUB_PROTO_IFATTACHDOMAIN, SI_ORDER_FIRST, vnet_domainfinalize,
+    NULL);
+
+static VNET_DEFINE(struct vnet_callout, pffast_callout);
+static VNET_DEFINE(struct vnet_callout, pfslow_callout);
+
+#define V_pffast_callout	VNET(pffast_callout)
+#define V_pfslow_callout	VNET(pfslow_callout)
 
 static void	pffasttimo(void *);
 static void	pfslowtimo(void *);
@@ -264,13 +274,18 @@ domaininit(void *dummy)
 	if (max_linkhdr < 16)		/* XXX */
 		max_linkhdr = 16;
 
-	callout_init(&pffast_callout, CALLOUT_MPSAFE);
-	callout_init(&pfslow_callout, CALLOUT_MPSAFE);
-
 	mtx_lock(&dom_mtx);
 	KASSERT(domain_init_status == 0, ("domaininit called too late!"));
 	domain_init_status = 1;
 	mtx_unlock(&dom_mtx);
+}
+
+/* ARGSUSED*/
+static void
+vnet_domaininit(void *dummy)
+{
+	vnet_callout_init(&V_pffast_callout, CALLOUT_MPSAFE);
+	vnet_callout_init(&V_pfslow_callout, CALLOUT_MPSAFE);
 }
 
 /* ARGSUSED*/
@@ -282,9 +297,14 @@ domainfinalize(void *dummy)
 	KASSERT(domain_init_status == 1, ("domainfinalize called too late!"));
 	domain_init_status = 2;
 	mtx_unlock(&dom_mtx);	
+}
 
-	callout_reset(&pffast_callout, 1, pffasttimo, NULL);
-	callout_reset(&pfslow_callout, 1, pfslowtimo, NULL);
+/* ARGSUSED*/
+static void
+vnet_domainfinalize(void *dummy)
+{
+	vnet_callout_reset(&V_pffast_callout, 1, pffasttimo, curvnet);
+	vnet_callout_reset(&V_pfslow_callout, 1, pfslowtimo, curvnet);
 }
 
 struct protosw *
@@ -507,27 +527,61 @@ pfctlinput2(int cmd, struct sockaddr *sa, void *ctlparam)
 }
 
 static void
-pfslowtimo(void *arg)
+pfslowtimo(void *vnet)
 {
 	struct domain *dp;
 	struct protosw *pr;
 
+	CURVNET_SET(vnet);
 	for (dp = domains; dp; dp = dp->dom_next)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_slowtimo)
 				(*pr->pr_slowtimo)();
-	callout_reset(&pfslow_callout, hz/2, pfslowtimo, NULL);
+	vnet_callout_reset(&V_pfslow_callout, hz/2, pfslowtimo, curvnet);
+	CURVNET_RESTORE();
 }
 
 static void
-pffasttimo(void *arg)
+pffasttimo(void *vnet)
 {
 	struct domain *dp;
 	struct protosw *pr;
 
+	CURVNET_SET(vnet);
 	for (dp = domains; dp; dp = dp->dom_next)
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
 			if (pr->pr_fasttimo)
 				(*pr->pr_fasttimo)();
-	callout_reset(&pffast_callout, hz/5, pffasttimo, NULL);
+	vnet_callout_reset(&V_pffast_callout, hz/5, pffasttimo, curvnet);
+	CURVNET_RESTORE();
 }
+
+void
+_pfdrain_vnet(void)
+{
+	struct domain *dp;
+	struct protosw *pr;
+
+	for (dp = domains; dp != NULL; dp = dp->dom_next)
+		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++)
+			if (pr->pr_drain != NULL)
+				(*pr->pr_drain)();
+}
+
+void
+pfdrain(void)
+{
+	VNET_ITERATOR_DECL(vnet_iter);
+
+	VNET_LIST_RLOCK();
+	VNET_FOREACH(vnet_iter) {
+		CURVNET_SET_QUIET(vnet_iter);
+		if (VNET_IS_STS())
+			vnet_sts_event_send(VNET_STS_EVENT_PR_DRAIN);
+		else
+			_pfdrain_vnet();
+		CURVNET_RESTORE();
+	}
+	VNET_LIST_RUNLOCK();
+}
+

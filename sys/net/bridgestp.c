@@ -1904,9 +1904,9 @@ bstp_tick(void *arg)
 			bp->bp_txcount--;
 	}
 
-	CURVNET_RESTORE();
+	vnet_callout_reset(&bs->bs_bstpcallout, hz, bstp_tick, bs);
 
-	callout_reset(&bs->bs_bstpcallout, hz, bstp_tick, bs);
+	CURVNET_RESTORE();
 }
 
 static void
@@ -2077,8 +2077,8 @@ bstp_reinit(struct bstp_state *bs)
 	bs->bs_bridge_pv.pv_dport_id = 0;
 	bs->bs_bridge_pv.pv_port_id = 0;
 
-	if (bs->bs_running && callout_pending(&bs->bs_bstpcallout) == 0)
-		callout_reset(&bs->bs_bstpcallout, hz, bstp_tick, bs);
+	if (bs->bs_running && vnet_callout_pending(&bs->bs_bstpcallout) == 0)
+		vnet_callout_reset(&bs->bs_bstpcallout, hz, bstp_tick, bs);
 
 	LIST_FOREACH(bp, &bs->bs_bplist, bp_next) {
 		bp->bp_port_id = (bp->bp_priority << 8) |
@@ -2101,7 +2101,7 @@ disablestp:
 		bp->bp_infois = BSTP_INFO_DISABLED;
 		bstp_set_port_role(bp, BSTP_ROLE_DISABLED);
 	}
-	callout_stop(&bs->bs_bstpcallout);
+	vnet_callout_stop(&bs->bs_bstpcallout);
 }
 
 static int
@@ -2134,7 +2134,7 @@ void
 bstp_attach(struct bstp_state *bs, struct bstp_cb_ops *cb)
 {
 	BSTP_LOCK_INIT(bs);
-	callout_init_mtx(&bs->bs_bstpcallout, &bs->bs_mtx, 0);
+	vnet_callout_init_mtx(&bs->bs_bstpcallout, &bs->bs_mtx, 0);
 	LIST_INIT(&bs->bs_bplist);
 
 	bs->bs_bridge_max_age = BSTP_DEFAULT_MAX_AGE;
@@ -2164,7 +2164,7 @@ bstp_detach(struct bstp_state *bs)
 	mtx_lock(&bstp_list_mtx);
 	LIST_REMOVE(bs, bs_list);
 	mtx_unlock(&bstp_list_mtx);
-	callout_drain(&bs->bs_bstpcallout);
+	vnet_callout_drain(&bs->bs_bstpcallout);
 	BSTP_LOCK_DESTROY(bs);
 }
 
@@ -2172,7 +2172,7 @@ void
 bstp_init(struct bstp_state *bs)
 {
 	BSTP_LOCK(bs);
-	callout_reset(&bs->bs_bstpcallout, hz, bstp_tick, bs);
+	vnet_callout_reset(&bs->bs_bstpcallout, hz, bstp_tick, bs);
 	bs->bs_running = 1;
 	bstp_reinit(bs);
 	BSTP_UNLOCK(bs);
@@ -2189,7 +2189,7 @@ bstp_stop(struct bstp_state *bs)
 		bstp_set_port_state(bp, BSTP_IFSTATE_DISCARDING);
 
 	bs->bs_running = 0;
-	callout_stop(&bs->bs_bstpcallout);
+	vnet_callout_stop(&bs->bs_bstpcallout);
 	BSTP_UNLOCK(bs);
 }
 

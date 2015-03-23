@@ -213,7 +213,7 @@ struct bridge_softc {
 	uint32_t		sc_brtmax;	/* max # of addresses */
 	uint32_t		sc_brtcnt;	/* cur. # of addresses */
 	uint32_t		sc_brttimeout;	/* rt timeout in seconds */
-	struct callout		sc_brcallout;	/* bridge callout */
+	struct vnet_callout	sc_brcallout;	/* bridge callout */
 	uint32_t		sc_iflist_ref;	/* refcount for sc_iflist */
 	uint32_t		sc_iflist_xcnt;	/* refcount for sc_iflist */
 	LIST_HEAD(, bridge_iflist) sc_iflist;	/* member interface list */
@@ -591,7 +591,7 @@ bridge_clone_create(struct if_clone *ifc, int unit, caddr_t params)
 	/* Initialize our routing table. */
 	bridge_rtable_init(sc);
 
-	callout_init_mtx(&sc->sc_brcallout, &sc->sc_mtx, 0);
+	vnet_callout_init_mtx(&sc->sc_brcallout, &sc->sc_mtx, 0);
 
 	LIST_INIT(&sc->sc_iflist);
 	LIST_INIT(&sc->sc_spanlist);
@@ -681,7 +681,7 @@ bridge_clone_destroy(struct ifnet *ifp)
 
 	BRIDGE_UNLOCK(sc);
 
-	callout_drain(&sc->sc_brcallout);
+	vnet_callout_drain(&sc->sc_brcallout);
 
 	mtx_lock(&bridge_list_mtx);
 	LIST_REMOVE(sc, sc_list);
@@ -1742,7 +1742,7 @@ bridge_init(void *xsc)
 		return;
 
 	BRIDGE_LOCK(sc);
-	callout_reset(&sc->sc_brcallout, bridge_rtable_prune_period * hz,
+	vnet_callout_reset(&sc->sc_brcallout, bridge_rtable_prune_period * hz,
 	    bridge_timer, sc);
 
 	ifp->if_drv_flags |= IFF_DRV_RUNNING;
@@ -1766,7 +1766,7 @@ bridge_stop(struct ifnet *ifp, int disable)
 	if ((ifp->if_drv_flags & IFF_DRV_RUNNING) == 0)
 		return;
 
-	callout_stop(&sc->sc_brcallout);
+	vnet_callout_stop(&sc->sc_brcallout);
 	bstp_stop(&sc->sc_stp);
 
 	bridge_rtflush(sc, IFBF_FLUSHDYN);
@@ -2647,7 +2647,7 @@ bridge_timer(void *arg)
 	bridge_rtage(sc);
 
 	if (sc->sc_ifp->if_drv_flags & IFF_DRV_RUNNING)
-		callout_reset(&sc->sc_brcallout,
+		vnet_callout_reset(&sc->sc_brcallout,
 		    bridge_rtable_prune_period * hz, bridge_timer, sc);
 }
 

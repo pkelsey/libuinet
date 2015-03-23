@@ -278,7 +278,7 @@ syncache_init(void)
 		TAILQ_INIT(&V_tcp_syncache.hashbase[i].sch_bucket);
 		mtx_init(&V_tcp_syncache.hashbase[i].sch_mtx, "tcp_sc_head",
 			 NULL, MTX_DEF);
-		callout_init_mtx(&V_tcp_syncache.hashbase[i].sch_timer,
+		vnet_callout_init_mtx(&V_tcp_syncache.hashbase[i].sch_timer,
 			 &V_tcp_syncache.hashbase[i].sch_mtx, 0);
 		V_tcp_syncache.hashbase[i].sch_length = 0;
 	}
@@ -301,7 +301,7 @@ syncache_destroy(void)
 	for (i = 0; i < V_tcp_syncache.hashsize; i++) {
 
 		sch = &V_tcp_syncache.hashbase[i];
-		callout_drain(&sch->sch_timer);
+		vnet_callout_drain(&sch->sch_timer);
 
 		SCH_LOCK(sch);
 		TAILQ_FOREACH_SAFE(sc, &sch->sch_bucket, sc_hash, nsc)
@@ -399,7 +399,7 @@ syncache_timeout(struct syncache *sc, struct syncache_head *sch, int docallout,
 	if (TSTMP_LT(sc->sc_rxttime, sch->sch_nextc)) {
 		sch->sch_nextc = sc->sc_rxttime;
 		if (docallout)
-			callout_reset(&sch->sch_timer, sch->sch_nextc - ticks,
+			vnet_callout_reset(&sch->sch_timer, sch->sch_nextc - ticks,
 			    syncache_timer, (void *)sch);
 	}
 }
@@ -472,7 +472,7 @@ syncache_timer(void *xsch)
 		syncache_timeout(sc, sch, 0, -1);
 	}
 	if (!TAILQ_EMPTY(&(sch)->sch_bucket))
-		callout_reset(&(sch)->sch_timer, (sch)->sch_nextc - tick,
+		vnet_callout_reset(&(sch)->sch_timer, (sch)->sch_nextc - tick,
 			syncache_timer, (void *)(sch));
 	CURVNET_RESTORE();
 }
@@ -1265,6 +1265,8 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	tp->t_reassdl = sototcpcb(lso)->t_reassdl;
 
 	m1 = syncache_synthesize_synack(sc, &th);
+	if (m1 == NULL)
+		goto abort;
 
 	/* tcp_fields_to_host(th); */
 	th->th_seq = ntohl(th->th_seq);

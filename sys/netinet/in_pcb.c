@@ -109,7 +109,8 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/in_pcb.c 237910 2012-07-01 08:47:1
 #include <security/mac/mac_framework.h>
 #endif /* MAC */
 
-static struct callout	ipport_tick_callout;
+static VNET_DEFINE(struct vnet_callout,	ipport_tick_callout);
+#define V_ipport_tick_callout VNET(ipport_tick_callout)
 
 /*
  * These configure the range of local port addresses assigned to
@@ -2449,31 +2450,33 @@ in_pcbsosetlabel(struct socket *so)
  * ipport_randomcps for at least ipport_randomtime seconds.
  */
 static void
-ipport_tick(void *xtp)
+ipport_tick(void *vnet)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);	/* XXX appease INVARIANTS here */
-		if (V_ipport_tcpallocs <=
-		    V_ipport_tcplastcount + V_ipport_randomcps) {
-			if (V_ipport_stoprandom > 0)
-				V_ipport_stoprandom--;
-		} else
-			V_ipport_stoprandom = V_ipport_randomtime;
-		V_ipport_tcplastcount = V_ipport_tcpallocs;
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
-	callout_reset(&ipport_tick_callout, hz, ipport_tick, NULL);
+	CURVNET_SET(vnet);
+	if (V_ipport_tcpallocs <=
+	    V_ipport_tcplastcount + V_ipport_randomcps) {
+		if (V_ipport_stoprandom > 0)
+			V_ipport_stoprandom--;
+	} else
+		V_ipport_stoprandom = V_ipport_randomtime;
+	V_ipport_tcplastcount = V_ipport_tcpallocs;
+	vnet_callout_reset(&V_ipport_tick_callout, hz, ipport_tick, curvnet);
+	CURVNET_RESTORE();
 }
 
+/*
+ * This is only called for vnets that are not in single-thread-stack mode -
+ * the event loops (and consequently, callouts) of vnets in
+ * single-thread-stack mode should have been stopped by the time the
+ * shutdown_pre_sync EVENTHANDLER runs, so it is not necessary for such
+ * vnets.
+ */
 static void
-ip_fini(void *xtp)
+ip_fini(void *vnet)
 {
-
-	callout_stop(&ipport_tick_callout);
+	CURVNET_SET(vnet);
+	vnet_callout_stop(&V_ipport_tick_callout);
+	CURVNET_RESTORE();
 }
 
 /* 
@@ -2485,12 +2488,20 @@ ipport_tick_init(const void *unused __unused)
 {
 
 	/* Start ipport_tick. */
-	callout_init(&ipport_tick_callout, CALLOUT_MPSAFE);
-	callout_reset(&ipport_tick_callout, 1, ipport_tick, NULL);
-	EVENTHANDLER_REGISTER(shutdown_pre_sync, ip_fini, NULL,
-		SHUTDOWN_PRI_DEFAULT);
+	vnet_callout_init(&V_ipport_tick_callout, CALLOUT_MPSAFE);
+	vnet_callout_reset(&V_ipport_tick_callout, 1, ipport_tick, curvnet);
+	/*
+	 * Only register a shutdown event handler for vnets that are not in
+	 * single-thread-stack mode as it is unsafe (event handlers will not
+	 * be run in the event loop contexts of those stacks) and
+	 * unnecessary (the event loops for such stacks should have been
+	 * stopped by the time the shutdown_pre_sync EVENTHANDLER runs).
+	 */
+	if (!VNET_IS_STS())
+		EVENTHANDLER_REGISTER(shutdown_pre_sync, ip_fini, curvnet,
+			SHUTDOWN_PRI_DEFAULT);
 }
-SYSINIT(ipport_tick_init, SI_SUB_PROTO_DOMAIN, SI_ORDER_MIDDLE, 
+VNET_SYSINIT(ipport_tick_init, SI_SUB_PROTO_DOMAIN, SI_ORDER_MIDDLE, 
     ipport_tick_init, NULL);
 
 void
