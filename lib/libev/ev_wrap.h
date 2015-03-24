@@ -20,6 +20,7 @@
 #define cleanupcnt ((loop)->cleanupcnt)
 #define cleanupmax ((loop)->cleanupmax)
 #define cleanups ((loop)->cleanups)
+#define counters ((loop)->counters)
 #define curpid ((loop)->curpid)
 #define epoll_epermcnt ((loop)->epoll_epermcnt)
 #define epoll_epermmax ((loop)->epoll_epermmax)
@@ -97,6 +98,15 @@
 #define uinet_pend_lock ((loop)->uinet_pend_lock)
 #define uinet_prepare_w ((loop)->uinet_prepare_w)
 #define uinet_prev_pend_head ((loop)->uinet_prev_pend_head)
+#define uinet_sts_check_w ((loop)->uinet_sts_check_w)
+#define uinet_sts_enabled ((loop)->uinet_sts_enabled)
+#define uinet_sts_idle_w ((loop)->uinet_sts_idle_w)
+#define uinet_sts_ifs ((loop)->uinet_sts_ifs)
+#define uinet_sts_if_max ((loop)->uinet_sts_if_max)
+#define uinet_sts_prepare_w ((loop)->uinet_sts_prepare_w)
+#define uinet_sts_ready_sockets_head ((loop)->uinet_sts_ready_sockets_head)
+#define uinet_sts_stack_max ((loop)->uinet_sts_stack_max)
+#define uinet_sts_stacks ((loop)->uinet_sts_stacks)
 #define uinet_walk_head ((loop)->uinet_walk_head)
 #define userdata ((loop)->userdata)
 #define vec_eo ((loop)->vec_eo)
@@ -126,6 +136,7 @@
 #undef cleanupcnt
 #undef cleanupmax
 #undef cleanups
+#undef counters
 #undef curpid
 #undef epoll_epermcnt
 #undef epoll_epermmax
@@ -203,6 +214,16 @@
 #undef uinet_pend_lock
 #undef uinet_prepare_w
 #undef uinet_prev_pend_head
+#undef uinet_sts_check_w
+#undef uinet_sts_enabled
+#undef uinet_sts_event_async_w
+#undef uinet_sts_idle_w
+#undef uinet_sts_if_max
+#undef uinet_sts_ifs
+#undef uinet_sts_prepare_w
+#undef uinet_sts_ready_sockets_head
+#undef uinet_sts_stack_max
+#undef uinet_sts_stacks
 #undef uinet_walk_head
 #undef userdata
 #undef vec_eo

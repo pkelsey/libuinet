@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2007,2008,2009,2010,2011,2012 Marc Alexander Lehmann <libev@schmorp.de>
  * All rights reserved.
- * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2014,2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modifica-
  * tion, are permitted provided that the following conditions are met:
@@ -51,7 +51,7 @@
 #   define EV_USE_FLOOR 1
 #  endif
 # endif
-
+#define EV_COUNTERS_ENABLE 1
 # ifdef HAVE_UINET_API_H
 #  ifndef EV_UINET_ENABLE
 #   define EV_UINET_ENABLE EV_FEATURE_WATCHERS
@@ -1528,6 +1528,44 @@ typedef struct
   #define ANHE_at_cache(he)
 #endif
 
+#if EV_UINET_ENABLE
+/* per-loop limits */
+#define EV_UINET_STS_MAX_STACKS	8
+#define EV_UINET_STS_MAX_IFS	8
+
+enum {
+  EV_UINET_STS_RX_IMMEDIATE   = 0x01,
+  EV_UINET_STS_TX_IMMEDIATE   = 0x02,
+  EV_UINET_STS_IMMEDIATE_MASK = 0x03
+};
+
+typedef struct uinet_sts_stack {
+#if EV_MULTIPLICITY
+  EV_P;
+#endif
+  uinet_instance_t uinst;
+  ev_async event_async_w;
+} uinet_sts_stack;
+
+typedef struct uinet_sts_if {
+#if EV_MULTIPLICITY
+  EV_P;
+#endif
+  uinet_if_t uif;
+  int flags;
+  ev_io rx_w;
+  ev_timer rx_timer_w;
+  ev_io tx_w;
+  ev_timer tx_timer_w;
+} uinet_sts_if;
+#endif
+
+#if EV_COUNTERS_ENABLE
+#define EV_COUNT(x)	++counters.x
+#else
+#define EV_COUNT(x)
+#endif
+
 #if EV_MULTIPLICITY
 
   struct ev_loop
@@ -2395,16 +2433,19 @@ childcb (EV_P_ ev_signal *sw, int revents)
 
 #if EV_UINET_ENABLE
 enum {
-  EV_UINET_PENDING    = 0x100, /* needs to be a bit that does not overlap EV_READ or EV_WRITE */
-  EV_UINET_INHIBITED  = 0x200  /* needs to be a bit that does not overlap EV_READ or EV_WRITE */
+  /* all flags here need to be a bit that does not overlap EV_READ or EV_WRITE */
+  EV_UINET_PENDING    = 0x100,
+  EV_UINET_INHIBITED  = 0x200,
+  EV_UINET_STS_READY  = 0x400
 };
 
 typedef struct ev_uinet_ctx
 {
   struct uinet_socket *so;
 #if EV_MULTIPLICITY
-  struct ev_loop *loop;
+  EV_P;
 #endif
+  unsigned int sts; /* socket belongs to a single-thread-stack mode uinet instance */
   int pend_flags; /* locked by uinet_pend_lock */
   unsigned short num_readers;
   unsigned short num_writers;
@@ -2453,13 +2494,47 @@ ev_loop_attach_uinet_interface (EV_P_ uinet_if_t uif) EV_THROW
   uinet_if_set_batch_event_handler(uif, uinet_batch_event_handler, arg);
 }
 
+static void
+uinet_feed_socket_events (ev_uinet_ctx *soctx)
+{
+#if EV_MULTIPLICITY
+  EV_P = soctx->EV_A;
+#endif
+  ev_uinet *w;
+  int revents;
+
+  w = (ev_uinet *)soctx->head;
+  while (w)
+    {
+      revents = w->events & soctx->pend_flags;
+      if (revents)
+        ev_feed_event (EV_A_ w, revents);
+
+      w = (ev_uinet *)w->next;
+    }
+}
+
+inline_size void
+uinet_sts_socket_events (ev_uinet_ctx *soctx, int events)
+{
+#if EV_MULTIPLICITY
+  EV_P = soctx->EV_A;
+#endif
+
+  soctx->pend_flags |= events;
+  if (!(soctx->pend_flags & EV_UINET_STS_READY))
+    {
+      UINET_LIST_INSERT_HEAD (&uinet_sts_ready_sockets_head, soctx, pend_list);
+      soctx->pend_flags |= EV_UINET_STS_READY;
+    }
+}
+
 inline_size void
 uinet_socket_events (ev_uinet_ctx *soctx, int events)
 {
   int new_pend_flags;
-  
 #if EV_MULTIPLICITY
-  EV_P = soctx->loop;
+  EV_P = soctx->EV_A;
 #endif
 
   new_pend_flags = events;
@@ -2479,12 +2554,283 @@ uinet_socket_events (ev_uinet_ctx *soctx, int events)
   pthread_mutex_unlock (&uinet_pend_lock);
 }
 
+inline_size void
+uinet_sts_if_process_rx (EV_P_ uinet_sts_if *evif)
+{
+  int fd;
+  uint64_t wait_time;
+
+  uinet_if_batch_rx (evif->uif, &fd, &wait_time);
+  if (fd != -1)
+    {
+      evif->flags &= ~EV_UINET_STS_RX_IMMEDIATE;
+      ev_io_set (&evif->rx_w, fd, EV_READ);
+      ev_io_start (EV_A_ &evif->rx_w);
+    }
+  else if (wait_time > 0)
+    {
+      evif->flags &= ~EV_UINET_STS_RX_IMMEDIATE;
+      ev_timer_set (&evif->rx_timer_w, (ev_tstamp)wait_time / 1000000000., 0);
+      ev_timer_start (EV_A_ &evif->rx_timer_w);
+    }
+  else
+    {
+      evif->flags |= EV_UINET_STS_RX_IMMEDIATE;
+    }
+}
+
+static void
+uinet_sts_process_rx_io (EV_P_ ev_io *w_io, int revents)
+{
+  ev_io_stop (EV_A_ w_io);
+  uinet_sts_if_process_rx (EV_A_ w_io->data);
+}
+
+static void
+uinet_sts_process_rx_timer (EV_P_ ev_timer *w_timer, int revents)
+{
+  uinet_sts_if_process_rx (EV_A_ w_timer->data);
+}
+
+inline_size int
+uinet_sts_if_process_tx (EV_P_ uinet_sts_if *evif)
+{
+  int fd;
+  int batch_limited;
+  uint64_t wait_time;
+
+  batch_limited = uinet_if_batch_tx (evif->uif, &fd, &wait_time);
+  if (fd != -1)
+    {
+      evif->flags &= ~EV_UINET_STS_TX_IMMEDIATE;
+      ev_io_set (&evif->tx_w, fd, EV_WRITE);
+      ev_io_start (EV_A_ &evif->tx_w);
+    }
+    else if (wait_time > 0)
+    {
+      evif->flags &= ~EV_UINET_STS_TX_IMMEDIATE;
+      ev_timer_set (&evif->tx_timer_w, (ev_tstamp)wait_time / 1000000000., 0);
+      ev_timer_start (EV_A_ &evif->tx_timer_w);
+    }
+    else
+    {
+      evif->flags |= EV_UINET_STS_TX_IMMEDIATE;
+    }
+
+  return (batch_limited);
+}
+
+static void
+uinet_sts_process_tx_io (EV_P_ ev_io *w_io, int revents)
+{
+  ev_io_stop (EV_A_ w_io);
+  uinet_sts_if_process_tx (EV_A_ w_io->data);
+}
+
+static void
+uinet_sts_process_tx_timer (EV_P_ ev_timer *w_timer, int revents)
+{
+  uinet_sts_if_process_tx (EV_A_ w_timer->data);
+}
+
+static void
+uinet_sts_prepare (EV_P_ ev_prepare *w_prepare, int revents)
+{
+  unsigned int i;
+  int fd;
+  int flags;
+  int tx_batch_limited;
+  uint64_t wait_time;
+  uinet_sts_if *evif;
+  ev_uinet_ctx *soctx;
+  struct uinet_socket *so;
+  int ready_sockets;
+
+  /*
+   * Check all of the sockets that have active watchers to see if at least
+   * one has an event of interest pending.  If so, we ensure that the idle
+   * watcher is running so the upcoming poll() is non-blocking, allowing the
+   * STS check watcher to fully detect all pending events of interest.
+   */
+  ready_sockets = 0;
+  UINET_LIST_FOREACH (soctx, &uinet_sts_ready_sockets_head, pend_list)
+    {
+      /*
+       * Note that none of the sockets on this list should have both zero
+       * readers and zero writers as such sockets are removed from the list
+       * in ev_uinet_stop().
+       */  
+      so = soctx->so;
+      if ((soctx->num_readers > 0) && uinet_soreadable (so, 0))
+        {
+          ready_sockets = 1;
+          break;
+        }
+
+      if ((soctx->num_writers > 0) && uinet_sowritable (so, 0))
+        {
+          ready_sockets = 1;
+          break;
+        }
+    }
+
+  flags = 0;
+  tx_batch_limited = 0;
+  for (i = 0; i < uinet_sts_if_max; i++)
+    {
+      evif = &uinet_sts_ifs[i];
+      if (evif->uif == NULL)
+        continue;
+
+      if (evif->flags & EV_UINET_STS_TX_IMMEDIATE)
+        tx_batch_limited += uinet_sts_if_process_tx (EV_A_ evif);
+      flags |= evif->flags;
+    }
+
+  /*
+   * If there is at least one ready socket, or any of the interfaces was
+   * batch-limited on transmit above (that is, still can transmit and has
+   * packets to send), or any of the interfaces are marked as having packets
+   * ready to receive, start the idle watcher if it is not already running
+   * so that a non-blocking poll is performed.
+   *
+   * This is done so that interface io watchers are only started for
+   * interfaces that need to wait for more transmit space or received
+   * packets so polling work is not performed when we already know the
+   * result.
+   */
+  if ((ready_sockets || tx_batch_limited || (flags & EV_UINET_STS_RX_IMMEDIATE)) &&
+      !ev_is_active (&uinet_sts_idle_w))
+    {
+      ev_idle_start (EV_A_ &uinet_sts_idle_w);
+      ev_unref (EV_A); /* this idle watcher should not keep loop alive */
+    }
+
+  /*
+   * If there are no ready sockets and all interfaces were neither
+   * batch-limited on transmit above nor have packets ready to receive, and
+   * the idle watcher is running, stop it, so we will block and not spin
+   * needlessly.
+   */
+  if (!(ready_sockets || tx_batch_limited || (flags & EV_UINET_STS_RX_IMMEDIATE)) &&
+      ev_is_active (&uinet_sts_idle_w))
+    {
+      ev_ref (EV_A);
+      ev_idle_stop (EV_A_ &uinet_sts_idle_w);
+    }
+}
+
+static void
+uinet_sts_check (EV_P_ ev_check *w_check, int revents)
+{
+  unsigned int i;
+  int fd;
+  uint64_t wait_time;
+  uinet_sts_if *evif;
+  ev_uinet_ctx *soctx;
+  struct uinet_socket *so;
+  unsigned int events_of_interest;
+
+  for (i = 0; i < uinet_sts_if_max; i++)
+    {
+      evif = &uinet_sts_ifs[i];
+      if (evif->uif == NULL)
+        continue;
+  
+      if (evif->flags & EV_UINET_STS_RX_IMMEDIATE)
+        uinet_sts_if_process_rx (EV_A_ evif);
+    }
+
+  /*
+   * Remove non-ready sockets from the ready sockets list, and for the
+   * remaining sockets, trigger all the affected watchers.
+   */
+  UINET_LIST_FOREACH (soctx, &uinet_sts_ready_sockets_head, pend_list)
+    {
+      /*
+       * Note that none of the sockets on this list should have both zero
+       * readers and zero writers as such sockets are removed from the list
+       * in ev_uinet_stop().
+       */  
+      so = soctx->so;
+      events_of_interest = 0;
+
+      if ((soctx->num_readers > 0) && uinet_soreadable (so, 0))
+        {
+          events_of_interest |= EV_READ;
+        }
+
+      if ((soctx->num_writers > 0) && uinet_sowritable (so, 0))
+        {
+          events_of_interest |= EV_WRITE;
+        }
+
+      if (events_of_interest)
+      {
+        soctx->pend_flags |= events_of_interest;
+        uinet_feed_socket_events (soctx);
+      }
+      else
+      {
+        /*
+	 * There are active watchers for this socket, but nothing to trigger
+	 * them.  Remove this socket from the ready list to avoid needlessly
+	 * polling its state.  If the socket ever becomes ready to trigger
+	 * an interested watcher again, an upcall will occur that will put
+	 * the socket back on the ready list.
+	 */
+        soctx->pend_flags = EV_NONE;
+	UINET_LIST_REMOVE (soctx, pend_list);
+      }
+    }
+  
+}
+
+static void
+uinet_sts_idle (EV_P_ ev_idle *w_idle, int revents)
+{
+	/* nothing to do */
+}
+
+static void
+uinet_sts_event_async (EV_P_ ev_async *w_async, int revents)
+{
+	uinet_sts_stack *evstack;
+
+	evstack = w_async->data;
+	uinet_instance_sts_events_process(evstack->uinst);
+}
+
+static int noinline
+uinet_sts_read_watcher_upcall (struct uinet_socket *so, void *arg, int wait_ok)
+{
+  ev_uinet_ctx *soctx = arg;
+
+  uinet_sts_socket_events (soctx, EV_READ);
+
+  return UINET_SU_OK;
+}
+
+static int noinline
+uinet_sts_write_watcher_upcall (struct uinet_socket *so, void *arg, int wait_ok)
+{
+  ev_uinet_ctx *soctx = arg;
+
+  uinet_sts_socket_events (soctx, EV_WRITE);
+
+  return UINET_SU_OK;
+}
+
 static int noinline
 uinet_read_watcher_upcall (struct uinet_socket *so, void *arg, int wait_ok)
 {
   ev_uinet_ctx *soctx = arg;
 
-  /* Filter out upcalls that don't represent a change in readability. */
+  /* 
+   * For non-STS sockets, filter out spurious upcalls that don't represent
+   * what libuinet considers readability.  For STS sockets, this filtering
+   * will occur in the STS check watcher.
+   */
   if (uinet_soreadable (so, 1))
     uinet_socket_events (soctx, EV_READ);
 
@@ -2496,7 +2842,11 @@ uinet_write_watcher_upcall (struct uinet_socket *so, void *arg, int wait_ok)
 {
   ev_uinet_ctx *soctx = arg;
 
-  /* Filter out upcalls that don't represent a change in writability. */
+  /* 
+   * For non-STS sockets, filter out spurious upcalls that don't represent
+   * what libuinet considers writability.  For STS sockets, this filtering
+   * will occur in the STS check watcher.
+   */
   if (uinet_sowritable (so, 1))
     uinet_socket_events (soctx, EV_WRITE);
 
@@ -2510,6 +2860,9 @@ uinet_reenable_upcalls (EV_P_ ev_prepare *w_prepare, int revents)
   ev_uinet_ctx *soctx_tmp;
   struct uinet_socket *so;
   int current_events;
+
+  if (UINET_LIST_EMPTY(&uinet_prev_pend_head))
+    return;
 
   /* All sockets on the prev_pend list have their upcalls disabled, so no
    * need for locking here.  The SAFE variant of LIST_FOREACH is used as an
@@ -2551,7 +2904,6 @@ static void
 uinet_process_pending_list (EV_P_ ev_async *w_async, int revents)
 {
   ev_uinet_ctx *soctx;
-  ev_uinet *w;
 
   UINET_ASSERT("libev: uinet_prev_pend list not empty",
       UINET_LIST_EMPTY(&uinet_prev_pend_head));
@@ -2587,15 +2939,7 @@ uinet_process_pending_list (EV_P_ ev_async *w_async, int revents)
       /* As the upcalls for this socket are now disabled, we can safely
        * access soctx->pend_flags without a lock.
        */
-      w = (ev_uinet *)soctx->head;
-      while (w)
-	{
-	  revents = w->events & soctx->pend_flags;
-	  if (revents)
-	    ev_feed_event (EV_A_ w, revents);
-
-	  w = (ev_uinet *)w->next;
-	}
+      uinet_feed_socket_events (soctx);
 
       soctx->pend_flags = EV_UINET_INHIBITED;
     }
@@ -2855,6 +3199,7 @@ loop_init (EV_P_ unsigned int flags) EV_THROW
 #endif
   UINET_LIST_INIT (&uinet_pend_head);
   UINET_LIST_INIT (&uinet_prev_pend_head);
+  UINET_LIST_INIT (&uinet_sts_ready_sockets_head);
 
   ev_init (&uinet_async_w, uinet_process_pending_list);
   ev_async_start (EV_A_ &uinet_async_w);
@@ -2864,9 +3209,311 @@ loop_init (EV_P_ unsigned int flags) EV_THROW
   ev_prepare_start (EV_A_ &uinet_prepare_w);
   ev_unref (EV_A); /* this prepare watcher should not keep loop alive */
 
+  uinet_sts_enabled = 0;
+  uinet_sts_stack_max = 0;
+  uinet_sts_if_max = 0;
+  ev_init (&uinet_sts_check_w, uinet_sts_check);
+  ev_init (&uinet_sts_idle_w, uinet_sts_idle);
+  ev_init (&uinet_sts_prepare_w, uinet_sts_prepare);
+
   uinet_in_batch = 0;
 #endif
 }
+
+#if EV_UINET_ENABLE
+static void * noinline ecb_cold
+uinet_sts_if_created_cb (void *arg, uinet_if_t uif)
+{
+  uinet_sts_stack *evstack = arg;
+#if EV_MULTIPLICITY
+  EV_P = evstack->EV_A;
+#endif
+  uinet_sts_if *evif;
+  unsigned int i;
+
+  evif = NULL;
+  for(i = 0; i < EV_UINET_STS_MAX_IFS; i++)
+    if (uinet_sts_ifs[i].uif == NULL)
+      {
+        evif = &uinet_sts_ifs[i];
+
+	if (i == uinet_sts_if_max)
+		uinet_sts_if_max++;
+        break;
+      }
+  if (evif == NULL)
+    return (NULL);
+
+#if EV_MULTIPLICITY
+  evif->EV_A = EV_A;
+#endif
+
+  evif->uif = uif;
+  evif->flags = EV_UINET_STS_RX_IMMEDIATE | EV_UINET_STS_TX_IMMEDIATE; 
+  ev_init(&evif->rx_w, uinet_sts_process_rx_io);
+  evif->rx_w.data = evif;
+  ev_init(&evif->rx_timer_w, uinet_sts_process_rx_timer);
+  evif->rx_timer_w.data = evif;
+  ev_init(&evif->tx_w, uinet_sts_process_tx_io);
+  evif->tx_w.data = evif;
+  ev_init(&evif->tx_timer_w, uinet_sts_process_tx_timer);
+  evif->tx_timer_w.data = evif;
+
+  return (evif);
+}
+
+static void noinline ecb_cold
+uinet_sts_if_destroyed_cb (void *arg)
+{
+  uinet_sts_if *evif = arg;
+#if EV_MULTIPLICITY
+  EV_P = evif->EV_A;
+#endif
+
+  evif->uif = NULL;
+  if (evif == &uinet_sts_ifs[uinet_sts_if_max - 1])
+	  uinet_sts_if_max--;
+
+  /*
+   * No need to stop interface-specific watchers as the loop has been
+   * stopped before this call.
+   */
+}
+
+static void * noinline ecb_cold
+uinet_sts_stack_created_cb (void *arg, uinet_instance_t uinst)
+{
+#if EV_MULTIPLICITY
+  EV_P = arg;
+#endif
+  uinet_sts_stack *evstack;
+  unsigned int i;
+
+  evstack = NULL;
+  for(i = 0; i < EV_UINET_STS_MAX_STACKS; i++)
+    if (uinet_sts_stacks[i].uinst == NULL)
+      {
+        evstack = &uinet_sts_stacks[i];
+
+	if (i == uinet_sts_stack_max)
+		uinet_sts_stack_max++;
+        break;
+      }
+  if (evstack == NULL)
+    return (NULL);
+
+#if EV_MULTIPLICITY
+  evstack->EV_A = EV_A;
+#endif
+
+  evstack->uinst = uinst;
+  ev_init (&evstack->event_async_w, uinet_sts_event_async);
+  evstack->event_async_w.data = evstack;
+  ev_async_start (EV_A_ &evstack->event_async_w);
+ 
+  /*
+   * The first sts-mode stack in the event loop starts the facilities
+   * required to support sts-mode stacks generally.
+   */
+  if (!uinet_sts_enabled)
+  {
+    ev_check_start (EV_A_ &uinet_sts_check_w);
+    ev_unref (EV_A); /* this check watcher should not keep loop alive */
+
+    ev_prepare_start (EV_A_ &uinet_sts_prepare_w);
+    ev_unref (EV_A); /* this prepare watcher should not keep loop alive */
+ 
+    uinet_sts_enabled = 1;
+  }
+
+  return (evstack);
+}
+
+static void noinline ecb_cold
+uinet_sts_stack_destroyed_cb (void *arg)
+{
+  uinet_sts_stack *evstack = arg;
+#if EV_MULTIPLICITY
+  EV_P = evstack->EV_A;
+#endif
+
+  evstack->uinst = NULL;
+  if (evstack == &uinet_sts_stacks[uinet_sts_stack_max - 1])
+	  uinet_sts_stack_max--;
+
+  /*
+   * No need to stop stack-specific watchers as the loop has been
+   * stopped before this call.
+   */
+}
+
+typedef struct ev_uinet_sts_timer
+{
+  ev_timer w; /* must be first */
+  void (*callout_func)(void *);
+  void *callout_arg;
+
+  /*
+   * The callout(9) definition and behavior of the callout active state
+   * cannot be synthesized from ev watcher state, so it is tracked
+   * separately here.
+   */
+  int callout_active;	
+} ev_uinet_sts_timer;
+
+static void
+uinet_sts_callout_cb (EV_P_ ev_timer *w_timer, int revents)
+{
+  ev_uinet_sts_timer *timer = w_timer->data;
+
+  if (timer->callout_func)
+    timer->callout_func(timer->callout_arg);
+}
+
+static void
+uinet_sts_callout_init (void *ctx, void *c)
+{
+  ev_uinet_sts_timer *timer = c;
+
+  UINET_ASSERT("libev: ev_uinet_sts_timer too large", sizeof(ev_uinet_sts_timer) <= uinet_sts_callout_max_size());
+
+  ev_init (&timer->w, uinet_sts_callout_cb);
+  timer->w.data = timer;
+  timer->callout_active = 0;
+  timer->callout_func = NULL;
+}
+
+static int
+uinet_sts_callout_schedule (void *ctx, void *c, int ticks)
+{
+#if EV_MULTIPLICITY
+  EV_P = ctx;
+#endif
+  ev_uinet_sts_timer *timer = c;
+  int was_rescheduled;
+
+  if (ev_is_active (&timer->w) || ev_is_pending (&timer->w))
+  {
+    ev_timer_stop (EV_A_ &timer->w);
+    was_rescheduled = 1;
+  } else
+    was_rescheduled = 0;
+
+  ev_timer_set (&timer->w, (ev_tstamp)ticks / uinet_hz, 0.);
+  ev_timer_start (EV_A_ &timer->w);
+
+  timer->callout_active = 1;
+  return (was_rescheduled);
+}
+
+static int
+uinet_sts_callout_reset (void *ctx, void *c, int ticks, void (*func)(void *), void *arg)
+{
+  ev_uinet_sts_timer *timer = c;
+
+  timer->callout_func = func;
+  timer->callout_arg = arg;
+  return (uinet_sts_callout_schedule (ctx, c, ticks));
+}
+
+static int
+uinet_sts_callout_pending (void *ctx, void *c)
+{
+  ev_uinet_sts_timer *timer = c;
+
+  /*
+   * callout(9) defines 'pending' as havinga timeout set, but not having yet
+   * reached it.  This is interpreted here as 'pending' means 'not too late
+   * to stop it', which covers both the libev active and libev pending
+   * states.
+   */
+  return (ev_is_active (&timer->w) || ev_is_pending (&timer->w));
+}
+
+static int
+uinet_sts_callout_active (void *ctx, void *c)
+{
+  ev_uinet_sts_timer *timer = c;
+
+  return (timer->callout_active);
+}
+
+static void
+uinet_sts_callout_deactivate (void *ctx, void *c)
+{
+  ev_uinet_sts_timer *timer = c;
+
+  timer->callout_active = 0;
+}
+
+static int
+uinet_sts_callout_msecs_remaining (void *ctx, void *c)
+{
+#if EV_MULTIPLICITY
+  EV_P = ctx;
+#endif
+  ev_uinet_sts_timer *timer = c;
+
+  return (int)(ev_timer_remaining (EV_A_ &timer->w) * 1000);
+}
+
+static int
+uinet_sts_callout_stop (void *ctx, void *c)
+{
+#if EV_MULTIPLICITY
+  EV_P = ctx;
+#endif
+  ev_uinet_sts_timer *timer = c;
+
+  timer->callout_active = 0;
+
+  if (ev_is_active (&timer->w) || ev_is_pending (&timer->w))
+    {
+      ev_timer_stop (EV_A_ &timer->w);
+      return (1);
+    } else
+      return (0);
+}
+
+static void
+uinet_sts_stack_event_notify_cb (void *arg)
+{
+  uinet_sts_stack *evstack = arg;
+#if EV_MULTIPLICITY
+  EV_P = evstack->EV_A;
+#endif
+
+  ev_async_send(EV_A_ &evstack->event_async_w);
+}
+
+void noinline ecb_cold
+ev_loop_enable_uinet_sts (EV_P_ struct uinet_sts_cfg *cfg)
+{
+#if EV_MULTIPLICITY
+  void *this_loop = EV_A;
+#else
+  void *this_loop = NULL;
+#endif
+
+  cfg->sts_enabled = 1;
+  cfg->sts_evctx = this_loop;
+
+  cfg->sts_instance_created_cb = uinet_sts_stack_created_cb;
+  cfg->sts_instance_destroyed_cb = uinet_sts_stack_destroyed_cb;
+  cfg->sts_instance_event_notify_cb = uinet_sts_stack_event_notify_cb;
+  cfg->sts_if_created_cb = uinet_sts_if_created_cb;
+  cfg->sts_if_destroyed_cb = uinet_sts_if_destroyed_cb;
+
+  cfg->sts_callout_init = uinet_sts_callout_init;
+  cfg->sts_callout_reset = uinet_sts_callout_reset;
+  cfg->sts_callout_schedule = uinet_sts_callout_schedule;
+  cfg->sts_callout_pending = uinet_sts_callout_pending;
+  cfg->sts_callout_active = uinet_sts_callout_active;
+  cfg->sts_callout_deactivate = uinet_sts_callout_deactivate;
+  cfg->sts_callout_msecs_remaining = uinet_sts_callout_msecs_remaining;
+  cfg->sts_callout_stop = uinet_sts_callout_stop;
+}
+#endif
 
 /* free up a loop structure */
 void ecb_cold
@@ -2917,6 +3564,24 @@ ev_loop_destroy (EV_P)
     {
       /*ev_ref (EV_A);*/
       /*ev_prepare_stop (EV_A_ &uinet_prepare_w);*/
+    }
+
+  if (ev_is_active (&uinet_sts_check_w))
+    {
+      /*ev_ref (EV_A);*/
+      /*ev_check_stop (EV_A_ &uinet_sts_check_w);*/
+    }
+
+  if (ev_is_active (&uinet_sts_idle_w))
+    {
+      /*ev_ref (EV_A);*/
+      /*ev_idle_stop (EV_A_ &uinet_sts_idle_w);*/
+    }
+
+  if (ev_is_active (&uinet_sts_prepare_w))
+    {
+      /*ev_ref (EV_A);*/
+      /*ev_prepare_stop (EV_A_ &uinet_sts_prepare_w);*/
     }
 
   pthread_mutex_destroy (&uinet_pend_lock);
@@ -3511,6 +4176,7 @@ ev_run (EV_P_ int flags)
 
   do
     {
+      EV_COUNT(iterations);
 #if EV_VERIFY >= 2
       ev_verify (EV_A);
 #endif
@@ -3649,7 +4315,6 @@ ev_run (EV_P_ int flags)
       if (expect_false (checkcnt))
         queue_events (EV_A_ (W *)checks, checkcnt, EV_CHECK);
 #endif
-
       EV_INVOKE_PENDING;
     }
   while (expect_true (
@@ -4892,6 +5557,7 @@ ev_uinet_attach (struct uinet_socket *so)
 	{
 	  memset (ctx, 0, sizeof(*ctx));
 	  ctx->so = so;
+	  ctx->sts = uinet_instance_sts_enabled (uinet_sogetinstance (so));
 	  uinet_sosetuserctx (so, sokey, ctx);
 	}
     }
@@ -4913,7 +5579,6 @@ ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
   ev_uinet_ctx *soctx = w->ctx;
   struct uinet_socket *so = soctx->so;
   int inhibited;
-  int initial_events;
 
   if (expect_false (ev_is_active (w)))
     return;
@@ -4939,45 +5604,90 @@ ev_uinet_start (EV_P_ ev_uinet *w) EV_THROW
    */
 #if EV_MULTIPLICITY
   if (0 == soctx->num_readers + soctx->num_writers)
-    soctx->loop = EV_A;
+    soctx->EV_A = EV_A;
 #endif
-    
-  /* It is important to set each upcall before checking for the
-   * corresponding initial event in order to avoid missing the event due to
-   * the race inherent in executing those two actions the other way.
-   */
 
-  initial_events = 0;
-  inhibited = soctx->pend_flags & EV_UINET_INHIBITED;
 
-  if (w->events & EV_READ)
-    {
-      if (!inhibited && (0 == soctx->num_readers)) 
+  if (soctx->sts)
+  {
+    int check_for_events;
+
+    check_for_events = 0;
+
+    if (w->events & EV_READ)
+      {
+        if (0 == soctx->num_readers)
+          {
+            uinet_soupcall_set (so, UINET_SO_RCV, uinet_sts_read_watcher_upcall, soctx);
+            check_for_events = 1;
+	  }
+        soctx->num_readers++;
+      }
+
+    if (w->events & EV_WRITE)
+      {
+        if (0 == soctx->num_writers)
 	{
-	  uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
-
-	  if (uinet_soreadable (so, 0))
-	    initial_events |= EV_READ;
+          uinet_soupcall_set (so, UINET_SO_SND, uinet_sts_write_watcher_upcall, soctx);
+          check_for_events = 1;
 	}
+        soctx->num_writers++;
+      }
 
-      soctx->num_readers++;
-    }
+    if (check_for_events &&
+        !(soctx->pend_flags & EV_UINET_STS_READY))
+      {
+        /*
+	 * Add to the ready list to make sure this socket gets scanned for
+	 * readability/writability at the top of the next event loop
+	 * iteration, as this is the first read and/or write watcher attached
+	 * to this socket.
+	 */
+        soctx->pend_flags |= EV_UINET_STS_READY;
+        UINET_LIST_INSERT_HEAD (&uinet_sts_ready_sockets_head, soctx, pend_list);
+      }  
+  }
+  else
+  {
+    int initial_events;
+    /*
+     * It is important to set each upcall before checking for the
+     * corresponding initial event in order to avoid missing the event due to
+     * the race inherent in executing those two actions the other way.
+     */
 
-  if (w->events & EV_WRITE)
-    {
-      if (!inhibited && (0 == soctx->num_writers))
-	{
-	  uinet_soupcall_set (so, UINET_SO_SND, uinet_write_watcher_upcall, soctx);
+    initial_events = 0;
+    inhibited = soctx->pend_flags & EV_UINET_INHIBITED;
 
-	  if (uinet_sowritable (so, 0))
-	    initial_events |= EV_WRITE;
-	}
+    if (w->events & EV_READ)
+      {
+        if (!inhibited && (0 == soctx->num_readers)) 
+        {
+          uinet_soupcall_set (so, UINET_SO_RCV, uinet_read_watcher_upcall, soctx);
 
-      soctx->num_writers++;
-    }
+          if (uinet_soreadable (so, 0))
+            initial_events |= EV_READ;
+        }
 
-  if (initial_events)
-	  uinet_socket_events (soctx, initial_events);
+        soctx->num_readers++;
+      }
+
+    if (w->events & EV_WRITE)
+      {
+        if (!inhibited && (0 == soctx->num_writers))
+          {
+            uinet_soupcall_set (so, UINET_SO_SND, uinet_write_watcher_upcall, soctx);
+
+            if (uinet_sowritable (so, 0))
+              initial_events |= EV_WRITE;
+        }
+
+        soctx->num_writers++;
+      }
+
+    if (initial_events)
+      uinet_socket_events (soctx, initial_events);
+  }
 
   EV_FREQUENT_CHECK;
 }
@@ -5013,27 +5723,47 @@ ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
 
   wlist_del (&soctx->head, (WL)w);
 
-  /* If there are now no more watchers for this socket and it is on the
-   * pending list, remove it from the pending list. No lock is required for
-   * accessing soctx->pend_flags because it will only be checked when there
-   * are no watchers and thus no upcalls installed.
-   */
-  if (NULL == soctx->head) {
-	  if (soctx->pend_flags & EV_UINET_INHIBITED) {
-		  /* No lock necessary for the prev_pend list, as it is only
-		   * modified in-loop.
-		   */
-		  UINET_LIST_REMOVE (soctx, pend_list);
-	  } else if (soctx->pend_flags & EV_UINET_PENDING) {
-		  pthread_mutex_lock (&uinet_pend_lock);
-		  UINET_LIST_REMOVE (soctx, pend_list);
-		  pthread_mutex_unlock (&uinet_pend_lock);
-	  } /* else 
-	     * This watcher is being stopped by some other watcher during an
-	     * event loop iteration where this watcher had no events.
-	     */
-	  soctx->pend_flags = EV_NONE;
-  }
+  if (NULL == soctx->head)
+    {
+      if (soctx->sts && (soctx->pend_flags & EV_UINET_STS_READY))
+        {
+          /*
+	   * Remove this socket from the ready sockets list, as there are
+	   * now no more watchers.
+	   */
+          UINET_LIST_REMOVE (soctx, pend_list);
+        }
+      else
+        {
+          /*
+           * If there are now no more watchers for this socket and it is on
+           * the pending list, remove it from the pending list. No lock is
+           * required for accessing soctx->pend_flags because it will only
+           * be checked below when there are no watchers and thus no upcalls
+           * installed that could modify it asynchronously.
+           */
+         if (soctx->pend_flags & EV_UINET_INHIBITED)
+            {
+              /*
+               * No lock necessary for the prev_pend list, as it is only
+               * modified in-loop.
+               */
+              UINET_LIST_REMOVE (soctx, pend_list);
+            }
+          else if (soctx->pend_flags & EV_UINET_PENDING)
+            {
+              pthread_mutex_lock (&uinet_pend_lock);
+              UINET_LIST_REMOVE (soctx, pend_list);
+              pthread_mutex_unlock (&uinet_pend_lock);
+            }
+        }
+       /* else 
+        * This watcher is being stopped by some other watcher during an
+        * event loop iteration where this watcher had no events.
+        */
+
+      soctx->pend_flags = EV_NONE;
+    }
 
 #if EV_WALK_ENABLE
   UINET_LIST_REMOVE (w, walk_list);
@@ -5042,6 +5772,20 @@ ev_uinet_stop (EV_P_ ev_uinet *w) EV_THROW
   ev_stop (EV_A_ (W)w);
 
   EV_FREQUENT_CHECK;
+}
+#endif
+
+#if EV_COUNTERS_ENABLE
+ev_loop_counters * noinline
+ev_loop_counters_get(EV_P) EV_THROW
+{
+	return (&counters);
+}
+
+void noinline
+ev_loop_counters_reset(EV_P) EV_THROW
+{
+	memset(&counters, 0, sizeof(counters));
 }
 #endif
 

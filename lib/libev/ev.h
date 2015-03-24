@@ -142,6 +142,10 @@ EV_CPP(extern "C" {)
 # define EV_WALK_ENABLE 0 /* not yet */
 #endif
 
+#ifndef EV_COUNTERS_ENABLE
+# define EV_COUNTERS_ENABLE 0
+#endif
+
 /*****************************************************************************/
 
 #if EV_CHILD_ENABLE && !EV_SIGNAL_ENABLE
@@ -270,6 +274,15 @@ enum {
 
 /* not official, do not use */
 #define EV_CB(type,name) void name (EV_P_ struct ev_ ## type *w, int revents)
+
+#if EV_COUNTERS_ENABLE
+typedef uint64_t ev_counter;
+
+typedef struct ev_loop_counters
+{
+  ev_counter iterations;
+} ev_loop_counters;
+#endif
 
 /*
  * struct member types:
@@ -646,6 +659,13 @@ EV_API_DECL void ev_loop_destroy (EV_P);
 /* you can actually call it at any time, anywhere :) */
 EV_API_DECL void ev_loop_fork (EV_P) EV_THROW;
 
+#if EV_UINET_ENABLE
+/* enable UINET single-thread-stack processing for the loop. If used, this must be */
+/* invoked before any ev_uinet watchers are started and before ev_run() is invoked */
+/* on the loop. */
+EV_API_DECL void ev_loop_enable_uinet_sts (EV_P_ struct uinet_sts_cfg *cfg) EV_THROW;
+#endif
+
 EV_API_DECL unsigned int ev_backend (EV_P) EV_THROW; /* backend in use by loop */
 
 EV_API_DECL void ev_now_update (EV_P) EV_THROW; /* update event loop time */
@@ -867,6 +887,11 @@ EV_API_DECL void ev_uinet_detach   (struct ev_uinet_ctx *ctx) EV_THROW;
 EV_API_DECL void ev_uinet_start    (EV_P_ ev_uinet *w) EV_THROW;
 EV_API_DECL void ev_uinet_stop     (EV_P_ ev_uinet *w) EV_THROW;
 EV_API_DECL void ev_loop_attach_uinet_interface (EV_P_ uinet_if_t uif) EV_THROW;
+# endif
+
+# if EV_COUNTERS_ENABLE
+EV_API_DECL ev_loop_counters *ev_loop_counters_get(EV_P) EV_THROW;
+EV_API_DECL void ev_loop_counters_reset(EV_P) EV_THROW;
 # endif
 
 #if EV_COMPAT3

@@ -210,6 +210,20 @@ VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_prev_pend_head)
 VARx(ev_async, uinet_async_w)
 VARx(ev_prepare, uinet_prepare_w)
 VARx(int, uinet_in_batch)
+
+VARx(unsigned int, uinet_sts_enabled)
+VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_sts_ready_sockets_head)
+VARx(ev_prepare, uinet_sts_prepare_w)
+VARx(ev_check, uinet_sts_check_w)
+VARx(ev_idle, uinet_sts_idle_w)
+VARx(unsigned int, uinet_sts_if_max)
+VARx(unsigned int, uinet_sts_stack_max)
+VARx(uinet_sts_stack, uinet_sts_stacks[EV_UINET_STS_MAX_STACKS])
+VARx(uinet_sts_if, uinet_sts_ifs[EV_UINET_STS_MAX_IFS])
+#endif
+
+#if EV_COUNTERS_ENABLE || EV_GENWRAP
+VARx(ev_loop_counters, counters)
 #endif
 
 #undef VARx
