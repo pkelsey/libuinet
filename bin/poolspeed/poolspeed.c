@@ -112,12 +112,16 @@ start_test_thread(void *arg)
 	const struct test_params *params = arg;
 
 	if (!params->use_malloc)
-		uinet_initialize_thread();
+		uinet_initialize_thread(NULL);
 
 	printf("Thread %d: count=%d\n", params->id, params->num_allocs);
 	barrier_wait(params->barrier);
 
 	do_test(arg);
+
+	if (!params->use_malloc)
+		uinet_finalize_thread();
+
 	return (NULL);
 }
 

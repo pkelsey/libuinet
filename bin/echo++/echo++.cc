@@ -325,7 +325,7 @@ void *interface_thread_start(void *arg)
 {
 	struct interface_config *cfg = (struct interface_config *)arg;
 
-	uinet_initialize_thread();
+	uinet_initialize_thread(NULL);
 
 	cfg->loop->run();
 
