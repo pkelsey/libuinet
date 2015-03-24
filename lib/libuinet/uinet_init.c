@@ -73,6 +73,8 @@ static struct thread *at_least_one_sighandling_thread;
 static struct uhi_msg shutdown_helper_msg;
 struct uinet_instance uinst0;
 
+unsigned int uinet_hz;
+
 int
 uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 {
@@ -85,10 +87,18 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 	unsigned int ncpus;
 	unsigned int nmbclusters;
 
+	uinet_hz = HZ;
+
 	if (cfg == NULL) {
 		uinet_default_cfg(&default_cfg);
 		cfg = &default_cfg;
 	}
+
+#if defined(VIMAGE_STS) || defined(VIMAGE_STS_ONLY)
+	if (inst_cfg) {
+		uinet_instance_init_vnet_sts(&vnet0_sts, inst_cfg);
+	}
+#endif
 
 	if_netmap_num_extra_bufs = cfg->netmap_extra_bufs;
 

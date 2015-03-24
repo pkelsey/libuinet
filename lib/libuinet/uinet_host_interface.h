@@ -159,6 +159,7 @@ void  uhi_thread_exit(void) __attribute__((__noreturn__));
 int   uhi_thread_hook_add(int which, uhi_thread_hook_t hook, void *arg);
 void  uhi_thread_hook_remove(int which, int id);
 void  uhi_thread_run_hooks(int which);
+void  uhi_thread_set_name(const char *name);
 int   uhi_tls_key_create(uhi_tls_key_t *key, void (*destructor)(void *));
 int   uhi_tls_key_delete(uhi_tls_key_t key);
 void *uhi_tls_get(uhi_tls_key_t key);

@@ -114,11 +114,21 @@ uinet_ifcreate(uinet_instance_t uinst, struct uinet_if_cfg *cfg, uinet_if_t *uif
 	new_uif->rx_cpu = cfg->rx_cpu;
 	new_uif->tx_cpu = cfg->tx_cpu;
 	new_uif->tx_inject_queue_len = cfg->tx_inject_queue_len;
+	new_uif->batch_event_handler = NULL;
+	new_uif->batch_event_handler_arg = NULL;
 	new_uif->first_look_handler = cfg->first_look_handler;
 	new_uif->first_look_handler_arg = cfg->first_look_handler_arg;
 	new_uif->type_cfg = cfg->type_cfg;
 	
 	new_uif->ifdata = NULL;
+
+	if (uinet_uifsts(new_uif)) {
+		new_uif->sts_evifctx = uinst->ui_sts.sts_if_created_cb(uinst->ui_sts_evinstctx, new_uif);
+		if (new_uif->sts_evifctx == NULL) {
+			error = ENXIO;
+			goto out;
+		}
+	}
 
 	switch (new_uif->type) {
 	case UINET_IFTYPE_NETMAP:
@@ -158,9 +168,12 @@ out:
 
 
 static int
-uinet_ifdestroy_internal(struct uinet_if *uif)
+uinet_ifdestroy_internal(struct uinet_instance *uinst, struct uinet_if *uif)
 {
 	int error;
+
+	if (uinet_uifsts(uif))
+		uinst->ui_sts.sts_if_destroyed_cb(uif->sts_evifctx);
 
 	switch (uif->type) {
 	case UINET_IFTYPE_NETMAP:
@@ -189,12 +202,12 @@ uinet_ifdestroy_internal(struct uinet_if *uif)
 int
 uinet_ifdestroy(uinet_if_t uif)
 {
+	struct uinet_instance *uinst = uif->uinst;
 	int error = EINVAL;
 
-	CURVNET_SET(uif->uinst->ui_vnet);
+	CURVNET_SET(uinst->ui_vnet);
 
-	if (NULL != uif)
-		error = uinet_ifdestroy_internal(uif);
+	error = uinet_ifdestroy_internal(uinst, uif);
 
 	CURVNET_RESTORE();
 
@@ -209,7 +222,7 @@ uinet_ifdestroy_all(struct uinet_instance *uinst)
 
 	CURVNET_SET(uinst->ui_vnet);
 	TAILQ_FOREACH_SAFE(uif, &V_uinet_if_list, link, tmp) {
-		uinet_ifdestroy_internal(uif);
+		uinet_ifdestroy_internal(uinst, uif);
 	}
 	CURVNET_RESTORE();
 }
@@ -224,7 +237,7 @@ uinet_ifdestroy_byname(uinet_instance_t uinst, const char *ifname)
 	CURVNET_SET(uinst->ui_vnet);
 	uif = uinet_iffind_byname(ifname);
 	if (uif)
-		error = uinet_ifdestroy_internal(uif);
+		error = uinet_ifdestroy_internal(uinst, uif);
 	CURVNET_RESTORE();
 
 	return (error);

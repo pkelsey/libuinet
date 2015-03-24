@@ -166,13 +166,34 @@ uinet_pd_mbuf_ctor_pd_ctx(void *mem, int size, void *arg, int how)
 
 
 static void
+uinet_pd_mbuf_dtor_pd_ctx(void *mem, int size, void *arg)
+{
+	struct uinet_pd_ctx *pdctx;
+	struct mbuf *m;
+
+	pdctx = (struct uinet_pd_ctx *)mem;
+	m = pdctx->m;
+
+	/*
+	 * Remove any tags that were attached to the mbuf
+	 *
+	 * XXX could avoid deallocating and reallocating the l2tag by leaving it attached here
+	 * but that would require adding and plumbing through a valid flag in the l2tag as 
+	 * currently its presence on an mbuf indicates its validity
+	 */
+	if ((m->m_flags & M_PKTHDR) != 0)
+		m_tag_delete_chain(m, NULL);
+}
+
+
+static void
 uinet_pd_mbuf_init(const void *unused __unused)
 {
 	/* register pool before creating zone so pool id is valid during zone init. */
 	pd_mbuf_ctx_pool_id = uinet_pd_pool_register(&pd_mbuf_ctx_pool);
 
 	zone_pd_mbuf_ctx = uma_zcreate("pd_mbuf_ctx", sizeof(struct uinet_pd_ctx),
-				       uinet_pd_mbuf_ctor_pd_ctx, NULL,
+				       uinet_pd_mbuf_ctor_pd_ctx, uinet_pd_mbuf_dtor_pd_ctx,
 				       uinet_pd_mbuf_zinit_pd_ctx, uinet_pd_mbuf_zfini_pd_ctx,
 				       UMA_ALIGN_PTR, 0);
 }

@@ -165,6 +165,17 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 	 */
 	ctx->hw_rx_ring->reserved = 0;
 #else
+	/*
+	 * Some versions of netmap don't initialize ni_bufs_head in the
+	 * newly allocated netmap_if structure when no extra buffers are
+	 * requested, and will return a non-zero value if a previous use of
+	 * that netmap_if structure had an extra buffers list that wasn't
+	 * completely freed successfully.  This will then lead to more
+	 * buffer free errors when this netmap_if is reclaimed.  Stop the
+	 * madness by providing the initialization here.
+	 */
+	if (ctx->req.nr_arg3 == 0)
+		if_netmap_set_bufshead(ctx, 0);
 	*num_extra_bufs = ctx->req.nr_arg3;
 #endif
 

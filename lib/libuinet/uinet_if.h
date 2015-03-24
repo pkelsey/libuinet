@@ -32,7 +32,7 @@
 
 
 #define uinet_iftouif(ifp) ((ifp)->if_pspare[1])
-
+#define uinet_uifsts(uif) ((uif)->uinst->ui_sts.sts_enabled)
 
 struct ifnet;
 struct vnet;
@@ -64,6 +64,7 @@ struct uinet_if {
 	union uinet_if_type_cfg type_cfg;
 
 	unsigned int ifindex;
+	void *sts_evifctx;		/* event system context for sts mode*/
 	void *ifdata;			/* softc */
 	struct ifnet *ifp;		/* ifnet */
 
@@ -83,12 +84,20 @@ struct uinet_if {
 
 	/* Invoked to send packets directly to the transmit interface. */
 	void (*inject_tx_pkts)(struct uinet_if *uif, struct uinet_pd_list *pkts);
+
+	/* Perform a non-blocking batch receive. */
+	int (*batch_rx)(struct uinet_if *uif, int *fd, uint64_t *wait_ns);
+
+	/* Perform a non-blocking batch transmit. */
+	int (*batch_tx)(struct uinet_if *uif, int *fd, uint64_t *wait_ns);
 };
 
 #define UIF_BATCH_EVENT(uif_, e_) if ((uif_)->batch_event_handler) (uif_)->batch_event_handler((uif_)->batch_event_handler_arg, (e_))
 #define UIF_FIRST_LOOK(uif_, p_) if ((uif_)->first_look_handler) (uif_)->first_look_handler((uif_)->first_look_handler_arg, (p_))
 #define UIF_PD_ALLOC(uif_, p_) (uif_)->pd_alloc((uif_), (p_))
 #define UIF_INJECT_TX(uif_, p_) (uif_)->inject_tx_pkts((uif_), (p_))
+#define UIF_BATCH_RX(uif_, fd_, ns_) (uif_)->batch_rx((uif_), (fd_), (ns_))
+#define UIF_BATCH_TX(uif_, fd_, ns_) (uif_)->batch_tx((uif_), (fd_), (ns_))
 
 
 int uinet_if_attach(struct uinet_if *uif, struct ifnet *ifp, void *sc);

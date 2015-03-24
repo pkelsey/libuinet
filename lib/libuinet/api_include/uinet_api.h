@@ -35,6 +35,9 @@ extern "C" {
 #include "uinet_api_errno.h"
 #include "uinet_api_types.h"
 
+/* valid after uinet_init() returns */
+extern unsigned int uinet_hz;
+
 void  uinet_finalize_thread(void);
 int   uinet_getl2info(struct uinet_socket *so, struct uinet_in_l2info *l2i);
 int   uinet_getifstat(uinet_if_t uif, struct uinet_ifstat *stat);
@@ -45,7 +48,7 @@ int   uinet_inet_pton(int af, const char *src, void *dst);
 int   uinet_inet6_enabled(void);
 void  uinet_default_cfg(struct uinet_global_cfg *cfg);
 int   uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg);
-int   uinet_initialize_thread(void);
+int   uinet_initialize_thread(const char *name);
 void  uinet_install_sighandlers(void);
 int   uinet_interface_add_alias(uinet_instance_t uinst, const char *name, const char *addr, const char *braddr, const char *mask);
 int   uinet_interface_create(uinet_instance_t uinst, const char *name);
@@ -115,6 +118,7 @@ void  uinet_soupcall_clear_locked(struct uinet_socket *so, int which);
 void  uinet_soupcall_set(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_set_locked(struct uinet_socket *so, int which, int (*func)(struct uinet_socket *, void *, int), void *arg);
 void  uinet_soupcall_unlock(struct uinet_socket *so, int which);
+unsigned int uinet_sts_callout_max_size(void);
 int   uinet_sysctlbyname(uinet_instance_t uinst, const char *name, char *oldp, size_t *oldplen,
 			 const char *newp, size_t newplen, size_t *retval, int flags);
 int   uinet_sysctl(uinet_instance_t uinst, const int *name, u_int namelen, void *oldp, size_t *oldplen,
@@ -218,6 +222,8 @@ int uinet_config_blackhole(uinet_instance_t uinst, uinet_blackhole_t action);
 void uinet_instance_default_cfg(struct uinet_instance_cfg *cfg);
 uinet_instance_t uinet_instance_create(struct uinet_instance_cfg *cfg);
 uinet_instance_t uinet_instance_default(void);
+unsigned int uinet_instance_sts_enabled(uinet_instance_t uinst);
+void uinet_instance_sts_events_process(uinet_instance_t uinst);
 void uinet_instance_destroy(uinet_instance_t uinst);
 
 void uinet_if_default_config(uinet_iftype_t type, struct uinet_if_cfg *cfg);
@@ -231,6 +237,9 @@ int uinet_if_set_batch_event_handler(uinet_if_t uif,
 
 void uinet_if_pd_alloc(uinet_if_t uif, struct uinet_pd_list *pkts);
 void uinet_if_inject_tx_packets(uinet_if_t uif, struct uinet_pd_list *pkts);
+
+unsigned int uinet_if_batch_rx(uinet_if_t uif, int *fd, uint64_t *wait_ns);
+unsigned int uinet_if_batch_tx(uinet_if_t uif, int *fd, uint64_t *wait_ns);
 
 struct uinet_pd_list *uinet_pd_list_alloc(uint32_t num_descs);
 void uinet_pd_list_free(struct uinet_pd_list *list);

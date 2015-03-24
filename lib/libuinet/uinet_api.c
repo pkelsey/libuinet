@@ -65,7 +65,7 @@ uinet_inet6_enabled(void)
 
 
 int
-uinet_initialize_thread(void)
+uinet_initialize_thread(const char *name)
 {
 	struct uinet_thread *utd;
 	struct thread *td;
@@ -83,6 +83,8 @@ uinet_initialize_thread(void)
 	 * might be holding a lock required by the shutdown thread.
 	 */
 	uhi_mask_all_signals();
+
+	uhi_thread_set_name(name);
 
 	utd = uhi_tls_get(kthread_tls_key);
 	if (NULL == utd) {
@@ -1585,8 +1587,7 @@ uinet_default_cfg(struct uinet_global_cfg *cfg)
 void
 uinet_instance_default_cfg(struct uinet_instance_cfg *cfg)
 {
-	cfg->loopback = 0;
-	cfg->userdata = NULL;
+	memset(cfg, 0, sizeof(struct uinet_instance_cfg));
 }
 
 int
@@ -1603,6 +1604,7 @@ uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
 
 	uinst->ui_vnet = vnet;
 	uinst->ui_vnet->vnet_uinet = uinst;
+	uinst->ui_sts = cfg->sts;
 	uinst->ui_userdata = cfg->userdata;
 
 	/*
@@ -1623,7 +1625,63 @@ uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
 		}
 	}
 
+	if (uinst->ui_sts.sts_enabled) {
+		uinst->ui_sts_evinstctx =
+		    uinst->ui_sts.sts_instance_created_cb(uinst->ui_sts.sts_evctx, uinst);
+		if (uinst->ui_sts_evinstctx == NULL)
+			return (-1);
+		
+		vnet->vnet_sts.sts_event_notify     = cfg->sts.sts_instance_event_notify_cb;
+		vnet->vnet_sts.sts_event_notify_arg = uinst->ui_sts_evinstctx;
+	}
+
 	return (error);
+}
+
+
+/*
+ * This routine exists because for sts-mode vnets, the sts enable and
+ * callout routines must be initialized before the VNET_SYSINITs are run
+ * when the vnet is allocated because some VNET_SYSINITs configure callouts.
+ * This routine is used to partially initialize a struct vnet_sts, which is
+ * then passed to vnet_alloc().  The rest of the struct vnet_sts
+ * initialization happens in uinet_instance_init() after the rest of the
+ * uinet_instance_t construction has occurred, in part because the rest of
+ * the struct vnet_sts initialization depends on information obtained from
+ * the external event system at that point.
+ *
+ * Note that as vnet0 is allocated in a SYSINIT, the vnet0_sts structure
+ * must be initialized by calling this routine in uinet_init() before the
+ * SYSINITs are run.
+ *
+ */
+void
+uinet_instance_init_vnet_sts(struct vnet_sts *sts, struct uinet_instance_cfg *cfg)
+{
+	memset(sts, 0, sizeof(*sts));
+
+	if (cfg == NULL)
+		return;
+
+	sts->sts_enabled            = cfg->sts.sts_enabled;
+	sts->sts_callout_ctx        = cfg->sts.sts_evctx;
+	sts->sts_callout_init       = cfg->sts.sts_callout_init;
+	sts->sts_callout_reset      = cfg->sts.sts_callout_reset;
+	sts->sts_callout_schedule   = cfg->sts.sts_callout_schedule;
+	sts->sts_callout_pending    = cfg->sts.sts_callout_pending;
+	sts->sts_callout_active     = cfg->sts.sts_callout_active;
+	sts->sts_callout_deactivate = cfg->sts.sts_callout_deactivate;
+	sts->sts_callout_msecs_remaining = cfg->sts.sts_callout_msecs_remaining;
+	sts->sts_callout_stop       = cfg->sts.sts_callout_stop;
+	sts->sts_event_notify       = cfg->sts.sts_instance_event_notify_cb;
+
+	/*
+	 * The rest of the struct vnet_sts is initialized in
+	 * uinet_instance_init().
+	 *
+	 * sts->sts_event_notify     = ...
+	 * sts->sts_event_notify_arg = ...
+	 */
 }
 
 
@@ -1633,16 +1691,22 @@ uinet_instance_create(struct uinet_instance_cfg *cfg)
 #ifdef VIMAGE
 	struct uinet_instance *uinst;
 	struct vnet *vnet;
+	struct vnet_sts sts;
 
 	uinst = malloc(sizeof(struct uinet_instance), M_DEVBUF, M_WAITOK);
 	if (uinst != NULL) {
-		vnet = vnet_alloc();
+		uinet_instance_init_vnet_sts(&sts, cfg);
+		vnet = vnet_alloc(&sts);
 		if (vnet == NULL) {
 			free(uinst, M_DEVBUF);
 			return (NULL);
 		}
 
-		uinet_instance_init(uinst, vnet, cfg);
+		if (-1 == uinet_instance_init(uinst, vnet, cfg)) {
+			vnet_destroy(vnet);
+			free(uinst, M_DEVBUF);
+			return (NULL);
+		}
 	}
 
 	return (uinst);
@@ -1659,6 +1723,24 @@ uinet_instance_default(void)
 }
 
 
+unsigned int
+uinet_instance_sts_enabled(uinet_instance_t uinst)
+{
+	return uinst->ui_sts.sts_enabled;
+}
+
+void
+uinet_instance_sts_events_process(uinet_instance_t uinst)
+{
+	vnet_sts_events_process(uinst->ui_vnet);
+}
+
+unsigned int
+uinet_sts_callout_max_size(void)
+{
+	return (VNET_CALLOUT_SIZE);
+}
+
 void
 uinet_instance_shutdown(uinet_instance_t uinst)
 {
@@ -1671,6 +1753,9 @@ uinet_instance_destroy(uinet_instance_t uinst)
 {
 	KASSERT(uinst != uinet_instance_default(), ("uinet_instance_destroy: cannot destroy default instance"));
 #ifdef VIMAGE
+	if (uinst->ui_sts.sts_enabled)
+		uinst->ui_sts.sts_instance_destroyed_cb(uinst->ui_sts_evinstctx);
+
 	uinet_instance_shutdown(uinst);
 	vnet_destroy(uinst->ui_vnet);
 	free(uinst, M_DEVBUF);
@@ -1750,6 +1835,20 @@ void
 uinet_if_inject_tx_packets(uinet_if_t uif, struct uinet_pd_list *pkts)
 {
 	UIF_INJECT_TX(uif, pkts);
+}
+
+
+unsigned int
+uinet_if_batch_rx(uinet_if_t uif, int *fd, uint64_t *wait_ns)
+{
+	return (UIF_BATCH_RX(uif, fd, wait_ns));
+}
+
+
+unsigned int
+uinet_if_batch_tx(uinet_if_t uif, int *fd, uint64_t *wait_ns)
+{
+	return (UIF_BATCH_TX(uif, fd, wait_ns));
 }
 
 

@@ -32,6 +32,8 @@
 
 #define UINET_IF_NAMESIZE	16
 
+#define UINET_NAME_BUF_LEN	32
+
 struct uinet_socket;
 struct uinet_mbuf;
 struct uinet_in_l2info;
@@ -629,8 +631,35 @@ struct uinet_global_cfg {
 };
 
 
+#define UINET_STS_EVENT_PR_DRAIN		0x00000001
+
+struct uinet_sts_cfg {
+	int sts_enabled;
+
+	/* global/per-loop event system context pointer passed to callbacks */
+	void *sts_evctx;
+	/* returns pointer to event system instance context */
+	void *(*sts_instance_created_cb)(void *evctx, uinet_instance_t uinst);
+	void (*sts_instance_destroyed_cb)(void *evinstctx);
+	void (*sts_instance_event_notify_cb)(void *evinstctx);
+	/* returns pointer to event system if context */
+	void *(*sts_if_created_cb)(void *evinstctx, uinet_if_t uif);
+	void (*sts_if_destroyed_cb)(void *evifctx);
+
+	void (*sts_callout_init)(void *ctx, void *c);
+	int (*sts_callout_reset)(void *ctx, void *c, int ticks, void (*func)(void *), void *arg);
+	int (*sts_callout_schedule)(void *ctx, void *c, int ticks);
+	int (*sts_callout_pending)(void *ctx, void *c);
+	int (*sts_callout_active)(void *ctx, void *c);
+	void (*sts_callout_deactivate)(void *ctx, void *c);
+	int (*sts_callout_msecs_remaining)(void *ctx, void *c);
+	int (*sts_callout_stop)(void *ctx, void *c);
+};
+
+
 struct uinet_instance_cfg {
 	unsigned int loopback;
+	struct uinet_sts_cfg sts;
 	void *userdata;
 };
 

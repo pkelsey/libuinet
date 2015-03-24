@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,36 +23,12 @@
  * SUCH DAMAGE.
  */
 
-#ifndef	_UINET_INTERNAL_H_
-#define	_UINET_INTERNAL_H_
+#ifndef _UINET_EV_H_
+#define _UINET_EV_H_
 
-#include <sys/queue.h>
-#include <sys/socket.h>
+#define EV_STANDALONE 1
+#define EV_UINET_ENABLE 1
+#define EV_COUNTERS_ENABLE 1
+#include <ev.h>
 
-#include <net/if.h>
-#include <net/vnet.h>
-
-#include "uinet_api.h"
-#include "uinet_if.h"
-
-struct uinet_instance {
-	struct vnet *ui_vnet;
-	struct uinet_sts_cfg ui_sts;
-	void *ui_sts_evinstctx;
-	void *ui_userdata;
-};
-
-
-extern struct uinet_instance uinst0;
-
-void uinet_ifdestroy_all(struct uinet_instance *uinst);
-struct uinet_if *uinet_iffind_byname(const char *ifname);
-
-void uinet_instance_init_vnet_sts(struct vnet_sts *sts, struct uinet_instance_cfg *cfg);
-int uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet, struct uinet_instance_cfg *cfg);
-void uinet_instance_shutdown(uinet_instance_t uinst);
-
-int uinet_if_attach(uinet_if_t uif, struct ifnet *ifp, void *sc);
-
-#endif /* _UINET_INTERNAL_H_ */
-
+#endif /* _UINET_EV_H_ */

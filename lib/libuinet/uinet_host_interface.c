@@ -568,11 +568,7 @@ pthread_start_routine(void *arg)
 		*(tsa->oncpu) = (cpuid == -1) ? 0 : cpuid;
 	}
 
-#if defined(__FreeBSD__)
-	pthread_set_name_np(pthread_self(), tsa->name);
-#elif defined(__linux__)
-	pthread_setname_np(pthread_self(), tsa->name);
-#endif
+	uhi_thread_set_name(tsa->name);
 
 	uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
 
@@ -660,6 +656,18 @@ uhi_thread_run_hooks(int which)
 	_uhi_mutex_unlock(&uhi_thread_hook_lock, NULL, UINET_LOCK_FILE, UINET_LOCK_LINE);
 }
 
+
+void
+uhi_thread_set_name(const char *name)
+{
+	if (name != NULL) {
+#if defined(__FreeBSD__)
+		pthread_set_name_np(pthread_self(), name);
+#elif defined(__linux__)
+		pthread_setname_np(pthread_self(), name);
+#endif
+	}
+}
 
 int
 uhi_tls_key_create(uhi_tls_key_t *key, void (*destructor)(void *))

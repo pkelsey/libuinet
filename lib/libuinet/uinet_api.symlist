@@ -8,6 +8,8 @@ uinet_getifstat
 uinet_gettcpstat
 uinet_ifaliasname
 uinet_ifcreate
+uinet_if_batch_rx
+uinet_if_batch_tx
 uinet_if_default_config
 uinet_ifdestroy
 uinet_ifdestroy_byname
@@ -27,6 +29,8 @@ uinet_instance_create
 uinet_instance_default
 uinet_instance_default_cfg
 uinet_instance_destroy
+uinet_instance_sts_enabled
+uinet_instance_sts_events_process
 uinet_interface_add_alias
 uinet_interface_create
 uinet_interface_up
@@ -59,6 +63,7 @@ uinet_soconnect
 uinet_socreate
 uinet_sogetconninfo
 uinet_sogeterror
+uinet_sogetinstance
 uinet_sogetpassivepeer
 uinet_sogetsockopt
 uinet_sogetstate
@@ -82,6 +87,7 @@ uinet_soupcall_clear_locked
 uinet_soupcall_set
 uinet_soupcall_set_locked
 uinet_soupcall_unlock
+uinet_sts_callout_max_size
 uinet_synfilter_deferral_alloc
 uinet_synfilter_deferral_deliver
 uinet_synfilter_deferral_free
