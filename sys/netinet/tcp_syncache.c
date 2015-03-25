@@ -1265,7 +1265,20 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	tp->t_keepcnt = sototcpcb(lso)->t_keepcnt;
 	tp->t_reassdl = sototcpcb(lso)->t_reassdl;
 
+	/*
+	 * XXX we should probably just allocate an mbuf on the stack and
+	 * configure it so that it won't be freed instead of trying to
+	 * dynamically allocate an mbuf in syncache_synthesize_synack(),
+	 * which may fail, and is likely more costly.
+	 */
 	m1 = syncache_synthesize_synack(sc, &th);
+
+	/*
+	 * tcp_input() is careful to not byte-swap header fields in-place in
+	 * the mbuf because there may be other simultaneous consumers of the
+	 * packet.  We don't have to worry about that here as we've
+	 * allocated the mbuf and it will be used solely for this purpose.
+	 */
 
 	/* tcp_fields_to_host(th); */
 	th->th_seq = ntohl(th->th_seq);
@@ -1273,7 +1286,8 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	th->th_win = ntohs(th->th_win);
 	th->th_urp = ntohs(th->th_urp);
 
-	tcp_do_segment(m1, th, so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED, 1);
+	tcp_do_segment(m1, th, (const uint8_t *)(th + 1),
+		       so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED, 1);
 
 	/* return with inp locked */
 	return (so);
