@@ -563,9 +563,6 @@ tcp_input(struct mbuf *m, int off0)
 	struct socket *so = NULL;
 	u_char *optp = NULL;
 	int optlen = 0;
-#ifdef INET
-	int len;
-#endif
 	int tlen = 0, off;
 	int drop_hdrlen;
 	int thflags;
@@ -577,6 +574,7 @@ tcp_input(struct mbuf *m, int off0)
 	uint8_t sig_checked = 0;
 #endif
 	uint8_t iptos = 0;
+	uint16_t th_sum;
 #ifdef IPFIREWALL_FORWARD
 	struct m_tag *fwd_tag;
 #endif
@@ -624,14 +622,14 @@ tcp_input(struct mbuf *m, int off0)
 		tlen = sizeof(*ip6) + ntohs(ip6->ip6_plen) - off0;
 		if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID_IPV6) {
 			if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
-				th->th_sum = m->m_pkthdr.csum_data;
+				th_sum = m->m_pkthdr.csum_data;
 			else
-				th->th_sum = in6_cksum_pseudo(ip6, tlen,
+				th_sum = in6_cksum_pseudo(ip6, tlen,
 				    IPPROTO_TCP, m->m_pkthdr.csum_data);
-			th->th_sum ^= 0xffff;
+			th_sum ^= 0xffff;
 		} else
-			th->th_sum = in6_cksum(m, IPPROTO_TCP, off0, tlen);
-		if (th->th_sum) {
+			th_sum = in6_cksum(m, IPPROTO_TCP, off0, tlen);
+		if (th_sum) {
 			TCPSTAT_INC(tcps_rcvbadsum);
 			goto drop;
 		}
@@ -656,46 +654,60 @@ tcp_input(struct mbuf *m, int off0)
 #ifdef INET
 	{
 		/*
-		 * Get IP and TCP header together in first mbuf.
-		 * Note: IP leaves IP header in first mbuf.
+		 * Ensure that the contents of mbufs using external buffers
+		 * are not modified.  This permits configurations where
+		 * inbound packets can be sent up the stack while
+		 * simultaneously be used for another purpose (such as
+		 * forwarding) without copying.  Such configurations must
+		 * use mbufs with external buffers, as that is the only way
+		 * to ensure that m_cat() (used in reassembly queue
+		 * processing) and m_pullup() don't move data into an mbuf.
+		 *
+		 * Using ip_stripoptions() modifies mbuf contents, and is
+		 * not necessary.  Without ip_stripoptions(), a maximally
+		 * sized ip + tcp header combination (with maximum options,
+		 * 120 bytes) fits within MHLEN with room to spare for
+		 * preserving the link header (for example, MHLEN is
+		 * currently 168 bytes on amd64, leaving 48 bytes for the
+		 * link header).
 		 */
-		if (off0 > sizeof (struct ip)) {
-			ip_stripoptions(m, (struct mbuf *)0);
-			off0 = sizeof(struct ip);
-		}
-		if (m->m_len < sizeof (struct tcpiphdr)) {
-			if ((m = m_pullup(m, sizeof (struct tcpiphdr)))
+
+		/*
+		 * Ensure IP header with options and minimal TCP header are
+		 * in the first mbuf (if the input mbuf is using an external
+		 * buffer, m_pullup() will always prepend a new mbuf instead
+		 * of modifying the existing buffer).
+		 */
+		if (m->m_len < off0 + sizeof (*th)) {
+			if ((m = m_pullup(m, off0 + sizeof (*th)))
 			    == NULL) {
 				TCPSTAT_INC(tcps_rcvshort);
 				return;
 			}
 		}
+
 		ip = mtod(m, struct ip *);
 		th = (struct tcphdr *)((caddr_t)ip + off0);
 		tlen = ntohs(ip->ip_len) - off0;
 
 		if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID) {
 			if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
-				th->th_sum = m->m_pkthdr.csum_data;
+				th_sum = m->m_pkthdr.csum_data;
 			else
-				th->th_sum = in_pseudo(ip->ip_src.s_addr,
+				th_sum = in_pseudo(ip->ip_src.s_addr,
 						ip->ip_dst.s_addr,
 						htonl(m->m_pkthdr.csum_data +
 							tlen +
 							IPPROTO_TCP));
-			th->th_sum ^= 0xffff;
+			th_sum ^= 0xffff;
 		} else {
-			struct ipovly *ipov = (struct ipovly *)ip;
-
 			/*
 			 * Checksum extended TCP header and data.
 			 */
-			len = off0 + tlen;
-			bzero(ipov->ih_x1, sizeof(ipov->ih_x1));
-			ipov->ih_len = htons(tlen);
-			th->th_sum = in_cksum(m, len);
+			th_sum = in_cksum_tcp(m, tlen, off0,
+				      ip->ip_src.s_addr, ip->ip_dst.s_addr);
 		}
-		if (th->th_sum) {
+		if (th_sum) {
 			TCPSTAT_INC(tcps_rcvbadsum);
 			goto drop;
 		}

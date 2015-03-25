@@ -142,6 +142,48 @@ skip_start:
 	return (~sum & 0xffff);
 }
 
+/*
+ * When this is called, the first mbuf always has the complete ip header
+ * (with options), and off0 is the size of the ip header including options.
+ *
+ * Note that the length passed in tlen is only the tcp length.
+ */
+uint16_t
+in_cksum_tcp(struct mbuf *m, int tlen, int off0, uint32_t src, uint32_t dst)
+{
+	uint64_t sum;
+	int mlen = 0;
+	int clen = 0;
+	caddr_t addr;
+	union q_util q_util;
+	union l_util l_util;
+
+	sum = (uint64_t)src + (uint64_t)dst +
+	    htons(IPPROTO_TCP) + (uint64_t)htons((uint16_t)tlen);
+	mlen = m->m_len - off0;
+	addr = mtod(m, caddr_t) + off0;
+	goto skip_start;
+
+	for (; m && tlen; m = m->m_next) {
+		if (m->m_len == 0)
+			continue;
+		mlen = m->m_len;
+		addr = mtod(m, caddr_t);
+skip_start:
+		if (tlen < mlen)
+			mlen = tlen;
+		if ((clen ^ (long) addr) & 1)
+		    sum += _do_cksum(addr, mlen) << 8;
+		else
+		    sum += _do_cksum(addr, mlen);
+
+		clen += mlen;
+		tlen -= mlen;
+	}
+	REDUCE16;
+	return (~sum & 0xffff);
+}
+
 u_int in_cksum_hdr(const struct ip *ip)
 {
 	u_int64_t sum = do_cksum(ip, sizeof(struct ip));

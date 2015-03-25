@@ -75,6 +75,7 @@ in_cksum_update(struct ip *ip)
 #ifdef _KERNEL
 #if defined(IPVERSION) && (IPVERSION == 4)
 u_int in_cksum_hdr(const struct ip *ip);
+uint16_t in_cksum_tcp(struct mbuf *m, int tlen, int off0, uint32_t src, uint32_t dst);
 #endif
 u_short	in_addword(u_short sum, u_short b);
 u_short	in_pseudo(u_int sum, u_int b, u_int c);
