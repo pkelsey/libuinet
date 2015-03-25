@@ -947,7 +947,7 @@ syncache_synthesize_synack(struct syncache *sc, struct tcphdr **pth)
 		ip = mtod(m, struct ip *);
 		ip->ip_v = IPVERSION;
 		ip->ip_hl = sizeof(struct ip) >> 2;
-		ip->ip_len = tlen;
+		ip->ip_len = htons(tlen);
 		ip->ip_id = 0;
 		ip->ip_off = 0;
 		ip->ip_sum = 0;
@@ -1016,7 +1016,7 @@ syncache_synthesize_synack(struct syncache *sc, struct tcphdr **pth)
 			ip6->ip6_plen = htons(ntohs(ip6->ip6_plen) + optlen);
 		else
 #endif
-			ip->ip_len += optlen;
+			ip->ip_len = htons(ntohs(ip->ip_len) + optlen);
 	} else
 		optlen = 0;
 
@@ -2304,7 +2304,7 @@ syncache_respond(struct syncache *sc)
 		ip = mtod(m, struct ip *);
 		ip->ip_v = IPVERSION;
 		ip->ip_hl = sizeof(struct ip) >> 2;
-		ip->ip_len = tlen;
+		ip->ip_len = htons(tlen);
 		ip->ip_id = 0;
 		ip->ip_off = 0;
 		ip->ip_sum = 0;
@@ -2322,7 +2322,7 @@ syncache_respond(struct syncache *sc)
 		 *	2) the SCF_UNREACH flag has been set
 		 */
 		if (V_path_mtu_discovery && ((sc->sc_flags & SCF_UNREACH) == 0))
-		       ip->ip_off |= IP_DF;
+		       ip->ip_off |= htons(IP_DF);
 
 		th = (struct tcphdr *)(ip + 1);
 	}
@@ -2382,7 +2382,7 @@ syncache_respond(struct syncache *sc)
 			ip6->ip6_plen = htons(ntohs(ip6->ip6_plen) + optlen);
 		else
 #endif
-			ip->ip_len += optlen;
+			ip->ip_len = htons(ntohs(ip->ip_len) + optlen);
 	} else
 		optlen = 0;
 

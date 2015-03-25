@@ -6111,7 +6111,7 @@ sctp_skip_csum_4:
 	/*
 	 * common chunk processing
 	 */
-	length = ip->ip_len + iphlen;
+	length = ntohs(ip->ip_len);
 	offset -= sizeof(struct sctp_chunkhdr);
 
 	ecn_bits = ip->ip_tos;

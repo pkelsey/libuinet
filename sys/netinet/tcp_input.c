@@ -558,9 +558,6 @@ tcp_input(struct mbuf *m, int off0)
 	struct tcphdr *th = NULL;
 	struct tcphdr stack_th;
 	struct ip *ip = NULL;
-#ifdef INET
-	struct ipovly *ipov;
-#endif
 	struct inpcb *inp = NULL;
 	struct tcpcb *tp = NULL;
 	struct socket *so = NULL;
@@ -674,9 +671,8 @@ tcp_input(struct mbuf *m, int off0)
 			}
 		}
 		ip = mtod(m, struct ip *);
-		ipov = (struct ipovly *)ip;
 		th = (struct tcphdr *)((caddr_t)ip + off0);
-		tlen = ip->ip_len;
+		tlen = ntohs(ip->ip_len) - off0;
 
 		if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID) {
 			if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
@@ -685,21 +681,18 @@ tcp_input(struct mbuf *m, int off0)
 				th->th_sum = in_pseudo(ip->ip_src.s_addr,
 						ip->ip_dst.s_addr,
 						htonl(m->m_pkthdr.csum_data +
-							ip->ip_len +
+							tlen +
 							IPPROTO_TCP));
 			th->th_sum ^= 0xffff;
-#ifdef TCPDEBUG
-			ipov->ih_len = (u_short)tlen;
-			ipov->ih_len = htons(ipov->ih_len);
-#endif
 		} else {
+			struct ipovly *ipov = (struct ipovly *)ip;
+
 			/*
 			 * Checksum extended TCP header and data.
 			 */
-			len = sizeof (struct ip) + tlen;
+			len = off0 + tlen;
 			bzero(ipov->ih_x1, sizeof(ipov->ih_x1));
-			ipov->ih_len = (u_short)tlen;
-			ipov->ih_len = htons(ipov->ih_len);
+			ipov->ih_len = htons(tlen);
 			th->th_sum = in_cksum(m, len);
 		}
 		if (th->th_sum) {
@@ -752,7 +745,6 @@ tcp_input(struct mbuf *m, int off0)
 					return;
 				}
 				ip = mtod(m, struct ip *);
-				ipov = (struct ipovly *)ip;
 				th = (struct tcphdr *)((caddr_t)ip + off0);
 			}
 		}

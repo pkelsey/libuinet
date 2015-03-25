@@ -1235,7 +1235,7 @@ timer:
 #endif
 #ifdef INET
     {
-	ip->ip_len = m->m_pkthdr.len;
+	ip->ip_len = htons(m->m_pkthdr.len);
 #ifdef INET6
 	if (tp->t_inpcb->inp_vflag & INP_IPV6PROTO)
 		ip->ip_ttl = in6_selecthlim(tp->t_inpcb, NULL);
@@ -1249,7 +1249,7 @@ timer:
 	 * NB: Don't set DF on small MTU/MSS to have a safe fallback.
 	 */
 	if (V_path_mtu_discovery && tp->t_maxopd > V_tcp_minmss)
-		ip->ip_off |= IP_DF;
+		ip->ip_off |= htons(IP_DF);
 
 	error = ip_output(m, tp->t_inpcb->inp_options, NULL,
 	    ((so->so_options & SO_DONTROUTE) ? IP_ROUTETOIF : 0), 0,
