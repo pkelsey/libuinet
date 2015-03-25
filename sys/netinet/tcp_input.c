@@ -704,8 +704,9 @@ tcp_input(struct mbuf *m, int off0)
 			/*
 			 * Checksum extended TCP header and data.
 			 */
-			th_sum = in_cksum_tcp(m, tlen, off0,
-				      ip->ip_src.s_addr, ip->ip_dst.s_addr);
+			th_sum = in_cksum_pseudo_header(m, tlen, off0,
+					ip->ip_src.s_addr, ip->ip_dst.s_addr,
+					IPPROTO_TCP);
 		}
 		if (th_sum) {
 			TCPSTAT_INC(tcps_rcvbadsum);

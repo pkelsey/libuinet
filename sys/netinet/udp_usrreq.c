@@ -351,17 +351,27 @@ udp_input(struct mbuf *m, int off)
 	UDPSTAT_INC(udps_ipackets);
 
 	/*
-	 * Strip IP options, if any; should skip this, make available to
-	 * user, and use on returned packets, but we don't yet have a way to
-	 * check the checksum with options still present.
+	 * Ensure that the contents of mbufs using external buffers
+	 * are not modified.  This permits configurations where
+	 * inbound packets can be sent up the stack while
+	 * simultaneously be used for another purpose (such as
+	 * forwarding) without copying.  Such configurations must
+	 * use mbufs with external buffers, as that is the only way
+	 * to ensure that m_cat() (used in reassembly queue
+	 * processing) and m_pullup() don't move data into an mbuf.
+	 *
+	 * Using ip_stripoptions() modifies mbuf contents, and is
+	 * not necessary.  Without ip_stripoptions(), a maximally
+	 * sized ip + udp header combination (with maximum options,
+	 * 68 bytes) fits within MHLEN with room to spare for
+	 * preserving the link header (for example, MHLEN is
+	 * currently 168 bytes on amd64, leaving 100 bytes for the
+	 * link header).
 	 */
-	if (iphlen > sizeof (struct ip)) {
-		ip_stripoptions(m, (struct mbuf *)0);
-		iphlen = sizeof(struct ip);
-	}
 
 	/*
-	 * Get IP and UDP header together in first mbuf.
+	 * Get IP header (with options) and UDP header together in first
+	 * mbuf.
 	 */
 	ip = mtod(m, struct ip *);
 	if (m->m_len < iphlen + sizeof(struct udphdr)) {
@@ -427,13 +437,9 @@ udp_input(struct mbuf *m, int off)
 				    m->m_pkthdr.csum_data + IPPROTO_UDP));
 			uh_sum ^= 0xffff;
 		} else {
-			char b[9];
-
-			bcopy(((struct ipovly *)ip)->ih_x1, b, 9);
-			bzero(((struct ipovly *)ip)->ih_x1, 9);
-			((struct ipovly *)ip)->ih_len = uh->uh_ulen;
-			uh_sum = in_cksum(m, len + sizeof (struct ip));
-			bcopy(b, ((struct ipovly *)ip)->ih_x1, 9);
+			uh_sum = in_cksum_pseudo_header(m, len, iphlen,
+				      ip->ip_src.s_addr, ip->ip_dst.s_addr,
+				      IPPROTO_UDP);
 		}
 		if (uh_sum) {
 			UDPSTAT_INC(udps_badsum);

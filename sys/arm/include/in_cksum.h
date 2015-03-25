@@ -48,7 +48,8 @@ u_short in_cksum_skip(struct mbuf *m, int len, int skip);
 u_int do_cksum(const void *, int);
 #if defined(IPVERSION) && (IPVERSION == 4)
 u_int in_cksum_hdr(const struct ip *);
-uint16_t in_cksum_tcp(struct mbuf *m, int tlen, int off0, uint32_t src, uint32_t dst);
+uint16_t in_cksum_pseudo_header(struct mbuf *m, int plen, int off0,
+				uint32_t src, uint32_t dst, uint8_t protonum);
 #endif
 
 static __inline u_short

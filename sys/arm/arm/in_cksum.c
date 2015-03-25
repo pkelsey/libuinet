@@ -146,10 +146,12 @@ skip_start:
  * When this is called, the first mbuf always has the complete ip header
  * (with options), and off0 is the size of the ip header including options.
  *
- * Note that the length passed in tlen is only the tcp length.
+ * Note that the length passed in plen is the upper level (TCP, UDP, etc)
+ * protocol length and does not include off0.
  */
 uint16_t
-in_cksum_tcp(struct mbuf *m, int tlen, int off0, uint32_t src, uint32_t dst)
+in_cksum_pseudo_header(struct mbuf *m, int plen, int off0,
+		       uint32_t src, uint32_t dst, uint8_t protonum)
 {
 	uint64_t sum;
 	int mlen = 0;
@@ -159,26 +161,26 @@ in_cksum_tcp(struct mbuf *m, int tlen, int off0, uint32_t src, uint32_t dst)
 	union l_util l_util;
 
 	sum = (uint64_t)src + (uint64_t)dst +
-	    htons(IPPROTO_TCP) + (uint64_t)htons((uint16_t)tlen);
+	    htons((uint16_t)protonum) + (uint64_t)htons((uint16_t)plen);
 	mlen = m->m_len - off0;
 	addr = mtod(m, caddr_t) + off0;
 	goto skip_start;
 
-	for (; m && tlen; m = m->m_next) {
+	for (; m && plen; m = m->m_next) {
 		if (m->m_len == 0)
 			continue;
 		mlen = m->m_len;
 		addr = mtod(m, caddr_t);
 skip_start:
-		if (tlen < mlen)
-			mlen = tlen;
+		if (plen < mlen)
+			mlen = plen;
 		if ((clen ^ (long) addr) & 1)
 		    sum += _do_cksum(addr, mlen) << 8;
 		else
 		    sum += _do_cksum(addr, mlen);
 
 		clen += mlen;
-		tlen -= mlen;
+		plen -= mlen;
 	}
 	REDUCE16;
 	return (~sum & 0xffff);
