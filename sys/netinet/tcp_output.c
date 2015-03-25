@@ -175,7 +175,6 @@ tcp_output(struct tcpcb *tp)
 	int off, flags, error = 0;	/* Keep compiler happy */
 	struct mbuf *m;
 	struct ip *ip = NULL;
-	struct ipovly *ipov = NULL;
 	struct tcphdr *th;
 	u_char opt[TCP_MAXOLEN];
 	unsigned ipoptlen, optlen, hdrlen;
@@ -913,7 +912,6 @@ send:
 #endif /* INET6 */
 	{
 		ip = mtod(m, struct ip *);
-		ipov = (struct ipovly *)ip;
 		th = (struct tcphdr *)(ip + 1);
 		tcpip_fillheaders(tp->t_inpcb, ip, th);
 	}

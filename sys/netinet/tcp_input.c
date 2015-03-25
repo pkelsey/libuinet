@@ -472,6 +472,7 @@ tcp_fields_copy_to_host(struct tcphdr *th, const struct tcphdr *mbuf_th)
 	th->th_off = mbuf_th->th_off;
 	th->th_flags = mbuf_th->th_flags;
 	th->th_win = ntohs(mbuf_th->th_win);
+	th->th_sum = 0;
 	th->th_urp = ntohs(mbuf_th->th_urp);
 }
 
