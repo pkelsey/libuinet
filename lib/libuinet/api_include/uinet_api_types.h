@@ -624,10 +624,35 @@ struct uinet_if_cfg {
 };
 
 
+enum uinet_global_cfg_type {
+	UINET_GLOBAL_CFG_SMALL,
+	UINET_GLOBAL_CFG_MEDIUM,
+	UINET_GLOBAL_CFG_LARGE
+};
+
+
 struct uinet_global_cfg {
 	unsigned int ncpus;
-	unsigned int nmbclusters;
 	uint32_t netmap_extra_bufs;
+	struct {
+		struct {
+			struct {
+				struct {
+					unsigned int hashsize;    /* number of buckets */
+					unsigned int bucketlimit; /* per-bucket limit */
+					unsigned int cachelimit;  /* overall entry limit */
+				} syncache;
+				unsigned int tcbhashsize; /* number of buckets in connection cache */
+			} tcp;
+		} inet;
+	} net;
+	struct {
+		struct {
+			unsigned int maxsockets; /* will be set to max(maxsockets, nmbclusters) */
+			unsigned int nmbclusters; /* maximum number of cluster mbufs */ 
+			unsigned int somaxconn;  /* maximum accept queue depth */
+		} ipc;
+	} kern;
 };
 
 
@@ -658,9 +683,9 @@ struct uinet_sts_cfg {
 
 
 struct uinet_instance_cfg {
-	unsigned int loopback;
-	struct uinet_sts_cfg sts;
-	void *userdata;
+	unsigned int loopback;      /* create loopback interface */
+	struct uinet_sts_cfg sts;  /* if used, set by external event system */
+	void *userdata;            /* application context pointer */
 };
 
 #endif /* _UINET_API_TYPES_H_ */

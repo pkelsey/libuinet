@@ -52,6 +52,7 @@ uinet_pool_free_arg
 uinet_pool_get_cur
 uinet_pool_get_max
 uinet_pool_set_max
+uinet_print_cfg
 uinet_setl2info
 uinet_setl2info2
 uinet_shutdown

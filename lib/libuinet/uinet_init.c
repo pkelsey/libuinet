@@ -75,22 +75,40 @@ struct uinet_instance uinst0;
 
 unsigned int uinet_hz;
 
+
+static unsigned int
+roundup_nearest_power_of_2(unsigned int n)
+{
+	unsigned int shift;
+
+	if (powerof2(n))
+		return (n);
+
+	shift = 0;
+	while (n != 1) {
+		n >>= 1;
+		shift++;
+	}
+
+	return (1 << shift);
+}
+
+
 int
 uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 {
 	struct thread *td;
 	char tmpbuf[32];
 	int boot_pages;
-	int num_hash_buckets;
 	caddr_t v;
 	struct uinet_global_cfg default_cfg;
 	unsigned int ncpus;
-	unsigned int nmbclusters;
+	unsigned int num_hash_buckets;
 
 	uinet_hz = HZ;
 
 	if (cfg == NULL) {
-		uinet_default_cfg(&default_cfg);
+		uinet_default_cfg(&default_cfg, UINET_GLOBAL_CFG_MEDIUM);
 		cfg = &default_cfg;
 	}
 
@@ -100,10 +118,13 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 	}
 #endif
 
+	printf("uinet starting\n");
+	printf("requested configuration:\n");
+	uinet_print_cfg(cfg);
+
 	if_netmap_num_extra_bufs = cfg->netmap_extra_bufs;
 
 	ncpus = cfg->ncpus;
-	nmbclusters = cfg->nmbclusters;
 
 	if (ncpus > MAXCPU) {
 		printf("Limiting number of CPUs to %u\n", MAXCPU);
@@ -113,10 +134,14 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 		ncpus = 1;
 	}
 
-	printf("uinet starting: cpus=%u, nmbclusters=%u\n", ncpus, nmbclusters);
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->kern.ipc.maxsockets);
+	setenv("kern.ipc.maxsockets", tmpbuf);
 
-	snprintf(tmpbuf, sizeof(tmpbuf), "%u", nmbclusters);
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->kern.ipc.nmbclusters);
 	setenv("kern.ipc.nmbclusters", tmpbuf);
+
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->kern.ipc.somaxconn);
+	setenv("kern.ipc.somaxconn", tmpbuf);
 
 	/* The env var kern.ncallout will get read in proc0_init(), but
 	 * that's after we init the callwheel below.  So we set it here for
@@ -127,18 +152,17 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 	snprintf(tmpbuf, sizeof(tmpbuf), "%u", ncallout);
 	setenv("kern.ncallout", tmpbuf);
 
-	/* Assuming maxsockets will be set to nmbclusters, the following
-	 * sets the TCP tcbhash size so that perfectly uniform hashing would
-	 * result in a maximum bucket depth of about 16.
-	 */
-	num_hash_buckets = 1;
-	while (num_hash_buckets < nmbclusters / 16)
-		num_hash_buckets <<= 1;
-	snprintf(tmpbuf, sizeof(tmpbuf), "%u", num_hash_buckets);	
-	setenv("net.inet.tcp.tcbhashsize", tmpbuf);
-
-	snprintf(tmpbuf, sizeof(tmpbuf), "%u", 2048);
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", roundup_nearest_power_of_2(cfg->net.inet.tcp.syncache.hashsize));
 	setenv("net.inet.tcp.syncache.hashsize", tmpbuf);
+
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->net.inet.tcp.syncache.bucketlimit);
+	setenv("net.inet.tcp.syncache.bucketlimit", tmpbuf);
+
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->net.inet.tcp.syncache.cachelimit);
+	setenv("net.inet.tcp.syncache.cachelimit", tmpbuf);
+
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", roundup_nearest_power_of_2(cfg->net.inet.tcp.tcbhashsize));	
+	setenv("net.inet.tcp.tcbhashsize", tmpbuf);
 
 	boot_pages = 16;  /* number of pages made available for uma to bootstrap itself */
 
@@ -194,13 +218,6 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 	if (kthread_add(one_sighandling_thread, NULL, NULL, &at_least_one_sighandling_thread, 0, 0, "one_sighandler"))
 		printf("Failed to create at least one signal handling thread\n");
 	uhi_mask_all_signals();
-
-#if 0
-	printf("maxusers=%d\n", maxusers);
-	printf("maxfiles=%d\n", maxfiles);
-	printf("maxsockets=%d\n", maxsockets);
-	printf("nmbclusters=%d\n", nmbclusters);
-#endif
 
 	return (0);
 }

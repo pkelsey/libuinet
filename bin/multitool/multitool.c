@@ -134,43 +134,66 @@ static pthread_mutex_t print_lock;
 static volatile int shutting_down;
 
 
+enum multitool_opt_id {
+	MIN_MT_OPT_VALUE = 1000, /* always first */
+
+	MT_OPT_BASE_CONFIG,
+	MT_OPT_MAXSOCKETS,
+	MT_OPT_NETMAP_EXTRA_BUFS,
+	MT_OPT_NMBCLUSTERS,
+	MT_OPT_SOMAXCONN,
+	MT_OPT_SYNCACHE_HASHSIZE,
+	MT_OPT_SYNCACHE_BUCKETLIMIT,
+	MT_OPT_SYNCACHE_CACHELIMIT,
+	MT_OPT_TCBHASHSIZE,
+
+	MAX_MT_OPT_VALUE /* always last */
+};
+
 
 static const struct option long_options[] = {
 /* global options */
-	{ "config-only",  no_argument,		0, 'N' },
-	{ "netmap-gpool", required_argument,	0, 'G' },
-
+	{ "base-config",	required_argument,	NULL, MT_OPT_BASE_CONFIG },
+	{ "config-only",	no_argument,		NULL, 'N' },
+	{ "max-accept-queue",	required_argument,	NULL, MT_OPT_SOMAXCONN },
+	{ "max-clusters",	required_argument,	NULL, MT_OPT_NMBCLUSTERS },
+	{ "max-sockets",	required_argument,	NULL, MT_OPT_MAXSOCKETS },
+	{ "netmap-extra-bufs",	required_argument,	NULL, MT_OPT_NETMAP_EXTRA_BUFS },
+	{ "syncache-hash-size",  required_argument,	NULL, MT_OPT_SYNCACHE_HASHSIZE },
+	{ "syncache-bucket-limit", required_argument,	NULL, MT_OPT_SYNCACHE_BUCKETLIMIT },
+	{ "syncache-cache-limit", required_argument,	NULL, MT_OPT_SYNCACHE_CACHELIMIT },
+	{ "tcb-hash-size",	required_argument,	NULL, MT_OPT_TCBHASHSIZE },
 
 /* event loop options */
-	{ "eloop",	optional_argument,	0, 'e' },
-	{ "eloop-cpu",	required_argument,	0, 'c' },
-	{ "stats",	optional_argument,	0, 'm' },
+	{ "eloop",		optional_argument,	NULL, 'e' },
+	{ "eloop-cpu",		required_argument,	NULL, 'c' },
+	{ "stats",		optional_argument,	NULL, 'm' },
 
 /* stack instance options */
-	{ "brief-tcp-stats", optional_argument,	0, 'J' },
-	{ "stack",	optional_argument,	0, 's' },
-	{ "sts",	no_argument,		0, 'S' },
+	{ "brief-tcp-stats",	optional_argument,	NULL, 'J' },
+	{ "stack",		optional_argument,	NULL, 's' },
+	{ "sts",		no_argument,		NULL, 'S' },
 
 /* interface types */
-	{ "netmap",	required_argument,	0, 'n' },
-	{ "pcap",	required_argument,	0, 'p' },
+	{ "netmap",		required_argument,	NULL, 'n' },
+	{ "pcap",		required_argument,	NULL, 'p' },
 
 /* per-interface options */
-	{ "bridge-to",	required_argument,	0, 'b' },
-	{ "gen",	optional_argument, 	0, 'g' },
-	{ "iqlen",	required_argument,	0, 'I' },
-	{ "rxcpu",	required_argument,	0, 'r' },
-	{ "txcpu",	required_argument,	0, 't' },
-	{ "rxbatch",	required_argument,	0, 'R' },
-	{ "trace-mask",	required_argument,	0, 'Z' },
+	{ "bridge-to",		required_argument,	NULL, 'b' },
+	{ "gen",		optional_argument, 	NULL, 'g' },
+	{ "iqlen",		required_argument,	NULL, 'I' },
+	{ "rxcpu",		required_argument,	NULL, 'r' },
+	{ "txcpu",		required_argument,	NULL, 't' },
+	{ "rxbatch",		required_argument,	NULL, 'R' },
+	{ "trace-mask",		required_argument,	NULL, 'Z' },
 
-	{ "help",	no_argument,		0, 'h' },
-	{ "verbose",	optional_argument,	0, 'v' },
+	{ "help",		no_argument,		NULL, 'h' },
+	{ "verbose",		optional_argument,	NULL, 'v' },
 
 /* demo app options */
-	{ "echo",	optional_argument,	0, 'E' },
-	{ "passive",	optional_argument,	0, 'P' },
-	{ "passive-extract", optional_argument,	0, 'X' },
+	{ "echo",		optional_argument,	NULL, 'E' },
+	{ "passive",		optional_argument,	NULL, 'P' },
+	{ "passive-extract",	optional_argument,	NULL, 'X' },
 
 	{ 0, 0, 0, 0 }
 };
@@ -193,10 +216,23 @@ usage(const char *progname)
 	printf("\n");
 	printf("Global options:\n");
 	printf("\n");
+	printf("  --base-config [small|medium|large]\n");
+	printf("                          Choose base global config to use (default 'medium')\n");
 	printf("  --config-only, -N       Print the configuration and exit (can be specified at any point)\n");
 	printf("  --help, -h              Print this message (can be specified at any point)\n");
-	printf("  --netmap-gpool, -G <buffers>\n");
+	printf("  --max-accept-queue <value>\n");
+	printf("                          Set the maximum listen socket accept queue length\n");
+	printf("  --max-clusters <value>  Set the upper limit on the global mbuf cluster pool size\n");
+	printf("  --max-sockets <value>   Set the maximum number of sockets per stack instance\n");
+	printf("  --netmap-extra-bufs <buffers>\n");
 	printf("                          Size of process-wide netmap extra buffer pool shared by netmapped physical interfaces\n");
+	printf("  --syncache-hash-size <value>\n");
+	printf("                          Set the number of buckets in each stack instance's syncache hash\n");
+	printf("  --syncache-bucket-limit <value>\n");
+	printf("                          Set the maximum number of entries in each syncache hash bucket\n");
+	printf("  --syncache-cache-limit <value>\n");
+	printf("                          Set the maximum number of entries in each stack instance's syncacne\n");
+	printf("  --tcb-hash-size <value> Set the number of buckets in each stack instance's tcp connection hash\n");
 	printf("  --verbose, -v [=level]  Increase baseline verbosity, or set to given level (can use multiple times)\n");
 	printf("\n");
 	printf("Event loop options:\n");
@@ -703,7 +739,8 @@ int main(int argc, char **argv)
 	unsigned int i, j;
 	int error;
 	unsigned int baseline_verbose;
-	unsigned int global_pool_size = 10000;
+	unsigned int option_set_flags[MAX_MT_OPT_VALUE - MIN_MT_OPT_VALUE - 1];
+	unsigned int option_values[MAX_MT_OPT_VALUE - MIN_MT_OPT_VALUE - 1];
 	enum {
 		CONFIGURING_GLOBALS = 0x01,
 		CONFIGURING_LOOP    = 0x02,
@@ -711,6 +748,14 @@ int main(int argc, char **argv)
 		CONFIGURING_IF      = 0x08,
 		CONFIGURING_APP	    = 0x10
 	} config_state;
+	
+#define OPTION_SET(opt) option_set_flags[opt - MIN_MT_OPT_VALUE - 1]
+#define OPTION_VALUE(opt) option_values[opt - MIN_MT_OPT_VALUE - 1]
+#define TRANSFER_OPTION(opt, cfgmember)				\
+	do {							\
+		if (OPTION_SET(opt))				\
+			gcfg.cfgmember = OPTION_VALUE(opt);	\
+	} while (0)
 
 #define REQUIRE_STATE(mask_, intro_)					\
 	do {								\
@@ -742,6 +787,9 @@ int main(int argc, char **argv)
 		printf("Failed to initialize print lock (%d)\n", error);
 		return (EXIT_FAILURE);
 	}
+
+	memset(option_set_flags, 0, sizeof(option_set_flags));
+	memset(option_values, 0, sizeof(option_values));
 
 	memset(elcfgs, 0, sizeof(elcfgs));
 	for(i = 0; i < MAX_EVENT_LOOPS; i++) {
@@ -785,8 +833,8 @@ int main(int argc, char **argv)
 	baseline_verbose = 0;
 	config_state = CONFIGURING_GLOBALS;
 
-	while ((opt = getopt_long(argc, argv, "b:c:e::E::g::G:hI:J::m::n:Np:P::r:R:s::St:vX:Z:",
-				  long_options, NULL)) != -1) {
+	while ((opt = getopt_long(argc, argv, "b:c:e::E::g::hI:J::m::n:Np:P::r:R:s::St:vX:Z:",
+				    long_options, NULL)) != -1) {
 		switch (opt) {
 		case 'b':
 			REQUIRE_STATE(CONFIGURING_IF, "Specifying a bridge-to list");
@@ -844,10 +892,6 @@ int main(int argc, char **argv)
 					return (EXIT_FAILURE);
 				}
 			}
-			break;
-		case 'G':
-			REQUIRE_STATE(CONFIGURING_GLOBALS, "Specifying netmap global pool size");
-			global_pool_size = strtoul(optarg, NULL, 10);
 			break;
 		case 'h':
 			usage(argv[0]);
@@ -1016,6 +1060,37 @@ int main(int argc, char **argv)
 				       curifcfg->type_name, curifcfg->ucfg.configstr);
 			}
 			break;
+		case MT_OPT_BASE_CONFIG:
+		{
+			enum uinet_global_cfg_type which;
+			REQUIRE_STATE(CONFIGURING_GLOBALS, "Specifying the base global config");
+			if (strcmp(optarg, "small") == 0) {
+				which = UINET_GLOBAL_CFG_SMALL;
+			} else if (strcmp(optarg, "medium") == 0) {
+				which = UINET_GLOBAL_CFG_MEDIUM;
+			} else if (strcmp(optarg, "large") == 0) {
+				which = UINET_GLOBAL_CFG_LARGE;
+			} else {
+				printf("Invalid global config base type\n");
+				return (EXIT_FAILURE);
+			}
+
+			OPTION_SET(MT_OPT_BASE_CONFIG) = 1;
+			OPTION_VALUE(MT_OPT_BASE_CONFIG) = which;
+			break;
+		}
+		case MT_OPT_MAXSOCKETS:
+		case MT_OPT_NETMAP_EXTRA_BUFS:
+		case MT_OPT_NMBCLUSTERS:
+		case MT_OPT_SOMAXCONN:
+		case MT_OPT_SYNCACHE_HASHSIZE:
+		case MT_OPT_SYNCACHE_BUCKETLIMIT:
+		case MT_OPT_SYNCACHE_CACHELIMIT:
+		case MT_OPT_TCBHASHSIZE:
+			REQUIRE_STATE(CONFIGURING_GLOBALS, "Specifying a global option");
+			OPTION_SET(opt) = 1;
+			OPTION_VALUE(opt) = strtoul(optarg, NULL, 10);
+			break;
 		default: 
 			usage(argv[0]);
 			return (EXIT_FAILURE);
@@ -1037,7 +1112,6 @@ int main(int argc, char **argv)
 		}
 	}
 
-	printf("Requested extra netmap buffers: %u\n", global_pool_size);
 	print_cfg(elcfgs, num_event_loops);
 
 	if (exit_after_config) {
@@ -1062,10 +1136,19 @@ int main(int argc, char **argv)
 
 	struct uinet_global_cfg gcfg;
 	struct uinet_instance_cfg icfg;
+	enum uinet_global_cfg_type which;
 
-	uinet_default_cfg(&gcfg);
-	gcfg.nmbclusters = 1024*1024;
-	gcfg.netmap_extra_bufs = global_pool_size;
+	which = OPTION_SET(MT_OPT_BASE_CONFIG) ? OPTION_VALUE(MT_OPT_BASE_CONFIG) : UINET_GLOBAL_CFG_MEDIUM;
+
+	uinet_default_cfg(&gcfg, which);
+	TRANSFER_OPTION(MT_OPT_MAXSOCKETS, kern.ipc.maxsockets);
+	TRANSFER_OPTION(MT_OPT_NETMAP_EXTRA_BUFS, netmap_extra_bufs);
+	TRANSFER_OPTION(MT_OPT_NMBCLUSTERS, kern.ipc.nmbclusters);
+	TRANSFER_OPTION(MT_OPT_SOMAXCONN, kern.ipc.somaxconn);
+	TRANSFER_OPTION(MT_OPT_SYNCACHE_HASHSIZE, net.inet.tcp.syncache.hashsize);
+	TRANSFER_OPTION(MT_OPT_SYNCACHE_BUCKETLIMIT, net.inet.tcp.syncache.bucketlimit);
+	TRANSFER_OPTION(MT_OPT_SYNCACHE_CACHELIMIT, net.inet.tcp.syncache.cachelimit);
+	TRANSFER_OPTION(MT_OPT_TCBHASHSIZE, net.inet.tcp.tcbhashsize);
 
 	uinet_instance_default_cfg(&icfg);
 	if (scfgs[0].sts)

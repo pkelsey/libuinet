@@ -1576,11 +1576,104 @@ uinet_lock_log_disable(void)
 
 
 void
-uinet_default_cfg(struct uinet_global_cfg *cfg)
+uinet_default_cfg(struct uinet_global_cfg *cfg, enum uinet_global_cfg_type which)
 {
-	cfg->ncpus = 1;
-	cfg->nmbclusters = 128*1024;
-	cfg->netmap_extra_bufs = 10000;
+	switch (which) {
+	case UINET_GLOBAL_CFG_SMALL:
+		*cfg = (struct uinet_global_cfg) {
+			.ncpus = 1,
+			.netmap_extra_bufs = 1000,
+			.kern = {
+				.ipc = {
+					.maxsockets = 1024,
+					.nmbclusters = 4*1024,
+					.somaxconn = 128,
+				},
+			},
+			.net = {
+				.inet = {
+					.tcp = {
+						.syncache = {
+							.hashsize = 512,
+							.bucketlimit = 30,
+							.cachelimit = 15360, /* (512 * 30) */
+						},
+						.tcbhashsize = 512,
+					},
+				},
+			},
+		};
+		break;
+	default:
+	case UINET_GLOBAL_CFG_MEDIUM:
+		*cfg = (struct uinet_global_cfg) {
+			.ncpus = 1,
+			.netmap_extra_bufs = 10000,
+			.kern = {
+				.ipc = {
+					.maxsockets = 128*1024,
+					.nmbclusters = 128*1024,
+					.somaxconn = 1024,
+				},
+			},
+			.net = {
+				.inet = {
+					.tcp = {
+						.syncache = {
+							.hashsize = 2048,
+							.bucketlimit = 30,
+							.cachelimit = 61440, /* (2048 * 30) */
+						},
+						.tcbhashsize = 8192,
+					},
+				},
+			},
+		};
+		break;
+	case UINET_GLOBAL_CFG_LARGE:
+		*cfg = (struct uinet_global_cfg) {
+			.ncpus = 1,
+			.netmap_extra_bufs = 40000,
+			.kern = {
+				.ipc = {
+					.maxsockets = 256*1024,
+					.nmbclusters = 512*1024,
+					.somaxconn = 2048,
+				},
+			},
+			.net = {
+				.inet = {
+					.tcp = {
+						.syncache = {
+							.hashsize = 4096,
+							.bucketlimit = 30,
+							.cachelimit = 122880, /* (4096 * 30) */
+						},
+						.tcbhashsize = 32768,
+					},
+				},
+			},
+		};
+		break;
+	}
+}
+
+
+void
+uinet_print_cfg(struct uinet_global_cfg *cfg)
+{
+#define PRINT_TUNABLE(t) printf("%s=%u\n", #t, cfg->t)
+
+	printf("ncpus=%u netmap_extra_bufs=%u\n", cfg->ncpus, cfg->netmap_extra_bufs);
+	PRINT_TUNABLE(net.inet.tcp.syncache.hashsize);
+	PRINT_TUNABLE(net.inet.tcp.syncache.bucketlimit);
+	PRINT_TUNABLE(net.inet.tcp.syncache.cachelimit);
+	PRINT_TUNABLE(net.inet.tcp.tcbhashsize);
+	PRINT_TUNABLE(kern.ipc.maxsockets);
+	PRINT_TUNABLE(kern.ipc.nmbclusters);
+	PRINT_TUNABLE(kern.ipc.somaxconn);
+
+#undef PRINT_TUNABLE	
 }
 
 
