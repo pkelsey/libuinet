@@ -273,10 +273,14 @@ first_look_handler(void *arg, struct uinet_pd_list *pkts)
 	struct uinet_pd_ctx *free_group[FREE_GROUP_MAX];
 	unsigned int free_group_count;
 	unsigned int to_stack;
-	unsigned int num_destinations;
+	unsigned int num_extra_refs;
 
 	ifcfg = (struct interface_config *)arg;
 	to_stack = ifcfg->scfg->num_apps ? 1 : 0;
+
+	if ((ifcfg->verbose > 1) && to_stack)
+		printf("%s (%s): First-look handler sending packets to the stack\n",
+		       ifcfg->ucfg.alias, ifcfg->ucfg.configstr);
 
 	if (ifcfg->num_bridge_to > 0) {
 		if (ifcfg->verbose > 1)
@@ -284,26 +288,29 @@ first_look_handler(void *arg, struct uinet_pd_list *pkts)
 			       ifcfg->ucfg.alias, ifcfg->ucfg.configstr,
 			       ifcfg->num_bridge_to, (ifcfg->num_bridge_to == 1) ? "" : "s"); 
 
-		num_destinations = ifcfg->num_bridge_to + to_stack;
+		num_extra_refs = ifcfg->num_bridge_to - 1;
 
 		/*
 		 * Mark the packets that we want to inject, and add extra
-		 * refs if there is more than one destination.
+		 * refs if there is more than one bridge_to destination.
 		 */
-		flags = (num_destinations > 1) ? UINET_PD_INJECT | UINET_PD_EXTRA_REFS : UINET_PD_INJECT;
+		flags = (num_extra_refs > 0) ? UINET_PD_INJECT | UINET_PD_EXTRA_REFS : UINET_PD_INJECT;
 		for (i = 0; i < pkts->num_descs; i++) {
+			/*
+			 * Packets from from the interface marked with
+			 * UINET_PD_TO_STACK by default, so clear it if we
+			 * don't want that behavior.
+			 */
 			if (!to_stack)
 				pkts->descs[i].flags &= ~UINET_PD_TO_STACK;
 			pkts->descs[i].flags |= flags;
 		}
 
 		/*
-		 *  We own one reference to the packets already, so if we
-		 *  have N destinations, we need to acquire N - 1 additional
-		 *  refs.
+		 * Adjust the refcounts if need be based on the descriptor
+		 * flags and number of requested extra refs.
 		 */
-		if (num_destinations > 1)
-			uinet_pd_ref_acquire(pkts, num_destinations - 1);
+		uinet_pd_ref_acquire(pkts, num_extra_refs);
 
 		for (i = 0; i < ifcfg->num_bridge_to; i++)
 			uinet_if_inject_tx_packets(ifcfg->bridge_to[i]->uif, pkts);

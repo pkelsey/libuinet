@@ -1859,6 +1859,21 @@ uinet_if_batch_tx(uinet_if_t uif, int *fd, uint64_t *wait_ns)
  * - it is only safe to use to adjust the refcounts of packet descriptors
  * that have a refcount of one (meaning the caller is the owner of the sole
  * reference to the descriptor).
+ *
+ * num_extra is the number of extra refs needed beyond what would be
+ * required for passage to the stack and/or injection to a single interface.
+ * This routine correctlys add any needed refs for passage to the stack
+ * and/or injection to a single interface, based on the UINET_PD_INJECT and
+ * UINET_PD_TO_STACK flags and only needs to be informed about refs required
+ * above and beyond those.
+ *
+ * The idea is that you mark the packet descriptors as required for
+ * injection and passage to the stack, you set UINET_PD_EXTRA_REFS if you
+ * want to tx-inject the packet into more that one interface or need
+ * additional refs for application use, then you call this routine with
+ * num_extra set to the number additional tx-injection interfaces above 1
+ * plus the number of application refs, and voila, the refs are correctly
+ * set.
  */
 void
 uinet_pd_ref_acquire(struct uinet_pd_list *pkts, unsigned int num_extra)
