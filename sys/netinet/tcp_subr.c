@@ -561,7 +561,41 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 		 */
 		m_freem(m->m_next);
 		m->m_next = NULL;
+#ifdef NO_MBUF_TURNAROUND
+		{
+			struct mbuf *m0;
+			int data_offset;
+
+			/*
+			 * Make a writable duplicate of the packet, landing
+			 * the data sourced from m->m_data at the same
+			 * offset into m0's storage.
+			 */
+			data_offset = (caddr_t)ipgen - 
+			    ((m->m_flags & M_EXT) ?
+			     (caddr_t)m->m_ext.ext_buf : (caddr_t)m->m_pktdat);
+			m->m_data -= data_offset;
+			m->m_pkthdr.len += data_offset;
+			m->m_len += data_offset;
+			m0 = m_dup(m, M_NOWAIT);
+			m_free(m);
+			if (m0 == NULL)
+				return;
+			m = m0;
+			m_adj(m, data_offset);
+#ifdef INET6
+			ip6 = mtod(m, struct ip6_hdr *);
+#endif /* INET6 */
+			ip = mtod(m, struct ip *);
+			/*
+			 * th doesn't need to be recomputed here as it will
+			 * be fixed up below when it is found to not lie
+			 * within m.
+			 */
+		}
+#else
 		m->m_data = (caddr_t)ipgen;
+#endif
 		m_addr_changed(m);
 		/* m_len is set later */
 		tlen = 0;

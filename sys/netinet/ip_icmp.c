@@ -155,7 +155,7 @@ SYSCTL_VNET_INT(_net_inet_icmp, OID_AUTO, bmcastecho, CTLFLAG_RW,
 int	icmpprintfs = 0;
 #endif
 
-static void	icmp_reflect(struct mbuf *);
+static void	icmp_reflect(struct mbuf *, int);
 static void	icmp_send(struct mbuf *, struct mbuf *);
 
 extern	struct protosw inetsw[];
@@ -316,7 +316,7 @@ stdreply:	icmpelen = max(8, min(V_icmp_quotelen, ntohs(oip->ip_len) - oiphlen));
 	nip->ip_hl = 5;
 	nip->ip_p = IPPROTO_ICMP;
 	nip->ip_tos = 0;
-	icmp_reflect(m);
+	icmp_reflect(m, 0);
 
 freeit:
 	m_freem(n);
@@ -575,7 +575,7 @@ icmp_input(struct mbuf *m, int off)
 reflect:
 		ICMPSTAT_INC(icps_reflect);
 		ICMPSTAT_INC(icps_outhist[icp->icmp_type]);
-		icmp_reflect(m);
+		icmp_reflect(m, 1);
 		return;
 
 	case ICMP_REDIRECT:
@@ -664,7 +664,7 @@ freeit:
  * Reflect the ip packet back to the source
  */
 static void
-icmp_reflect(struct mbuf *m)
+icmp_reflect(struct mbuf *m, int turnaround)
 {
 	struct ip *ip = mtod(m, struct ip *);
 	struct ifaddr *ifa;
@@ -681,6 +681,21 @@ icmp_reflect(struct mbuf *m)
 		ICMPSTAT_INC(icps_badaddr);
 		goto done;	/* Ip_output() will check for broadcast */
 	}
+
+#ifdef NO_MBUF_TURNAROUND
+	if (turnaround)	{
+		struct mbuf *m0;
+	
+		m0 = m_dup(m, M_NOWAIT);
+		m_freem(m);
+		if (m0 == NULL) {
+			ICMPSTAT_INC(icps_nomem);
+			goto done;
+		}
+		m = m0;
+		ip = mtod(m, struct ip *);
+	}
+#endif
 
 	m_addr_changed(m);
 
