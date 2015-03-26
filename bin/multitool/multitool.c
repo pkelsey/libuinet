@@ -299,7 +299,7 @@ first_look_handler(void *arg, struct uinet_pd_list *pkts)
 
 		/*
 		 *  We own one reference to the packets already, so if we
-		 *  have N desitnations, we need to acquire N - 1 additional
+		 *  have N destinations, we need to acquire N - 1 additional
 		 *  refs.
 		 */
 		if (num_destinations > 1)
