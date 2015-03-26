@@ -116,6 +116,18 @@ in6_gif_output(struct ifnet *ifp,
 		return EAFNOSUPPORT;
 	}
 
+#ifdef NO_MBUF_TURNAROUND
+	{
+		struct mbuf *m0;
+
+		m0 = m_dup(m, M_NOWAIT);
+		m_freem(m);
+		if (m0 == NULL)
+			return ENOBUFS;
+		m = m0;
+	}
+#endif
+
 	switch (family) {
 #ifdef INET
 	case AF_INET:

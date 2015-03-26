@@ -743,15 +743,7 @@ carp_input_c(struct mbuf *m, struct carp_header *ch, sa_family_t af)
 
 	if (bpf_peers_present(SC2IFP(sc)->if_bpf)) {
 		uint32_t af1 = af;
-#ifdef INET
-		struct ip *ip = mtod(m, struct ip *);
 
-		/* BPF wants net byte order */
-		if (af == AF_INET) {
-			ip->ip_len = htons(ip->ip_len + (ip->ip_hl << 2));
-			ip->ip_off = htons(ip->ip_off);
-		}
-#endif
 		bpf_mtap2(SC2IFP(sc)->if_bpf, &af1, sizeof(af1), m);
 	}
 
@@ -975,9 +967,9 @@ carp_send_ad_locked(struct carp_softc *sc)
 		ip->ip_v = IPVERSION;
 		ip->ip_hl = sizeof(*ip) >> 2;
 		ip->ip_tos = IPTOS_LOWDELAY;
-		ip->ip_len = len;
+		ip->ip_len = htons(len);
 		ip->ip_id = ip_newid();
-		ip->ip_off = IP_DF;
+		ip->ip_off = htons(IP_DF);
 		ip->ip_ttl = CARP_DFLTTL;
 		ip->ip_p = IPPROTO_CARP;
 		ip->ip_sum = 0;

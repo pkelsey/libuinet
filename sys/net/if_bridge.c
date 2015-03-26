@@ -3148,15 +3148,6 @@ ipfwpass:
 	switch (ether_type) {
 	case ETHERTYPE_IP:
 		/*
-		 * before calling the firewall, swap fields the same as
-		 * IP does. here we assume the header is contiguous
-		 */
-		ip = mtod(*mp, struct ip *);
-
-		ip->ip_len = ntohs(ip->ip_len);
-		ip->ip_off = ntohs(ip->ip_off);
-
-		/*
 		 * Run pfil on the member interface and the bridge, both can
 		 * be skipped by clearing pfil_member or pfil_bridge.
 		 *
@@ -3194,7 +3185,7 @@ ipfwpass:
 			}
 		}
 
-		/* Recalculate the ip checksum and restore byte ordering */
+		/* Recalculate the ip checksum. */
 		ip = mtod(*mp, struct ip *);
 		hlen = ip->ip_hl << 2;
 		if (hlen < sizeof(struct ip))
@@ -3206,8 +3197,6 @@ ipfwpass:
 			if (ip == NULL)
 				goto bad;
 		}
-		ip->ip_len = htons(ip->ip_len);
-		ip->ip_off = htons(ip->ip_off);
 		ip->ip_sum = 0;
 		if (hlen == sizeof(struct ip))
 			ip->ip_sum = in_cksum_hdr(ip);

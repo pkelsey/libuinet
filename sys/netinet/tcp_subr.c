@@ -561,7 +561,41 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 		 */
 		m_freem(m->m_next);
 		m->m_next = NULL;
+#ifdef NO_MBUF_TURNAROUND
+		{
+			struct mbuf *m0;
+			int data_offset;
+
+			/*
+			 * Make a writable duplicate of the packet, landing
+			 * the data sourced from m->m_data at the same
+			 * offset into m0's storage.
+			 */
+			data_offset = (caddr_t)ipgen - 
+			    ((m->m_flags & M_EXT) ?
+			     (caddr_t)m->m_ext.ext_buf : (caddr_t)m->m_pktdat);
+			m->m_data -= data_offset;
+			m->m_pkthdr.len += data_offset;
+			m->m_len += data_offset;
+			m0 = m_dup(m, M_NOWAIT);
+			m_free(m);
+			if (m0 == NULL)
+				return;
+			m = m0;
+			m_adj(m, data_offset);
+#ifdef INET6
+			ip6 = mtod(m, struct ip6_hdr *);
+#endif /* INET6 */
+			ip = mtod(m, struct ip *);
+			/*
+			 * th doesn't need to be recomputed here as it will
+			 * be fixed up below when it is found to not lie
+			 * within m.
+			 */
+		}
+#else
 		m->m_data = (caddr_t)ipgen;
+#endif
 		m_addr_changed(m);
 		/* m_len is set later */
 		tlen = 0;
@@ -603,10 +637,10 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 #ifdef INET
 	{
 		tlen += sizeof (struct tcpiphdr);
-		ip->ip_len = tlen;
+		ip->ip_len = htons(tlen);
 		ip->ip_ttl = V_ip_defttl;
 		if (V_path_mtu_discovery)
-			ip->ip_off |= IP_DF;
+			ip->ip_off |= htons(IP_DF);
 	}
 #endif
 	m->m_len = tlen;
@@ -1423,12 +1457,11 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 					    /*
 					     * If no alternative MTU was
 					     * proposed, try the next smaller
-					     * one.  ip->ip_len has already
-					     * been swapped in icmp_input().
+					     * one.
 					     */
 					    if (!mtu)
-						mtu = ip_next_mtu(ip->ip_len,
-						 1);
+						    mtu = ip_next_mtu(
+						     ntohs(ip->ip_len), 1);
 					    if (mtu < V_tcp_minmss
 						 + sizeof(struct tcpiphdr))
 						mtu = V_tcp_minmss
@@ -1919,7 +1952,7 @@ tcp_signature_apply(void *fstate, void *data, u_int len)
  * specify per-application flows but it is unstable.
  */
 int
-tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
+tcp_signature_compute(struct mbuf *m, int off0, int len, int optlen,
     u_char *buf, u_int direction)
 {
 	union sockaddr_union dst;
@@ -2011,8 +2044,8 @@ tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
 		    optlen);
 		MD5Update(&ctx, (char *)&ippseudo, sizeof(struct ippseudo));
 
-		th = (struct tcphdr *)((u_char *)ip + sizeof(struct ip));
-		doff = sizeof(struct ip) + sizeof(struct tcphdr) + optlen;
+		th = (struct tcphdr *)((u_char *)ip + off0);
+		doff = off0 + sizeof(struct tcphdr) + optlen;
 		break;
 #endif
 #ifdef INET6
@@ -2040,8 +2073,8 @@ tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
 		nhdr = IPPROTO_TCP;
 		MD5Update(&ctx, (char *)&nhdr, sizeof(uint8_t));
 
-		th = (struct tcphdr *)((u_char *)ip6 + sizeof(struct ip6_hdr));
-		doff = sizeof(struct ip6_hdr) + sizeof(struct tcphdr) + optlen;
+		th = (struct tcphdr *)((u_char *)ip6 + off0);
+		doff = off0 + sizeof(struct tcphdr) + optlen;
 		break;
 #endif
 	default:
@@ -2055,6 +2088,13 @@ tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
 	 * Step 2: Update MD5 hash with TCP header, excluding options.
 	 * The TCP checksum must be set to zero.
 	 */
+	/* 
+	 * In the tcp_input() path, it's OK to alter th->th_sum because th
+	 * points to an on-stack copy of the header (it's also pointless, as
+	 * in that case th->th_sum is always zero here).  In the
+	 * tcp_output() path, it's OK to alter th->th_sum because there are
+	 * never any other simultaneous consumers of the packet at that
+	 * point. */
 	savecsum = th->th_sum;
 	th->th_sum = 0;
 	MD5Update(&ctx, (char *)th, sizeof(struct tcphdr));

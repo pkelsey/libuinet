@@ -317,8 +317,8 @@ struct tcpopt {
 #define	TOF_MAXOPT	0x0100
 	u_int32_t	to_tsval;	/* new timestamp */
 	u_int32_t	to_tsecr;	/* reflected timestamp */
-	u_char		*to_sacks;	/* pointer to the first SACK blocks */
-	u_char		*to_signature;	/* pointer to the TCP-MD5 signature */
+	const uint8_t	*to_sacks;	/* pointer to the first SACK blocks */
+	const uint8_t	*to_signature;	/* pointer to the TCP-MD5 signature */
 	u_int16_t	to_mss;		/* maximum segment size */
 	u_int8_t	to_wscale;	/* window scaling */
 	u_int8_t	to_nsacks;	/* number of SACK blocks */
@@ -700,9 +700,9 @@ void	 tcp_reass_destroy(void);
 void	 tcp_input(struct mbuf *, int);
 #define	TI_UNLOCKED	1
 #define	TI_WLOCKED	2
-void	 tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
-	     struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos,
-	     int ti_locked, int no_unlock);
+void	 tcp_do_segment(struct mbuf *m, struct tcphdr *th, const uint8_t *optp,
+	     struct socket *so, struct tcpcb *tp, int drop_hdrlen, int tlen,
+	     uint8_t iptos, int ti_locked, int no_unlock);
 u_long	 tcp_maxmtu(struct in_conninfo *, int *);
 u_long	 tcp_maxmtu6(struct in_conninfo *, int *);
 void	 tcp_mss_update(struct tcpcb *, int, int, struct hc_metrics_lite *,

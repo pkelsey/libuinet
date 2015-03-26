@@ -944,7 +944,7 @@ syncache_synthesize_synack(struct syncache *sc, struct tcphdr **pth)
 		ip = mtod(m, struct ip *);
 		ip->ip_v = IPVERSION;
 		ip->ip_hl = sizeof(struct ip) >> 2;
-		ip->ip_len = tlen;
+		ip->ip_len = htons(tlen);
 		ip->ip_id = 0;
 		ip->ip_off = 0;
 		ip->ip_sum = 0;
@@ -1013,7 +1013,7 @@ syncache_synthesize_synack(struct syncache *sc, struct tcphdr **pth)
 			ip6->ip6_plen = htons(ntohs(ip6->ip6_plen) + optlen);
 		else
 #endif
-			ip->ip_len += optlen;
+			ip->ip_len = htons(ntohs(ip->ip_len) + optlen);
 	} else
 		optlen = 0;
 
@@ -1264,9 +1264,22 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	tp->t_keepcnt = sototcpcb(lso)->t_keepcnt;
 	tp->t_reassdl = sototcpcb(lso)->t_reassdl;
 
+	/*
+	 * XXX we should probably just allocate an mbuf on the stack and
+	 * configure it so that it won't be freed instead of trying to
+	 * dynamically allocate an mbuf in syncache_synthesize_synack(),
+	 * which may fail, and is likely more costly.
+	 */
 	m1 = syncache_synthesize_synack(sc, &th);
 	if (m1 == NULL)
 		goto abort;
+
+	/*
+	 * tcp_input() is careful to not byte-swap header fields in-place in
+	 * the mbuf because there may be other simultaneous consumers of the
+	 * packet.  We don't have to worry about that here as we've
+	 * allocated the mbuf and it will be used solely for this purpose.
+	 */
 
 	/* tcp_fields_to_host(th); */
 	th->th_seq = ntohl(th->th_seq);
@@ -1274,7 +1287,8 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	th->th_win = ntohs(th->th_win);
 	th->th_urp = ntohs(th->th_urp);
 
-	tcp_do_segment(m1, th, so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED, 1);
+	tcp_do_segment(m1, th, (const uint8_t *)(th + 1),
+		       so, tp, 0, 0, IPTOS_ECN_NOTECT, TI_WLOCKED, 1);
 
 	/* return with inp locked */
 	return (so);
@@ -2313,7 +2327,7 @@ syncache_respond(struct syncache *sc)
 		ip = mtod(m, struct ip *);
 		ip->ip_v = IPVERSION;
 		ip->ip_hl = sizeof(struct ip) >> 2;
-		ip->ip_len = tlen;
+		ip->ip_len = htons(tlen);
 		ip->ip_id = 0;
 		ip->ip_off = 0;
 		ip->ip_sum = 0;
@@ -2331,7 +2345,7 @@ syncache_respond(struct syncache *sc)
 		 *	2) the SCF_UNREACH flag has been set
 		 */
 		if (V_path_mtu_discovery && ((sc->sc_flags & SCF_UNREACH) == 0))
-		       ip->ip_off |= IP_DF;
+		       ip->ip_off |= htons(IP_DF);
 
 		th = (struct tcphdr *)(ip + 1);
 	}
@@ -2391,7 +2405,7 @@ syncache_respond(struct syncache *sc)
 			ip6->ip6_plen = htons(ntohs(ip6->ip6_plen) + optlen);
 		else
 #endif
-			ip->ip_len += optlen;
+			ip->ip_len = htons(ntohs(ip->ip_len) + optlen);
 	} else
 		optlen = 0;
 

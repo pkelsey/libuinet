@@ -271,6 +271,21 @@ icmp6_error(struct mbuf *m, int type, int code, int param)
 	}
 #endif
 
+#ifdef NO_MBUF_TURNAROUND
+	if (turnaround)	{
+		struct mbuf *m0;
+	
+		m0 = m_dup(m, M_NOWAIT);
+		m_freem(m);
+		if (m0 == NULL) {
+			ICMPSTAT_INC(icps_nomem);
+			goto done;
+		}
+		m = m0;
+		ip = mtod(m, struct ip *);
+	}
+#endif
+
 #ifndef PULLDOWN_TEST
 	IP6_EXTHDR_CHECK(m, 0, sizeof(struct ip6_hdr), );
 #else
@@ -390,7 +405,7 @@ icmp6_error(struct mbuf *m, int type, int code, int param)
 	m->m_pkthdr.rcvif = NULL;
 
 	ICMP6STAT_INC(icp6s_outhist[type]);
-	icmp6_reflect(m, sizeof(struct ip6_hdr)); /* header order: IPv6 - ICMPv6 */
+	icmp6_reflect(m, sizeof(struct ip6_hdr), 0); /* header order: IPv6 - ICMPv6 */
 
 	return;
 
@@ -571,10 +586,17 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		icmp6_ifstat_inc(ifp, ifs6_in_echo);
 		if (code != 0)
 			goto badcode;
+#if NO_MBUF_TURNAROUND
+		if ((n = m_dup(m, M_NOWAIT)) == NULL) {
+			/* Give up remote */
+			break;
+		}
+#else
 		if ((n = m_copy(m, 0, M_COPYALL)) == NULL) {
 			/* Give up remote */
 			break;
 		}
+#endif
 		if ((n->m_flags & M_EXT) != 0
 		 || n->m_len < off + sizeof(struct icmp6_hdr)) {
 			struct mbuf *n0 = n;
@@ -626,7 +648,7 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		if (n) {
 			ICMP6STAT_INC(icp6s_reflect);
 			ICMP6STAT_INC(icp6s_outhist[ICMP6_ECHO_REPLY]);
-			icmp6_reflect(n, noff);
+			icmp6_reflect(n, noff, 0);
 		}
 		break;
 
@@ -675,7 +697,11 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 			IP6_EXTHDR_CHECK(m, off, sizeof(struct icmp6_nodeinfo),
 			    IPPROTO_DONE);
 #endif
+#ifdef NO_MBUF_TURNAROUND
+			n = m_dup(m, M_NOWAIT);
+#else
 			n = m_copy(m, 0, M_COPYALL);
+#endif
 			if (n)
 				n = ni6_input(n, off);
 			/* XXX meaningless if n == NULL */
@@ -751,7 +777,7 @@ icmp6_input(struct mbuf **mp, int *offp, int proto)
 		if (n) {
 			ICMP6STAT_INC(icp6s_reflect);
 			ICMP6STAT_INC(icp6s_outhist[ICMP6_WRUREPLY]);
-			icmp6_reflect(n, noff);
+			icmp6_reflect(n, noff, 0);
 		}
 		break;
 	    }
@@ -980,6 +1006,21 @@ icmp6_notify_error(struct mbuf **mp, int off, int icmp6len, int code)
 		ICMP6STAT_INC(icp6s_tooshort);
 		goto freeit;
 	}
+
+#ifdef NO_MBUF_TURNAROUND
+	{
+		struct mbuf *m0;
+
+		m0 = m_dup(m, M_NOWAIT);
+		m_freem(m);
+		if (m0 == NULL) {
+			ICMP6STAT_INC(icp6s_nomem);
+			return (-1);
+		}
+		m = m0;
+	}
+#endif
+
 #ifndef PULLDOWN_TEST
 	IP6_EXTHDR_CHECK(m, off,
 	    sizeof(struct icmp6_hdr) + sizeof(struct ip6_hdr), -1);
@@ -2151,7 +2192,7 @@ icmp6_rip6_input(struct mbuf **mp, int off)
  * OFF points to the icmp6 header, counted from the top of the mbuf.
  */
 void
-icmp6_reflect(struct mbuf *m, size_t off)
+icmp6_reflect(struct mbuf *m, size_t off, int turnaround)
 {
 	struct ip6_hdr *ip6;
 	struct icmp6_hdr *icmp6;
@@ -2169,6 +2210,20 @@ icmp6_reflect(struct mbuf *m, size_t off)
 		    __FILE__, __LINE__));
 		goto bad;
 	}
+
+#ifdef NO_MBUF_TURNAROUND
+	if (turnaround)	{
+		struct mbuf *m0;
+	
+		m0 = m_dup(m, M_NOWAIT);
+		m_freem(m);
+		if (m0 == NULL) {
+			ICMPSTAT_INC(icp6s_nomem);
+			return;
+		}
+		m = m0;
+	}
+#endif
 
 	/*
 	 * If there are extra headers between IPv6 and ICMPv6, strip
