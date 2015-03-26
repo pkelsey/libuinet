@@ -426,6 +426,16 @@ configure_bridging(struct interface_config *ifcfgs, unsigned int num_ifs, unsign
 
 
 static void
+print_cpu(const char *label, int cpu)
+{
+	if (cpu < 0)
+		printf("%s=auto", label);
+	else
+		printf("%s=%d", label, cpu);
+}
+
+
+static void
 print_cfg(struct event_loop_config *elcfgs, unsigned int num_event_loops)
 {
 	unsigned int i, j;
@@ -437,6 +447,7 @@ print_cfg(struct event_loop_config *elcfgs, unsigned int num_event_loops)
 	unsigned int stack_index;
 	unsigned int if_index;
 	unsigned int app_index;
+	int rxcpu, txcpu;
 
 	for (i = 0; i < num_event_loops; i++) {
 		curloopcfg = &elcfgs[i];
@@ -473,16 +484,15 @@ print_cfg(struct event_loop_config *elcfgs, unsigned int num_event_loops)
 				} else 
 					printf("<none>");
 
-				if (curifcfg->ucfg.tx_cpu < 0)
-					printf(" txcpu=auto");
-				else
-					printf(" txcpu=%u", curifcfg->ucfg.tx_cpu);
+				if (curstackcfg->sts)
+					txcpu = rxcpu = curloopcfg->cpu;
+				else {
+					txcpu = curifcfg->ucfg.tx_cpu;
+					rxcpu = curifcfg->ucfg.rx_cpu;
+				}
 
-				if (curifcfg->ucfg.rx_cpu < 0)
-					printf(" rxcpu=auto");
-				else
-					printf(" rxcpu=%u", curifcfg->ucfg.rx_cpu);
-
+				print_cpu(" rxcpu", txcpu);
+				print_cpu(" txcpu", txcpu);
 				printf("\n");
 			}
 			if (if_index == 0)
@@ -789,7 +799,7 @@ int main(int argc, char **argv)
 				curloopcfg->cpu = -1;
 			break;
 		case 'e':
-			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_LOOP|CONFIGURING_STACK|CONFIGURING_APP, "Creating a new event loop");
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_LOOP|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new event loop");
 			LIMIT_OBJECTS("event loops", num_event_loops, MAX_EVENT_LOOPS);
 
 			curloopcfg = &elcfgs[num_event_loops];
