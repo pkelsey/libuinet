@@ -211,9 +211,9 @@ static MALLOC_DEFINE(M_SYNCACHE, "syncache", "TCP syncache");
 
 #define ENDPTS6_EQ(a, b) (memcmp(a, b, sizeof(*a)) == 0)
 
-#define	SCH_LOCK(sch)		mtx_lock(&(sch)->sch_mtx)
-#define	SCH_UNLOCK(sch)		mtx_unlock(&(sch)->sch_mtx)
-#define	SCH_LOCK_ASSERT(sch)	mtx_assert(&(sch)->sch_mtx, MA_OWNED)
+#define	SCH_LOCK(sch)		VNET_MTX_LOCK(&(sch)->sch_mtx)
+#define	SCH_UNLOCK(sch)		VNET_MTX_UNLOCK(&(sch)->sch_mtx)
+#define	SCH_LOCK_ASSERT(sch)	VNET_MTX_ASSERT(&(sch)->sch_mtx, MA_OWNED)
 
 /*
  * Requires the syncache entry to be already removed from the bucket list.

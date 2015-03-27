@@ -169,11 +169,11 @@ static VNET_DEFINE(struct mtx, ipqlock);
 #define	V_ipq			VNET(ipq)
 #define V_ipqlock		VNET(ipqlock)
 
-#define	IPQ_LOCK()	mtx_lock(&V_ipqlock)
-#define	IPQ_UNLOCK()	mtx_unlock(&V_ipqlock)
-#define	IPQ_LOCK_INIT()	mtx_init(&V_ipqlock, "V_ipqlock", NULL, MTX_DEF)
-#define	IPQ_LOCK_DESTROY()	mtx_destroy(&V_ipqlock)
-#define	IPQ_LOCK_ASSERT()	mtx_assert(&V_ipqlock, MA_OWNED)
+#define	IPQ_LOCK()	VNET_MTX_LOCK(&V_ipqlock)
+#define	IPQ_UNLOCK()	VNET_MTX_UNLOCK(&V_ipqlock)
+#define	IPQ_LOCK_INIT()	VNET_MTX_INIT(&V_ipqlock, "V_ipqlock", NULL, MTX_DEF)
+#define	IPQ_LOCK_DESTROY()	VNET_MTX_DESTROY(&V_ipqlock)
+#define	IPQ_LOCK_ASSERT()	VNET_MTX_ASSERT(&V_ipqlock, MA_OWNED)
 
 static void	maxnipq_update(void);
 static void	ipq_zone_change(void *);

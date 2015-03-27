@@ -998,9 +998,15 @@ int
 uinet_sogetpeeraddr(struct uinet_socket *so, struct uinet_sockaddr **sa)
 {
 	struct socket *so_internal = (struct socket *)so;
+	int rv;
 
 	*sa = NULL;
-	return (*so_internal->so_proto->pr_usrreqs->pru_peeraddr)(so_internal, (struct sockaddr **)sa);
+
+	CURVNET_SET(so_internal->so_vnet);
+	rv = (*so_internal->so_proto->pr_usrreqs->pru_peeraddr)(so_internal, (struct sockaddr **)sa);
+	CURVNET_RESTORE();
+
+	return (rv);
 }
 
 
@@ -1008,9 +1014,15 @@ int
 uinet_sogetsockaddr(struct uinet_socket *so, struct uinet_sockaddr **sa)
 {
 	struct socket *so_internal = (struct socket *)so;
+	int rv;
 
 	*sa = NULL;
-	return (*so_internal->so_proto->pr_usrreqs->pru_sockaddr)(so_internal, (struct sockaddr **)sa);
+	
+	CURVNET_SET(so_internal->so_vnet);
+	rv = (*so_internal->so_proto->pr_usrreqs->pru_sockaddr)(so_internal, (struct sockaddr **)sa);
+	CURVNET_RESTORE();
+
+	return (rv);
 }
 
 

@@ -86,12 +86,12 @@ static VNET_DEFINE(struct ip6q, ip6q);	/* ip6 reassemble queue */
 #define	V_frag6_nfrags			VNET(frag6_nfrags)
 #define	V_ip6q				VNET(ip6q)
 
-#define	IP6Q_LOCK_INIT()	mtx_init(&V_ip6qlock, "V_ip6qlock", NULL, MTX_DEF)
-#define	IP6Q_LOCK_DESTROY()	mtx_destroy(&V_ip6qlock)
-#define	IP6Q_LOCK()		mtx_lock(&V_ip6qlock)
-#define	IP6Q_TRYLOCK()		mtx_trylock(&V_ip6qlock)
-#define	IP6Q_LOCK_ASSERT()	mtx_assert(&V_ip6qlock, MA_OWNED)
-#define	IP6Q_UNLOCK()		mtx_unlock(&V_ip6qlock)
+#define	IP6Q_LOCK_INIT()	VNET_MTX_INIT(&V_ip6qlock, "V_ip6qlock", NULL, MTX_DEF)
+#define	IP6Q_LOCK_DESTROY()	VNET_MTX_DESTROY(&V_ip6qlock)
+#define	IP6Q_LOCK()		VNET_MTX_LOCK(&V_ip6qlock)
+#define	IP6Q_TRYLOCK()		VNET_MTX_TRYLOCK(&V_ip6qlock)
+#define	IP6Q_LOCK_ASSERT()	VNET_MTX_ASSSERT(&V_ip6qlock, MA_OWNED)
+#define	IP6Q_UNLOCK()		VNET_MTX_UNLOCK(&V_ip6qlock)
 
 static MALLOC_DEFINE(M_FTABLE, "fragment", "fragment reassembly header");
 
