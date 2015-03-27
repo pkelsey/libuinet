@@ -560,15 +560,6 @@ pthread_start_routine(void *arg)
 	if (error != 0)
 		printf("Warning: unable to set uhi thread-specific data (%d)\n", error);
 
-	if (tsa->host_thread_id) {
-		*tsa->host_thread_id = (uhi_thread_t)pthread_self();
-	}
-
-	if (tsa->oncpu) {
-		cpuid = uhi_thread_bound_cpu();
-		*(tsa->oncpu) = (cpuid == -1) ? 0 : cpuid;
-	}
-
 	uhi_thread_set_name(tsa->name);
 
 	uhi_thread_run_hooks(UHI_THREAD_HOOK_START);

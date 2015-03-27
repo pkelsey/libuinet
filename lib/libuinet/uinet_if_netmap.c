@@ -1256,7 +1256,7 @@ if_netmap_send(void *arg)
 	int poll_wait_ms;
 
 	if (sc->uif->tx_cpu >= 0)
-		sched_bind(sc->tx_thread, sc->uif->tx_cpu);
+		sched_bind(curthread, sc->uif->tx_cpu);
 
 	TRACE(TRACE_CFG, " tx: thread bound to cpu %d\n", sc->uif->tx_cpu);
 
@@ -1264,7 +1264,7 @@ if_netmap_send(void *arg)
 	avail = if_netmap_txavail(sc->nm_host_ctx);
 	curslot = if_netmap_txcur(sc->nm_host_ctx);
 	txr = sc->tx_inject_ring;
-	poll_wait_ms = (sc->tx_thread->td_stop_check_ticks * 1000) / hz;
+	poll_wait_ms = (curthread->td_stop_check_ticks * 1000) / hz;
 	cur_inject_take = 0;
 	do {
 		TRACE(TRACE_TX_BATCH, " tx: Waiting for packets to transmit\n");
@@ -1552,12 +1552,12 @@ if_netmap_receive(void *arg)
 	uif = sc->uif;
 
 	if (uif->rx_cpu >= 0)
-		sched_bind(sc->rx_thread, uif->rx_cpu);
+		sched_bind(curthread, uif->rx_cpu);
 
 	TRACE(TRACE_CFG, "rx: thread bound to cpu %d\n", uif->rx_cpu);
 
 	done = 0;
-	poll_wait_ms = (sc->rx_thread->td_stop_check_ticks * 1000) / hz;
+	poll_wait_ms = (curthread->td_stop_check_ticks * 1000) / hz;
 
 	for (;;) {
 		done = if_netmap_wait_for_avail(sc, &sc->rx_avail, UHI_POLLIN, if_netmap_rxavail, poll_wait_ms);

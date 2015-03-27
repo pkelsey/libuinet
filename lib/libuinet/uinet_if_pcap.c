@@ -218,7 +218,7 @@ if_pcap_send(void *arg)
 	unsigned int pktlen;
 
 	if (sc->uif->tx_cpu >= 0)
-		sched_bind(sc->tx_thread, sc->uif->tx_cpu);
+		sched_bind(curthread, sc->uif->tx_cpu);
 
 	while (1) {
 		mtx_lock(&sc->tx_lock);
@@ -332,7 +332,7 @@ if_pcap_receive(void *arg)
 	int result;
 
 	if (sc->uif->rx_cpu >= 0)
-		sched_bind(sc->rx_thread, sc->uif->rx_cpu);
+		sched_bind(curthread, sc->uif->rx_cpu);
 
 	if (sc->isfile)
 		pause("pcaprx", hz);
