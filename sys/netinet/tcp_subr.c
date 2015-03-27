@@ -1172,7 +1172,7 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 	xig.xig_len = sizeof xig;
 	xig.xig_count = n + m;
 	xig.xig_gen = gencnt;
-	xig.xig_sogen = so_gencnt;
+	xig.xig_sogen = V_so_gencnt;
 	error = SYSCTL_OUT(req, &xig, sizeof xig);
 	if (error)
 		return (error);
@@ -1267,7 +1267,7 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 		 */
 		INP_INFO_RLOCK(&V_tcbinfo);
 		xig.xig_gen = V_tcbinfo.ipi_gencnt;
-		xig.xig_sogen = so_gencnt;
+		xig.xig_sogen = V_so_gencnt;
 		xig.xig_count = V_tcbinfo.ipi_count + pcb_count;
 		INP_INFO_RUNLOCK(&V_tcbinfo);
 		error = SYSCTL_OUT(req, &xig, sizeof xig);
@@ -1276,7 +1276,7 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_net_inet_tcp, TCPCTL_PCBLIST, pcblist,
+SYSCTL_VNET_PROC(_net_inet_tcp, TCPCTL_PCBLIST, pcblist,
     CTLTYPE_OPAQUE | CTLFLAG_RD, NULL, 0,
     tcp_pcblist, "S,xtcpcb", "List of active TCP connections");
 

@@ -142,12 +142,12 @@ sblock(struct sockbuf *sb, int flags)
 	if (flags & SBL_WAIT) {
 		if ((sb->sb_flags & SB_NOINTR) ||
 		    (flags & SBL_NOINTR)) {
-			sx_xlock(&sb->sb_sx);
+			VNET_SX_XLOCK(&sb->sb_sx);
 			return (0);
 		}
-		return (sx_xlock_sig(&sb->sb_sx));
+		return (VNET_SX_XLOCK_SIG(&sb->sb_sx));
 	} else {
-		if (sx_try_xlock(&sb->sb_sx) == 0)
+		if (VNET_SX_TRY_XLOCK(&sb->sb_sx) == 0)
 			return (EWOULDBLOCK);
 		return (0);
 	}
@@ -157,7 +157,7 @@ void
 sbunlock(struct sockbuf *sb)
 {
 
-	sx_xunlock(&sb->sb_sx);
+	VNET_SX_XUNLOCK(&sb->sb_sx);
 }
 
 /*

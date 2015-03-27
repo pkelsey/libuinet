@@ -127,15 +127,20 @@ soo_ioctl(struct file *fp, u_long cmd, void *data, struct ucred *active_cred,
 
 	switch (cmd) {
 	case FIONBIO:
+	{
+		CURVNET_SET(so->so_vnet);
 		SOCK_LOCK(so);
 		if (*(int *)data)
 			so->so_state |= SS_NBIO;
 		else
 			so->so_state &= ~SS_NBIO;
 		SOCK_UNLOCK(so);
+		CURVNET_RESTORE();
 		break;
-
+	}
 	case FIOASYNC:
+	{
+		CURVNET_SET(so->so_vnet);
 		/*
 		 * XXXRW: This code separately acquires SOCK_LOCK(so) and
 		 * SOCKBUF_LOCK(&so->so_rcv) even though they are the same
@@ -163,8 +168,9 @@ soo_ioctl(struct file *fp, u_long cmd, void *data, struct ucred *active_cred,
 			so->so_snd.sb_flags &= ~SB_ASYNC;
 			SOCKBUF_UNLOCK(&so->so_snd);
 		}
+		CURVNET_RESTORE();
 		break;
-
+	}
 	case FIONREAD:
 		/* Unlocked read. */
 		*(int *)data = so->so_rcv.sb_cc;
@@ -261,12 +267,14 @@ soo_stat(struct file *fp, struct stat *ub, struct ucred *active_cred,
 	 * If SBS_CANTRCVMORE is set, but there's still data left in the
 	 * receive buffer, the socket is still readable.
 	 */
+	CURVNET_SET(so->so_vnet);
 	SOCKBUF_LOCK(&so->so_rcv);
 	if ((so->so_rcv.sb_state & SBS_CANTRCVMORE) == 0 ||
 	    so->so_rcv.sb_cc != 0)
 		ub->st_mode |= S_IRUSR | S_IRGRP | S_IROTH;
 	ub->st_size = so->so_rcv.sb_cc - so->so_rcv.sb_ctl;
 	SOCKBUF_UNLOCK(&so->so_rcv);
+	CURVNET_RESTORE();
 	/* Unlocked read. */
 	if ((so->so_snd.sb_state & SBS_CANTSENDMORE) == 0)
 		ub->st_mode |= S_IWUSR | S_IWGRP | S_IWOTH;

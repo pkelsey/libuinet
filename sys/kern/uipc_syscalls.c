@@ -364,6 +364,7 @@ kern_accept(struct thread *td, int s, struct sockaddr **name,
 	error = getsock_cap(fdp, s, CAP_ACCEPT, &headfp, &fflag);
 	if (error)
 		return (error);
+	CURVNET_SET(head->so_vnet);
 	head = headfp->f_data;
 	if ((head->so_options & SO_ACCEPTCONN) == 0) {
 		error = EINVAL;
@@ -491,6 +492,7 @@ done:
 	if (nfp != NULL)
 		fdrop(nfp, td);
 	fdrop(headfp, td);
+	CURVNET_RESTORE();
 	return (error);
 }
 
@@ -573,6 +575,7 @@ kern_connect(td, fd, sa)
 		error = EINPROGRESS;
 		goto done1;
 	}
+	CURVNET_SET(so->so_vnet);
 	SOCK_LOCK(so);
 	while ((so->so_state & SS_ISCONNECTING) && so->so_error == 0) {
 		error = msleep(&so->so_timeo, SOCK_MTX(so), PSOCK | PCATCH,
@@ -588,6 +591,7 @@ kern_connect(td, fd, sa)
 		so->so_error = 0;
 	}
 	SOCK_UNLOCK(so);
+	CURVNET_RESTORE();
 bad:
 	if (!interrupted)
 		so->so_state &= ~SS_ISCONNECTING;
@@ -1847,7 +1851,7 @@ kern_sendfile(struct thread *td, struct sendfile_args *uap,
 	 */
 	AUDIT_ARG_FD(uap->fd);
 	if ((error = fgetvp_read(td, uap->fd, CAP_READ, &vp)) != 0)
-		goto out;
+		goto early_out;
 	vfslocked = VFS_LOCK_GIANT(vp->v_mount);
 	vn_lock(vp, LK_SHARED | LK_RETRY);
 	if (vp->v_type == VREG) {
@@ -1873,11 +1877,11 @@ kern_sendfile(struct thread *td, struct sendfile_args *uap,
 	VFS_UNLOCK_GIANT(vfslocked);
 	if (obj == NULL) {
 		error = EINVAL;
-		goto out;
+		goto early_out;
 	}
 	if (uap->offset < 0) {
 		error = EINVAL;
-		goto out;
+		goto early_out;
 	}
 
 	/*
@@ -1886,8 +1890,9 @@ kern_sendfile(struct thread *td, struct sendfile_args *uap,
 	 */
 	if ((error = getsock_cap(td->td_proc->p_fd, uap->s, CAP_WRITE,
 	    &sock_fp, NULL)) != 0)
-		goto out;
+		goto early_out;
 	so = sock_fp->f_data;
+	CURVNET_SET(so->so_vnet);
 	if (so->so_type != SOCK_STREAM) {
 		error = EINVAL;
 		goto out;
@@ -2213,11 +2218,9 @@ retry_space:
 				goto done;
 			}
 			SOCKBUF_UNLOCK(&so->so_snd);
-			CURVNET_SET(so->so_vnet);
 			/* Avoid error aliasing. */
 			err = (*so->so_proto->pr_usrreqs->pru_send)
 				    (so, 0, m, NULL, NULL, td);
-			CURVNET_RESTORE();
 			if (err == 0) {
 				/*
 				 * We need two counters to get the
@@ -2260,6 +2263,8 @@ retry_space:
 done:
 	sbunlock(&so->so_snd);
 out:
+	CURVNET_RESTORE();
+early_out:
 	/*
 	 * If there was no error we have to clear td->td_retval[0]
 	 * because it may have been set by writev.

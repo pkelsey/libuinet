@@ -36,6 +36,9 @@
 #include <sys/_lock.h>
 #include <sys/_mutex.h>
 #include <sys/_sx.h>
+#ifdef _KERNEL
+#include <net/vnet.h>
+#endif
 
 #define	SB_MAX		(2*1024*1024)	/* default for max chars in sockbuf */
 
@@ -110,14 +113,14 @@ struct	sockbuf {
  * buffer.
  */
 #define	SOCKBUF_MTX(_sb)		(&(_sb)->sb_mtx)
-#define	SOCKBUF_LOCK_INIT(_sb, _name) \
-	mtx_init(SOCKBUF_MTX(_sb), _name, NULL, MTX_DEF)
-#define	SOCKBUF_LOCK_DESTROY(_sb)	mtx_destroy(SOCKBUF_MTX(_sb))
-#define	SOCKBUF_LOCK(_sb)		mtx_lock(SOCKBUF_MTX(_sb))
-#define	SOCKBUF_OWNED(_sb)		mtx_owned(SOCKBUF_MTX(_sb))
-#define	SOCKBUF_UNLOCK(_sb)		mtx_unlock(SOCKBUF_MTX(_sb))
-#define	SOCKBUF_LOCK_ASSERT(_sb)	mtx_assert(SOCKBUF_MTX(_sb), MA_OWNED)
-#define	SOCKBUF_UNLOCK_ASSERT(_sb)	mtx_assert(SOCKBUF_MTX(_sb), MA_NOTOWNED)
+#define	SOCKBUF_LOCK_INIT(_sb, _name)				\
+	VNET_MTX_INIT(SOCKBUF_MTX(_sb), _name, NULL, MTX_DEF)
+#define	SOCKBUF_LOCK_DESTROY(_sb)	VNET_MTX_DESTROY(SOCKBUF_MTX(_sb))
+#define	SOCKBUF_LOCK(_sb)		VNET_MTX_LOCK(SOCKBUF_MTX(_sb))
+#define	SOCKBUF_OWNED(_sb)		VNET_MTX_OWNED(SOCKBUF_MTX(_sb))
+#define	SOCKBUF_UNLOCK(_sb)		VNET_MTX_UNLOCK(SOCKBUF_MTX(_sb))
+#define	SOCKBUF_LOCK_ASSERT(_sb)	VNET_MTX_ASSERT(SOCKBUF_MTX(_sb), MA_OWNED)
+#define	SOCKBUF_UNLOCK_ASSERT(_sb)	VNET_MTX_ASSERT(SOCKBUF_MTX(_sb), MA_NOTOWNED)
 
 void	sbappend(struct sockbuf *sb, struct mbuf *m);
 void	sbappend_locked(struct sockbuf *sb, struct mbuf *m);

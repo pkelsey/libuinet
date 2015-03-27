@@ -109,6 +109,7 @@ struct vnet {
 #include <sys/proc.h>			/* for struct thread */
 #include <sys/rwlock.h>
 #include <sys/sx.h>
+#include <sys/sysctl.h>
 
 /*
  * Location of the kernel's 'set_vnet' linker set.
@@ -617,25 +618,33 @@ struct vnet_callout {
 void	vnet_sts_events_process(struct vnet *vnet);
 
 
-#define VNET_MTX_INIT(m, n, t, o)	(VNET_IS_STS() ? (void)0 : mtx_init(m, n, t, o)) 
-#define VNET_MTX_DESTROY(m)		(VNET_IS_STS() ? (void)0 : mtx_destroy(m)) 
-#define VNET_MTX_LOCK(m)		(VNET_IS_STS() ? (void)0 : mtx_lock(m)) 
-#define VNET_MTX_TRYLOCK(m)		(VNET_IS_STS() ?       1 : mtx_trylock(m)) 
-#define VNET_MTX_UNLOCK(m)		(VNET_IS_STS() ? (void)0 : mtx_unlock(m)) 
-#define VNET_MTX_ASSERT(m, a)		(VNET_IS_STS() ? (void)0 : mtx_assert(m, a)) 
+#define VNET_MTX_INIT(m, n, t, o)	(VNET_IS_STS() ? (void)0 : mtx_init(m, n, t, o))
+#define VNET_MTX_DESTROY(m)		(VNET_IS_STS() ? (void)0 : mtx_destroy(m))
+#define VNET_MTX_LOCK(m)		(VNET_IS_STS() ? (void)0 : mtx_lock(m))
+#define VNET_MTX_TRYLOCK(m)		(VNET_IS_STS() ?       1 : mtx_trylock(m))
+#define VNET_MTX_UNLOCK(m)		(VNET_IS_STS() ? (void)0 : mtx_unlock(m))
+#define VNET_MTX_OWNED(m)		(VNET_IS_STS() ? (void)0 : mtx_owned(m))
+#define VNET_MTX_ASSERT(m, a)		(VNET_IS_STS() ? (void)0 : mtx_assert(m, a))
 
-#define VNET_RWLOCK_INIT(l, n, o) 	(VNET_IS_STS() ? (void)0 : rw_init_flags(l, n, o)) 
-#define VNET_RWLOCK_DESTROY(l)		(VNET_IS_STS() ? (void)0 : rw_destroy(l))
-#define VNET_RWLOCK_RLOCK(l) 		(VNET_IS_STS() ? (void)0 : rw_rlock(l))
-#define VNET_RWLOCK_WLOCK(l) 		(VNET_IS_STS() ? (void)0 : rw_wlock(l))
-#define VNET_RWLOCK_TRY_RLOCK(l)	(VNET_IS_STS() ?       1 : rw_try_rlock(l))
-#define VNET_RWLOCK_TRY_WLOCK(l)	(VNET_IS_STS() ?       1 : rw_try_wlock(l))
-#define VNET_RWLOCK_RUNLOCK(l) 		(VNET_IS_STS() ? (void)0 : rw_runlock(l))
-#define VNET_RWLOCK_WUNLOCK(l) 		(VNET_IS_STS() ? (void)0 : rw_wunlock(l))
-#define VNET_RWLOCK_TRY_UPGRADE(l)	(VNET_IS_STS() ?       1 : rw_try_upgrade(l))
-#define VNET_RWLOCK_DOWNGRADE(l)	(VNET_IS_STS() ? (void)0 : rw_downgrade(l))
-#define VNET_RWLOCK_WLOCKED(l) 		(VNET_IS_STS() ?       1 : rw_wowned(l))
-#define VNET_RWLOCK_ASSERT(l, a)	(VNET_IS_STS() ? (void)0 : rw_assert(l, a))
+#define VNET_RWLOCK_INIT(r, n, o) 	(VNET_IS_STS() ? (void)0 : rw_init_flags(r, n, o)) 
+#define VNET_RWLOCK_DESTROY(r)		(VNET_IS_STS() ? (void)0 : rw_destroy(r))
+#define VNET_RWLOCK_RLOCK(r) 		(VNET_IS_STS() ? (void)0 : rw_rlock(r))
+#define VNET_RWLOCK_WLOCK(r) 		(VNET_IS_STS() ? (void)0 : rw_wlock(r))
+#define VNET_RWLOCK_TRY_RLOCK(r)	(VNET_IS_STS() ?       1 : rw_try_rlock(r))
+#define VNET_RWLOCK_TRY_WLOCK(r)	(VNET_IS_STS() ?       1 : rw_try_wlock(r))
+#define VNET_RWLOCK_RUNLOCK(r) 		(VNET_IS_STS() ? (void)0 : rw_runlock(r))
+#define VNET_RWLOCK_WUNLOCK(r) 		(VNET_IS_STS() ? (void)0 : rw_wunlock(r))
+#define VNET_RWLOCK_TRY_UPGRADE(r)	(VNET_IS_STS() ?       1 : rw_try_upgrade(r))
+#define VNET_RWLOCK_DOWNGRADE(r)	(VNET_IS_STS() ? (void)0 : rw_downgrade(r))
+#define VNET_RWLOCK_WLOCKED(r) 		(VNET_IS_STS() ?       1 : rw_wowned(r))
+#define VNET_RWLOCK_ASSERT(r, a)	(VNET_IS_STS() ? (void)0 : rw_assert(r, a))
+
+#define VNET_SX_INIT(s, n, o)		(VNET_IS_STS() ? (void)0 : sx_init_flags(s, n, o))
+#define VNET_SX_DESTROY(s)		(VNET_IS_STS() ? (void)0 : sx_destroy(s))
+#define VNET_SX_XLOCK(s)		(VNET_IS_STS() ? (void)0 : sx_xlock(s))
+#define VNET_SX_XLOCK_SIG(s)		(VNET_IS_STS() ?       0 : sx_xlock_sig(s))
+#define VNET_SX_TRY_XLOCK(s)		(VNET_IS_STS() ?       1 : sx_try_xlock(s))
+#define VNET_SX_XUNLOCK(s)		(VNET_IS_STS() ? (void)0 : sx_xunlock(s))
 
 #else /* !VIMAGE || !(VIMAGE_STS || VIMAGE_STS_ONLY) */
 
@@ -684,20 +693,28 @@ void	vnet_sts_events_process(struct vnet *vnet);
 #define VNET_MTX_LOCK(m)		mtx_lock(m) 
 #define VNET_MTX_TRYLOCK(m)		mtx_trylock(m) 
 #define VNET_MTX_UNLOCK(m)		mtx_unlock(m) 
+#define VNET_MTX_OWNED(m)		mtx_owned(m) 
 #define VNET_MTX_ASSERT(m, a)		mtx_assert(m, a) 
 
-#define VNET_RWLOCK_INIT(l, n, o) 	rw_init_flags(l, n, o) 
-#define VNET_RWLOCK_DESTROY(l)		rw_destroy(l)
-#define VNET_RWLOCK_RLOCK(l) 		rw_rlock(l)
-#define VNET_RWLOCK_WLOCK(l) 		rw_wlock(l)
-#define VNET_RWLOCK_TRY_RLOCK(l)	rw_try_rlock(l)
-#define VNET_RWLOCK_TRY_WLOCK(l)	rw_try_wlock(l)
-#define VNET_RWLOCK_RUNLOCK(l) 		rw_runlock(l)
-#define VNET_RWLOCK_WUNLOCK(l) 		rw_wunlock(l)
-#define VNET_RWLOCK_TRY_UPGRADE(l)	rw_try_upgrade(l)
-#define VNET_RWLOCK_DOWNGRADE(l)	rw_downgrade(l)
-#define VNET_RWLOCK_WLOCKED(l) 		rw_wowned(l)
-#define VNET_RWLOCK_ASSERT(l, a)	rw_assert(l, a)
+#define VNET_RWLOCK_INIT(r, n, o) 	rw_init_flags(r, n, o) 
+#define VNET_RWLOCK_DESTROY(r)		rw_destroy(r)
+#define VNET_RWLOCK_RLOCK(r) 		rw_rlock(r)
+#define VNET_RWLOCK_WLOCK(r) 		rw_wlock(r)
+#define VNET_RWLOCK_TRY_RLOCK(r)	rw_try_rlock(r)
+#define VNET_RWLOCK_TRY_WLOCK(r)	rw_try_wlock(r)
+#define VNET_RWLOCK_RUNLOCK(r) 		rw_runlock(r)
+#define VNET_RWLOCK_WUNLOCK(r) 		rw_wunlock(r)
+#define VNET_RWLOCK_TRY_UPGRADE(r)	rw_try_upgrade(r)
+#define VNET_RWLOCK_DOWNGRADE(r)	rw_downgrade(r)
+#define VNET_RWLOCK_WLOCKED(r) 		rw_wowned(r)
+#define VNET_RWLOCK_ASSERT(r, a)	rw_assert(r, a)
+
+#define VNET_SX_INIT(s, n, o)		sx_init_flags(s, n, o)
+#define VNET_SX_DESTROY(s)		sx_destroy(s)
+#define VNET_SX_XLOCK(s)		sx_xlock(s)
+#define VNET_SX_XLOCK_SIG(s)		sx_xlock_sig(s)
+#define VNET_SX_TRY_XLOCK(s)		sx_try_xlock(s)
+#define VNET_SX_XUNLOCK(s)		sx_xunlock(s)
 
 #endif /* VIMAGE && (VIMAGE_STS || VIMAGE_STS_ONLY) */
 

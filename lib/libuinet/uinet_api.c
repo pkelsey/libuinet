@@ -539,7 +539,7 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 		*nam = NULL;
 
 	*aso = NULL;
-
+	CURVNET_SET(head->so_vnet);
 	ACCEPT_LOCK();
 	if ((head->so_state & SS_NBIO) && TAILQ_EMPTY(&head->so_comp)) {
 		if (head->so_upcallprep.soup_accept != NULL) {
@@ -556,7 +556,7 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 			head->so_error = ECONNABORTED;
 			break;
 		}
-		error = msleep(&head->so_timeo, &accept_mtx, PSOCK | PCATCH,
+		error = msleep(&head->so_timeo, &V_accept_mtx, PSOCK | PCATCH,
 		    "accept", 0);
 		if (error) {
 			ACCEPT_UNLOCK();
@@ -610,7 +610,7 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 			soclose(peer_so);
 #endif
 		soclose(so);
-		return (error);
+		goto noconnection;
 	}
 
 	if (nam) {
@@ -624,6 +624,7 @@ noconnection:
 	if (sa)
 		free(sa, M_SONAME);
 
+	CURVNET_RESTORE();
 	return (error);
 }
 
@@ -667,6 +668,7 @@ uinet_soconnect(struct uinet_socket *uso, struct uinet_sockaddr *nam)
 		error = EINPROGRESS;
 		goto done1;
 	}
+	CURVNET_SET(so->so_vnet);
 	SOCK_LOCK(so);
 	while ((so->so_state & SS_ISCONNECTING) && so->so_error == 0) {
 		error = msleep(&so->so_timeo, SOCK_MTX(so), PSOCK | PCATCH,
@@ -682,6 +684,7 @@ uinet_soconnect(struct uinet_socket *uso, struct uinet_sockaddr *nam)
 		so->so_error = 0;
 	}
 	SOCK_UNLOCK(so);
+	CURVNET_RESTORE();
 bad:
 	if (!interrupted)
 		so->so_state &= ~SS_ISCONNECTING;
@@ -707,12 +710,14 @@ uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc)
 	struct socket *so_internal = (struct socket *)so;
 	struct inpcb *inp = sotoinpcb(so_internal);
 
+	CURVNET_SET(so_internal->so_vnet);
 	/* XXX do we really need the INFO lock here? */
 	INP_INFO_RLOCK(inp->inp_pcbinfo);
 	INP_RLOCK(inp);
 	memcpy(inc, &sotoinpcb(so_internal)->inp_inc, sizeof(struct uinet_in_conninfo));
 	INP_RUNLOCK(inp);
 	INP_INFO_RUNLOCK(inp->inp_pcbinfo);
+	CURVNET_RESTORE();
 }
 
 
@@ -781,6 +786,7 @@ uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall)
 	unsigned int avail; 
 	int canread;
 
+	CURVNET_SET(so_internal->so_vnet);
 	if (so_internal->so_options & SO_ACCEPTCONN) {
 		if (so_internal->so_error)
 			canread = -1;
@@ -805,6 +811,7 @@ uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall)
 		if (!in_upcall)
 			SOCKBUF_UNLOCK(&so_internal->so_rcv);
 	}
+	CURVNET_RESTORE();
 
 	return canread;
 }
@@ -817,6 +824,7 @@ uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall)
 	long space;
 	int canwrite;
 
+	CURVNET_SET(so_internal->so_vnet);
 	if (so_internal->so_options & SO_ACCEPTCONN) {
 		canwrite = 0;
 	} else {
@@ -842,6 +850,7 @@ uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall)
 		if (!in_upcall)
 			SOCKBUF_UNLOCK(&so_internal->so_snd);
 	}
+	CURVNET_RESTORE();
 
 	return canwrite;
 }
@@ -851,8 +860,13 @@ int
 uinet_soallocuserctx(struct uinet_socket *so)
 {
 	struct socket *so_internal = (struct socket *)so;
+	int error;
 
-	return souserctx_alloc(so_internal);
+	CURVNET_SET(so_internal->so_vnet);
+	error = souserctx_alloc(so_internal);
+	CURVNET_RESTORE();
+
+	return (error);
 }
 
 
@@ -1050,7 +1064,9 @@ uinet_soupcall_lock(struct uinet_socket *so, int which)
 		return;
 	}
 	
+	CURVNET_SET(so_internal->so_vnet);
 	SOCKBUF_LOCK(sb);
+	CURVNET_RESTORE();
 }
 
 
@@ -1071,7 +1087,9 @@ uinet_soupcall_unlock(struct uinet_socket *so, int which)
 		return;
 	}
 	
+	CURVNET_SET(so_internal->so_vnet);
 	SOCKBUF_UNLOCK(sb);
+	CURVNET_RESTORE();
 }
 
 
@@ -1093,9 +1111,11 @@ uinet_soupcall_set(struct uinet_socket *so, int which,
 		return;
 	}
 
+	CURVNET_SET(so_internal->so_vnet);
 	SOCKBUF_LOCK(sb);
 	uinet_soupcall_set_locked(so, which, func, arg);
 	SOCKBUF_UNLOCK(sb);
+	CURVNET_RESTORE();
 }
 
 
@@ -1125,10 +1145,11 @@ uinet_soupcall_clear(struct uinet_socket *so, int which)
 		return;
 	}
 
+	CURVNET_SET(so_internal->so_vnet);
 	SOCKBUF_LOCK(sb);
 	uinet_soupcall_clear_locked(so, which);
 	SOCKBUF_UNLOCK(sb);
-
+	CURVNET_RESTORE();
 }
 
 
