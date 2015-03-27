@@ -945,7 +945,7 @@ int main (int argc, char **argv)
 	}
 
 	struct uinet_global_cfg cfg;
-	uinet_default_cfg(&cfg);
+	uinet_default_cfg(&cfg, UINET_GLOBAL_CFG_MEDIUM);
 	uinet_init(&cfg, NULL);
 	uinet_install_sighandlers();
 
