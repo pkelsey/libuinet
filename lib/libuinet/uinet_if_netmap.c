@@ -1275,7 +1275,7 @@ if_netmap_send(void *arg)
 		/* release inject ring descriptors we've processed */
 		txr->take = cur_inject_take;
 		while ((sc->tx_pkts_to_send == 0) && !done)
-			if (EWOULDBLOCK == cv_timedwait(&sc->tx_cv, &sc->tx_lock, sc->tx_thread->td_stop_check_ticks))
+			if (EWOULDBLOCK == cv_timedwait(&sc->tx_cv, &sc->tx_lock, curthread->td_stop_check_ticks))
 				done = kthread_stop_check();
 		sc->tx_pkts_to_send = 0;
 		num_pd = uinet_pd_ring_avail(txr);

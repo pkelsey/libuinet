@@ -68,7 +68,6 @@ int
 uinet_initialize_thread(const char *name)
 {
 	struct uinet_thread *utd;
-	struct thread *td;
 	int cpuid;
 
 	/*
@@ -88,24 +87,23 @@ uinet_initialize_thread(const char *name)
 
 	utd = uhi_tls_get(kthread_tls_key);
 	if (NULL == utd) {
+		/* This thread has not been initialized */
 		utd = uinet_thread_alloc(NULL);
 		if (NULL == utd)
 			return (ENOMEM);
-		
-		td = utd->td;
-
-		KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_initialize_thread: can't safely store host thread id"));
-		td->td_wchan = (void *)uhi_thread_self();
 
 		uhi_tls_set(kthread_tls_key, utd);
-
 		uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
 	} else {
-		td = utd->td;
+		/*
+		 * If already initialized, update current cpu so
+		 * uinet_initialize_thread() can be called on an already
+		 * initialized thread after changing the cpu pin state to
+		 * update the cached current cpu.
+		 */
+		cpuid = uhi_thread_bound_cpu();
+		utd->td.td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
 	}
-
-	cpuid = uhi_thread_bound_cpu();
-	td->td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
 
 	return (0);
 }

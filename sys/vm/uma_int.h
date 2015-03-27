@@ -404,7 +404,11 @@ void uma_large_free(uma_slab_t slab);
 
 #ifdef UINET
 
+#ifdef HAS_NATIVE_TLS
+#define CACHE_ENTER(zone) &curthread_uma_tls.ut_caches[zone->uz_cacheidx]
+#else
 #define CACHE_ENTER(zone) &((struct uma_tls *)uhi_tls_get(uma_tls_key))->ut_caches[zone->uz_cacheidx]
+#endif
 #define CACHE_EXIT(zone)
 #define CACHE_FOREACH(zone, cache)					\
 	for (uma_tls_t tls = TAILQ_FIRST(&uma_tls_list);		\

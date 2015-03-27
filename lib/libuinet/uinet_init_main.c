@@ -78,6 +78,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/init_main.c 237725 2012-06-28 19:34:2
 #include <sys/malloc.h>
 #include <sys/conf.h>
 #include <sys/cpuset.h>
+#ifdef UINET
+#include <sys/smp.h>
+#endif
 
 #include <machine/cpu.h>
 
@@ -108,7 +111,6 @@ static struct session session0;
 static struct pgrp pgrp0;
 #endif
 struct	proc proc0;
-struct	thread thread0 __aligned(16);
 struct	vmspace vmspace0;
 struct	proc *initproc;
 
@@ -459,7 +461,7 @@ proc0_init(void *dummy __unused)
 	td = &thread0;
 	init_param1();
 	init_param2(100000 /* XXX physpages */);
-	
+
 	/*
 	 * Initialize magic number and osrel.
 	 */
@@ -526,7 +528,12 @@ proc0_init(void *dummy __unused)
 	td->td_lend_user_pri = PRI_MAX;
 	td->td_priority = PVM;
 	td->td_base_pri = PVM;
+#ifdef UINET
+	int cpuid = uhi_thread_bound_cpu();
+	td->td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
+#else
 	td->td_oncpu = 0;
+#endif
 	td->td_flags = TDF_INMEM|TDP_KTHREAD;
 
 #ifndef UINET

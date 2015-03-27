@@ -1,7 +1,7 @@
 /*-
  * Copyright (c) 2010 Kip Macy
  * All rights reserved.
- * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,78 +49,77 @@
 #include "uinet_host_interface.h"
 
 
+struct uinet_thread_started_notice {
+	struct mtx lock;
+	struct cv cond;
+	struct uinet_thread *utd;
+};
+
+
+/*
+ * The per-thread uinet context is maintained using thread-local storage.
+ * If TLS support isn't available in the toolchain or otherwise isn't used,
+ * the uhi API is used (pthreads underneath).  Even if toolchain TLS support
+ * is used, the uhi API is still used during thread initialization and
+ * destruction.
+ */
+
+#ifdef HAS_NATIVE_TLS
+__thread struct uinet_thread uinet_curthread;
+#endif
+
 void uinet_init_thread0(void);
+void uinet_thread_init(void);
 
-
-static struct uinet_thread uinet_thread0;
+struct uinet_thread *uinet_thread0;
 uhi_tls_key_t kthread_tls_key;
 
-struct uinet_thread *
-uinet_thread_alloc(struct proc *p)
+/*
+ * This routine runs in the context of a newly created thread after all
+ * other initialization has occurred and just before the thread entry point
+ * is invoked.
+ */
+static void
+uinet_thread_start_hook(void *arg)
 {
-	struct uinet_thread *utd = NULL;
-	struct thread *td = NULL;
-	struct mtx *lock = NULL;
-	struct cv *cond = NULL;
+	struct uinet_thread *utd;
+	struct thread *td;
+	int is_thread_zero;
+	int cpuid;
 
-	if (NULL == p) {
-		p = &proc0;
+	utd = uhi_tls_get(kthread_tls_key);
+	is_thread_zero = (utd == uinet_thread0);
+
+#ifdef HAS_NATIVE_TLS
+	/*
+	 * Dispose of the allocated struct uinet_thread and replace with the
+	 * native TLS version.
+	 */
+	/* td_proc is set in uinet_thread_alloc and thus needs to be copied. */
+	uinet_curthread.td.td_proc = utd->td.td_proc;
+	uhi_tls_set(kthread_tls_key, &uinet_curthread);
+	free(utd, M_DEVBUF);
+	utd = &uinet_curthread;
+#endif
+	td = &utd->td;
+	cv_init(&utd->cond, "thread_sleepq");
+	mtx_init(&utd->lock, "thread_lock", NULL, MTX_DEF);
+	td->td_lock = &utd->lock;
+	td->td_sleepqueue = (struct sleepqueue *)(&utd->cond);
+ 	td->td_last_stop_check = ticks;
+	td->td_stop_check_ticks = hz / 2;
+	td->td_stop_req = NULL;
+	td->td_pflags |= TDP_KTHREAD;
+
+	if (!is_thread_zero) {
+		/* for thread0, the ucred is initialized in proc0_init */
+		td->td_ucred = crhold(td->td_proc->p_ucred);
 	}
 
-	utd = malloc(sizeof(struct uinet_thread), M_DEVBUF, M_ZERO | M_WAITOK);
-	if (NULL == utd)
-		goto error;
-
-	td = malloc(sizeof(struct thread), M_DEVBUF, M_ZERO | M_WAITOK);
-	if (NULL == td)
-		goto error;
-
-	lock = malloc(sizeof(struct mtx), M_DEVBUF, M_WAITOK);
-	if (NULL == lock)
-		goto error;
-
-	cond = malloc(sizeof(struct cv), M_DEVBUF, M_WAITOK);
-	if (NULL == cond)
-		goto error;
-
-	cv_init(cond, "thread_sleepq");
-	mtx_init(lock, "thread_lock", NULL, MTX_DEF);
-	td->td_lock = lock;
-	td->td_sleepqueue = (struct sleepqueue *)cond;
-	td->td_ucred = crhold(p->p_ucred);
-	td->td_proc = p;
-	td->td_pflags |= TDP_KTHREAD;
-	td->td_oncpu = 0;
-	td->td_stop_req = NULL;
-	td->td_last_stop_check = ticks;
-	td->td_stop_check_ticks = hz / 2;
-
-	utd->td = td;
-
-	return (utd);
-
-error:
-	if (utd) free(utd, M_DEVBUF);
-	if (td) free(td, M_DEVBUF);
-	if (lock) free(lock, M_DEVBUF);
-	if (cond) free(cond, M_DEVBUF);
-
-	return (NULL);
-}
-
-
-void
-uinet_thread_free(struct uinet_thread *utd)
-{
-	struct thread *td = utd->td;
-
-	crfree(td->td_proc->p_ucred);
-	mtx_destroy(td->td_lock);
-	free(td->td_lock, M_DEVBUF);
-	cv_destroy((struct cv *)td->td_sleepqueue);
-	free(td->td_sleepqueue, M_DEVBUF);
-	free(td, M_DEVBUF);
-	free(utd, M_DEVBUF);
+	KASSERT(sizeof(curthread->td_wchan) >= sizeof(uhi_thread_t), ("kthread_add: can't safely store host thread id"));
+	td->td_wchan = (void *)uhi_thread_self(); /* safety of this cast checked by the KASSERT above */
+	cpuid = uhi_thread_bound_cpu();
+	td->td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
 }
 
 
@@ -129,8 +128,67 @@ tls_destructor(void *tls_data)
 {
 	struct uinet_thread *utd = tls_data;
 
-	if (utd != &uinet_thread0)
-		uinet_thread_free(utd);
+	uinet_thread_free(utd);
+}
+
+
+/*
+ * Initialize the uinet kthread shim facility.
+ */
+void
+uinet_thread_init(void)
+{
+	if (uhi_tls_key_create(&kthread_tls_key, tls_destructor))
+		panic("Could not create kthread subsystem tls key");
+
+	uhi_thread_hook_add(UHI_THREAD_HOOK_START, uinet_thread_start_hook, NULL);
+}
+
+
+
+struct uinet_thread *
+uinet_thread_alloc(struct proc *p)
+{
+	struct uinet_thread *utd;
+
+	if (NULL == p) {
+		p = &proc0;
+	}
+
+	utd = malloc(sizeof(struct uinet_thread), M_DEVBUF, M_ZERO | M_WAITOK);
+	if (NULL == utd)
+		return(NULL);
+	utd->td.td_proc = p;
+
+	return (utd);
+}
+
+
+void
+uinet_thread_free(struct uinet_thread *utd)
+{
+	struct thread *td = &utd->td;
+
+	crfree(td->td_proc->p_ucred);
+	mtx_destroy(&utd->lock);
+	cv_destroy(&utd->cond);
+
+#ifndef HAS_NATIVE_TLS
+	free(utd, M_DEVBUF);
+#endif
+}
+
+
+
+static void
+notify_started(void *arg)
+{
+	struct uinet_thread_started_notice *n = arg;
+
+	mtx_lock(&n->lock);
+	n->utd = uhi_tls_get(kthread_tls_key);
+	cv_signal(&n->cond);
+	mtx_unlock(&n->lock);
 }
 
 
@@ -147,29 +205,26 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 	uhi_thread_t host_thread;
 	struct uhi_thread_start_args *tsa;
 	struct uinet_thread *utd;
-	struct thread *td;
 	va_list ap;
+	struct uinet_thread_started_notice notice;
 
 	utd = uinet_thread_alloc(p);
 	if (NULL == utd)
 		return (ENOMEM);
 
-	td = utd->td;
-
-	if (tdp)
-		*tdp = td;
+	mtx_init(&notice.lock, "notice_lock", NULL, MTX_DEF);
+	cv_init(&notice.cond, "notice_cv");
+	notice.utd = 0;
 
 	tsa = malloc(sizeof(struct uhi_thread_start_args), M_DEVBUF, M_WAITOK);
 	tsa->start_routine = start_routine;
 	tsa->start_routine_arg = arg;
 	tsa->end_routine = NULL;
+ 	tsa->start_notify_routine = notify_started;
+	tsa->start_notify_routine_arg = &notice;
+	tsa->set_tls = 1;
 	tsa->tls_key = kthread_tls_key;
 	tsa->tls_data = utd;
-
-	/* Have uhi_thread_create() store the host thread ID in td_wchan */
-	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("kthread_add: can't safely store host thread id"));
-	tsa->host_thread_id = (uhi_thread_t *)&td->td_wchan;
-	tsa->oncpu = &td->td_oncpu;
 
 	va_start(ap, str);
 	vsnprintf(tsa->name, sizeof(tsa->name), str, ap);
@@ -177,11 +232,17 @@ kthread_add(void (*start_routine)(void *), void *arg, struct proc *p,
 
 	error = uhi_thread_create(&host_thread, tsa, pages * PAGE_SIZE); 
 
-	/*
-	 * Ensure tc_wchan is valid before kthread_add returns, in case the
-	 * thread has not started yet.
-	 */
-	td->td_wchan = (void *)host_thread; /* safety of this cast checked by the KASSERT above */
+ 	mtx_lock(&notice.lock);
+	while (!notice.utd)
+		cv_wait(&notice.cond, &notice.lock);
+	mtx_unlock(&notice.lock);
+
+	mtx_destroy(&notice.lock);
+	cv_destroy(&notice.cond);
+
+	if (tdp)
+		*tdp = &notice.utd->td;
+
 	return (error);
 }
 
@@ -207,27 +268,30 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 	struct uinet_thread *utd;
 	struct thread *td;
 	va_list ap;
+	struct uinet_thread_started_notice notice;
 
 	utd = uinet_thread_alloc(*p);
 	if (NULL == utd)
 		return (ENOMEM);
 
-	td = utd->td;
+	td = &utd->td;
+	if (*p == NULL) {
+		*p = td->td_proc;
+	}
 
-	if (tdp)
-		*tdp = td;
+	mtx_init(&notice.lock, "notice_lock", NULL, MTX_DEF);
+	cv_init(&notice.cond, "notice_cv");
+	notice.utd = 0;
 
 	tsa = malloc(sizeof(struct uhi_thread_start_args), M_DEVBUF, M_WAITOK);
 	tsa->start_routine = start_routine;
 	tsa->start_routine_arg = arg;
 	tsa->end_routine = NULL;
+ 	tsa->start_notify_routine = notify_started;
+	tsa->start_notify_routine_arg = &notice;
+	tsa->set_tls = 1;
 	tsa->tls_key = kthread_tls_key;
 	tsa->tls_data = utd;
-
-	/* Have uhi_thread_create() store the host thread ID in td_wchan */
-	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("kproc_kthread_add: can't safely store host thread id"));
-	tsa->host_thread_id = (uhi_thread_t *)&td->td_wchan;
-	tsa->oncpu = &td->td_oncpu;
 
 	va_start(ap, str);
 	vsnprintf(tsa->name, sizeof(tsa->name), str, ap);
@@ -235,11 +299,17 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 
 	error = uhi_thread_create(&host_thread, tsa, pages * PAGE_SIZE); 
 
-	/*
-	 * Ensure tc_wchan is valid before kthread_add returns, in case the
-	 * thread has not started yet.
-	 */
-	td->td_wchan = (void *)host_thread; /* safety of this cast checked by the KASSERT above */
+ 	mtx_lock(&notice.lock);
+	while (!notice.utd)
+		cv_wait(&notice.cond, &notice.lock);
+	mtx_unlock(&notice.lock);
+
+	mtx_destroy(&notice.lock);
+	cv_destroy(&notice.cond);
+
+	if (tdp)
+		*tdp = &notice.utd->td;
+
 	return (error);
 }
 
@@ -248,24 +318,14 @@ kproc_kthread_add(void (*start_routine)(void *), void *arg,
 void
 uinet_init_thread0(void)
 {
-	struct thread *td;
-	int cpuid;
-
-	if (uhi_tls_key_create(&kthread_tls_key, tls_destructor))
-		panic("Could not create kthread subsystem tls key");
-
-	td = &thread0;
-	td->td_proc = &proc0;
-
-	KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_init_thread0: can't safely store host thread id"));
-	td->td_wchan = (void *)uhi_thread_self();
-
-	cpuid = uhi_thread_bound_cpu();
-	td->td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
-	
-	uinet_thread0.td = td;
-
-	uhi_tls_set(kthread_tls_key, &uinet_thread0);
+	uinet_thread0 = uinet_thread_alloc(&proc0);
+	uhi_tls_set(kthread_tls_key, uinet_thread0);
+	uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
+	/*
+	 * The start hook may have replaced the thread state allocated
+	 * above, so update uinet_thread0.
+	 */
+	uinet_thread0 = uhi_tls_get(kthread_tls_key);
 }
 
 

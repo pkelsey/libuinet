@@ -28,6 +28,7 @@
 #ifndef	_UINET_SYS_PCPU_H_
 #define _UINET_SYS_PCPU_H_
 
+
 #include_next <sys/pcpu.h>
 
 /*
@@ -171,12 +172,16 @@ struct pcpu *uinet_pcpu_get(void);
 
 
 #include "uinet_host_interface.h"
-#include <sys/proc.h>
 
 extern uhi_tls_key_t kthread_tls_key;
-
 #undef curthread
-#define curthread (((struct uinet_thread *)uhi_tls_get(kthread_tls_key))->td)
 
+
+#ifdef HAS_NATIVE_TLS
+extern __thread struct uinet_thread uinet_curthread;
+#define curthread ((struct thread *)(&uinet_curthread))
+#else
+#define curthread ((struct thread *)uhi_tls_get(kthread_tls_key))
+#endif
 
 #endif	/* _UINET_SYS_PCPU_H_ */

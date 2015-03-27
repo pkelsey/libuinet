@@ -532,7 +532,6 @@ pthread_start_routine(void *arg)
 {
 	struct uhi_thread_start_args *tsa = arg;
 	int error;
-	int cpuid;
 
 	/*
 	 * uinet_shutdown() waits for a message from the shutdown thread
@@ -551,9 +550,11 @@ pthread_start_routine(void *arg)
 	setitimer(ITIMER_PROF, &prof_itimer, NULL);
 #endif /* UINET_PROFILE */
 
-	error = uhi_tls_set(tsa->tls_key, tsa->tls_data);
-	if (error != 0)
-		printf("Warning: unable to set user-supplied thread-specific data (%d)\n", error);
+	if (tsa->set_tls) {
+		error = uhi_tls_set(tsa->tls_key, tsa->tls_data);
+		if (error != 0)
+			printf("Warning: unable to set user-supplied thread-specific data (%d)\n", error);
+	}
 
 	error = uhi_tls_set(uhi_thread_tls_key, tsa);
 	if (error != 0)
@@ -571,6 +572,9 @@ pthread_start_routine(void *arg)
 	uhi_thread_set_name(tsa->name);
 
 	uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
+
+	if (tsa->start_notify_routine)
+		tsa->start_notify_routine(tsa->start_notify_routine_arg);
 
 	tsa->start_routine(tsa->start_routine_arg);
 

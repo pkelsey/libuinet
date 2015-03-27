@@ -179,6 +179,7 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 	kern_timeout_callwheel_alloc(malloc(round_page((vm_offset_t)v), M_DEVBUF, M_ZERO));
         kern_timeout_callwheel_init();
 
+	uinet_thread_init();
 	uinet_init_thread0();
 
         uma_startup(malloc(boot_pages*PAGE_SIZE, M_DEVBUF, M_ZERO), boot_pages);
