@@ -206,7 +206,7 @@ cc_init(void)
 }
 
 /*
- * Returns non-zero on success, 0 on failure.
+ * Returns non-zero on failure, 0 on success.
  */
 int
 cc_deregister_algo(struct cc_algo *remove_cc)
@@ -214,6 +214,9 @@ cc_deregister_algo(struct cc_algo *remove_cc)
 	struct cc_algo *funcs, *tmpfuncs;
 	int err;
 
+#ifdef INET_NO_CC_UNLOAD
+	err = EOPNOTSUPP;
+#else
 	err = ENOENT;
 
 	/* Never allow newreno to be deregistered. */
@@ -240,6 +243,7 @@ cc_deregister_algo(struct cc_algo *remove_cc)
 		 *   TCP, we may want a more generic way to handle this step.
 		 */
 		err = tcp_ccalgounload(remove_cc);
+#endif
 
 	return (err);
 }

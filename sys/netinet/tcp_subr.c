@@ -736,12 +736,19 @@ tcp_newtcpcb(struct inpcb *inp)
 
 	/*
 	 * Use the current system default CC algorithm.
+	 *
+	 * If unloading CC algorithms is not allowed, there is no need to
+	 * obtain the list lock to read a pointer to a CC that will never
+	 * disapppear.
 	 */
+#ifndef INET_NO_CC_UNLOAD
 	CC_LIST_RLOCK();
+#endif
 	KASSERT(!STAILQ_EMPTY(&cc_list), ("cc_list is empty!"));
 	CC_ALGO(tp) = CC_DEFAULT();
+#ifndef INET_NO_CC_UNLOAD
 	CC_LIST_RUNLOCK();
-
+#endif
 	if (CC_ALGO(tp)->cb_init != NULL)
 		if (CC_ALGO(tp)->cb_init(tp->ccv) > 0) {
 			uma_zfree(V_tcpcb_zone, tm);
