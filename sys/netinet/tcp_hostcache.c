@@ -168,8 +168,8 @@ static MALLOC_DEFINE(M_HOSTCACHE, "hostcache", "TCP hostcache");
 	  (ip6)->s6_addr32[3]) &			\
 	 V_tcp_hostcache.hashmask)
 
-#define THC_LOCK(lp)		mtx_lock(lp)
-#define THC_UNLOCK(lp)		mtx_unlock(lp)
+#define THC_LOCK(lp)		VNET_MTX_LOCK(lp)
+#define THC_UNLOCK(lp)		VNET_MTX_UNLOCK(lp)
 
 void
 tcp_hc_init(void)
@@ -212,7 +212,7 @@ tcp_hc_init(void)
 	for (i = 0; i < V_tcp_hostcache.hashsize; i++) {
 		TAILQ_INIT(&V_tcp_hostcache.hashbase[i].hch_bucket);
 		V_tcp_hostcache.hashbase[i].hch_length = 0;
-		mtx_init(&V_tcp_hostcache.hashbase[i].hch_mtx, "tcp_hc_entry",
+		VNET_MTX_INIT(&V_tcp_hostcache.hashbase[i].hch_mtx, "tcp_hc_entry",
 			  NULL, MTX_DEF);
 	}
 
@@ -247,7 +247,7 @@ tcp_hc_destroy(void)
 	uma_zdestroy(V_tcp_hostcache.zone);
 
 	for (i = 0; i < V_tcp_hostcache.hashsize; i++)
-		mtx_destroy(&V_tcp_hostcache.hashbase[i].hch_mtx);
+		VNET_MTX_DESTROY(&V_tcp_hostcache.hashbase[i].hch_mtx);
 	free(V_tcp_hostcache.hashbase, M_HOSTCACHE);
 }
 #endif
