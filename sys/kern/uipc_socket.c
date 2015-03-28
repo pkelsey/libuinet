@@ -576,7 +576,8 @@ sonewconn(struct socket *head, int connstatus)
 	ACCEPT_UNLOCK();
 	if (connstatus) {
 		sorwakeup(head);
-		wakeup_one(&head->so_timeo);
+		if (!CURVNET_IS_STS())
+			wakeup_one(&head->so_timeo);
 	}
 	return (so);
 }
@@ -3298,10 +3299,11 @@ soopt_mcopyout(struct sockopt *sopt, struct mbuf *m)
 void
 sohasoutofband(struct socket *so)
 {
-
-	if (so->so_sigio != NULL)
-		pgsigio(&so->so_sigio, SIGURG, 0);
-	selwakeuppri(&so->so_rcv.sb_sel, PSOCK);
+	if (!CURVNET_IS_STS()) {
+		if (so->so_sigio != NULL)
+			pgsigio(&so->so_sigio, SIGURG, 0);
+		selwakeuppri(&so->so_rcv.sb_sel, PSOCK);
+	}
 }
 
 int
@@ -3692,6 +3694,9 @@ soisconnected(struct socket *so)
 {
 	struct socket *head;	
 	int ret;
+	int is_sts;
+
+	is_sts = CURVNET_IS_STS();
 
 restart:
 	ACCEPT_LOCK();
@@ -3710,7 +3715,8 @@ restart:
 			so->so_qstate |= SQ_COMP;
 			ACCEPT_UNLOCK();
 			sorwakeup(head);
-			wakeup_one(&head->so_timeo);
+			if (!is_sts)
+				wakeup_one(&head->so_timeo);
 		} else {
 			ACCEPT_UNLOCK();
 			soupcall_set(so, SO_RCV,
@@ -3729,7 +3735,8 @@ restart:
 	}
 	SOCK_UNLOCK(so);
 	ACCEPT_UNLOCK();
-	wakeup(&so->so_timeo);
+	if (!is_sts)
+		wakeup(&so->so_timeo);
 	sorwakeup(so);
 	sowwakeup(so);
 }
@@ -3750,7 +3757,8 @@ soisdisconnecting(struct socket *so)
 	SOCKBUF_LOCK(&so->so_snd);
 	so->so_snd.sb_state |= SBS_CANTSENDMORE;
 	sowwakeup_locked(so);
-	wakeup(&so->so_timeo);
+	if (!CURVNET_IS_STS())
+		wakeup(&so->so_timeo);
 }
 
 void
@@ -3770,7 +3778,8 @@ soisdisconnected(struct socket *so)
 	so->so_snd.sb_state |= SBS_CANTSENDMORE;
 	sbdrop_locked(&so->so_snd, so->so_snd.sb_cc);
 	sowwakeup_locked(so);
-	wakeup(&so->so_timeo);
+	if (!CURVNET_IS_STS())
+		wakeup(&so->so_timeo);
 }
 
 /*

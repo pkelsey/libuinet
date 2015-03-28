@@ -176,15 +176,20 @@ void
 sowakeup(struct socket *so, struct sockbuf *sb)
 {
 	int ret;
+	int is_sts;
 
 	SOCKBUF_LOCK_ASSERT(sb);
 
-	selwakeuppri(&sb->sb_sel, PSOCK);
+	is_sts = CURVNET_IS_STS();
+
+	if (!is_sts)
+		selwakeuppri(&sb->sb_sel, PSOCK);
 	if (!SEL_WAITING(&sb->sb_sel))
 		sb->sb_flags &= ~SB_SEL;
 	if (sb->sb_flags & SB_WAIT) {
 		sb->sb_flags &= ~SB_WAIT;
-		wakeup(&sb->sb_cc);
+		if (!is_sts)
+			wakeup(&sb->sb_cc);
 	}
 	KNOTE_LOCKED(&sb->sb_sel.si_note, 0);
 	if (sb->sb_upcall != NULL) {
