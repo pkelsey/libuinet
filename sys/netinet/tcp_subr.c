@@ -65,6 +65,10 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_subr.c 238247 2012-07-08 14:21
 #include <net/route.h>
 #include <net/if.h>
 #include <net/vnet.h>
+#ifdef PROMISCUOUS_INET
+/* XXX for maxmtu kludge */
+#include <net/ethernet.h>
+#endif
 
 #include <netinet/cc.h>
 #include <netinet/in.h>
@@ -1822,9 +1826,8 @@ tcp_maxmtu(struct in_conninfo *inc, int *flags)
 	}
 #ifdef PROMISCUOUS_INET
 	} else {
-		ifp = ifnet_byfib_ref(inc->inc_fibnum);
-		if (ifp)
-			maxmtu = ifp->if_mtu;
+		/* XXX post-cdom, need a new scheme for this */
+		maxmtu = ETHERMTU;
 	}
 #endif
 
