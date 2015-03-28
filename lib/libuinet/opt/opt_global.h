@@ -7,3 +7,4 @@
 #define NO_MBUF_TURNAROUND 1
 //#define UINET_LOCK_DEBUG 1
 //#define WITNESS 1
+#define CPUSET_STR_FUNC_ONLY 1

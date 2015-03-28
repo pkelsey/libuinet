@@ -178,11 +178,13 @@ CRYPTO_SRCS+=			\
 
 
 KERN_SRCS+=			\
+	kern_cpuset.c		\
 	kern_descrip.c		\
 	kern_event.c		\
 	kern_fail.c		\
 	kern_khelp.c		\
 	kern_hhook.c		\
+	kern_ktr.c		\
 	kern_linker.c		\
 	kern_mbuf.c		\
 	kern_module.c		\
