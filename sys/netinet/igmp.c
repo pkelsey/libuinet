@@ -182,7 +182,8 @@ static const struct netisr_handler igmp_nh = {
  * as anything which modifies ifma needs to be covered by that lock.
  * So check for ifma_protospec being NULL before proceeding.
  */
-struct mtx		 igmp_mtx;
+VNET_DEFINE(struct mtx, igmp_mtx);
+#define V_igmp_mtx	VNET_NAME(igmp_mtx)
 
 struct mbuf		*m_raopt;		 /* Router Alert option */
 MALLOC_DEFINE(M_IGMP, "igmp", "igmp state");
@@ -3546,13 +3547,21 @@ igmp_init(void *unused __unused)
 
 	CTR1(KTR_IGMPV3, "%s: initializing", __func__);
 
-	IGMP_LOCK_INIT();
-
 	m_raopt = igmp_ra_alloc();
 
 	netisr_register(&igmp_nh);
 }
 SYSINIT(igmp_init, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, igmp_init, NULL);
+
+static void
+igmp_vnet_init(void *unused __unused)
+{
+
+	CTR2(KTR_IGMPV3, "%s: initializing for vnet %p", __func__, curvnet);
+
+	IGMP_LOCK_INIT();
+}
+VNET_SYSINIT(igmp_init, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, igmp_vnet_init, NULL);
 
 static void
 igmp_uninit(void *unused __unused)
@@ -3568,6 +3577,16 @@ igmp_uninit(void *unused __unused)
 	IGMP_LOCK_DESTROY();
 }
 SYSUNINIT(igmp_uninit, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, igmp_uninit, NULL);
+
+static void
+igmp_vnet_uninit(void *unused __unused)
+{
+
+	CTR2(KTR_IGMPV3, "%s: tearing down for vnet %p", __func__, curvnet);
+
+	IGMP_LOCK_DESTROY();
+}
+VNET_SYSUNINIT(igmp_uninit, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, igmp_vnet_uninit, NULL);
 
 static void
 vnet_igmp_init(const void *unused __unused)

@@ -2497,7 +2497,7 @@ ipport_tick_init(const void *unused __unused)
 	 * unnecessary (the event loops for such stacks should have been
 	 * stopped by the time the shutdown_pre_sync EVENTHANDLER runs).
 	 */
-	if (!VNET_IS_STS())
+	if (!CURVNET_IS_STS())
 		EVENTHANDLER_REGISTER(shutdown_pre_sync, ip_fini, curvnet,
 			SHUTDOWN_PRI_DEFAULT);
 }

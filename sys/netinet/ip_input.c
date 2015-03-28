@@ -88,8 +88,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_input.c 237910 2012-07-01 08:47
 CTASSERT(sizeof(struct ip) == 20);
 #endif
 
-struct	rwlock in_ifaddr_lock;
-RW_SYSINIT(in_ifaddr_lock, &in_ifaddr_lock, "in_ifaddr_lock");
+VNET_DEFINE(struct rwlock, in_ifaddr_lock);
 
 VNET_DEFINE(int, rsvp_on);
 
@@ -216,6 +215,21 @@ SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, output_flowtable_size, CTLFLAG_RDTUN,
 #endif
 
 static void	ip_freef(struct ipqhead *, struct ipq *);
+
+
+static void
+ip_vnet_init(void *unused __unused)
+{
+	IN_IFADDR_LOCK_INIT();
+}
+VNET_SYSINIT(ip_init, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, ip_vnet_init, NULL);
+
+static void
+ip_vnet_uninit(void *unused __unused)
+{
+	IN_IFADDR_LOCK_DESTROY();
+}
+VNET_SYSUNINIT(ip_uninit, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, ip_vnet_uninit, NULL);
 
 /*
  * Kernel module interface for updating ipstat.  The argument is an index

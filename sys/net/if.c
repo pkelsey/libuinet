@@ -606,7 +606,8 @@ void
 ifq_init(struct ifaltq *ifq, struct ifnet *ifp)
 {
 	
-	mtx_init(&ifq->ifq_mtx, ifp->if_xname, "if send queue", MTX_DEF);
+	ifq->ifq_vnet = ifp->if_vnet;
+	IF_LOCK_INIT(ifq, ifp->if_xname, "if send queue", MTX_DEF);
 
 	if (ifq->ifq_maxlen == 0) 
 		ifq->ifq_maxlen = ifqmaxlen;
@@ -621,7 +622,7 @@ ifq_init(struct ifaltq *ifq, struct ifnet *ifp)
 void
 ifq_delete(struct ifaltq *ifq)
 {
-	mtx_destroy(&ifq->ifq_mtx);
+	IF_LOCK_DESTROY(ifq);
 }
 
 /*
@@ -658,6 +659,7 @@ if_attach_internal(struct ifnet *ifp, int vmove)
 
 #ifdef VIMAGE
 	ifp->if_vnet = curvnet;
+	ifp->if_snd.ifq_vnet = curvnet;
 	if (ifp->if_home_vnet == NULL)
 		ifp->if_home_vnet = curvnet;
 #endif
@@ -696,7 +698,7 @@ if_attach_internal(struct ifnet *ifp, int vmove)
 		socksize = roundup2(socksize, sizeof(long));
 		ifasize = sizeof(*ifa) + 2 * socksize;
 		ifa = malloc(ifasize, M_IFADDR, M_WAITOK | M_ZERO);
-		ifa_init(ifa);
+		ifa_init(ifa, ifp);
 		sdl = (struct sockaddr_dl *)(ifa + 1);
 		sdl->sdl_len = socksize;
 		sdl->sdl_family = AF_LINK;
@@ -705,7 +707,6 @@ if_attach_internal(struct ifnet *ifp, int vmove)
 		sdl->sdl_index = ifp->if_index;
 		sdl->sdl_type = ifp->if_type;
 		ifp->if_addr = ifa;
-		ifa->ifa_ifp = ifp;
 		ifa->ifa_rtrequest = link_rtrequest;
 		ifa->ifa_addr = (struct sockaddr *)sdl;
 		sdl = (struct sockaddr_dl *)(socksize + (caddr_t)sdl);
@@ -1474,10 +1475,10 @@ if_maddr_runlock(struct ifnet *ifp)
  * Reference count functions for ifaddrs.
  */
 void
-ifa_init(struct ifaddr *ifa)
+ifa_init(struct ifaddr *ifa, struct ifnet *ifp)
 {
-
-	mtx_init(&ifa->ifa_mtx, "ifaddr", NULL, MTX_DEF);
+	ifa->ifa_ifp = ifp;
+	IFA_LOCK_INIT(ifa);
 	refcount_init(&ifa->ifa_refcnt, 1);
 }
 
@@ -1493,7 +1494,7 @@ ifa_free(struct ifaddr *ifa)
 {
 
 	if (refcount_release(&ifa->ifa_refcnt)) {
-		mtx_destroy(&ifa->ifa_mtx);
+		IFA_LOCK_DESTROY(ifa);
 		free(ifa, M_IFADDR);
 	}
 }

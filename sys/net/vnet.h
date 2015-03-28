@@ -516,9 +516,9 @@ struct vnet_callout {
 };
 
 #if defined(VIMAGE_STS_ONLY)
-#define VNET_IS_STS()	1
+#define VNET_IS_STS(v)	1
 #else
-#define VNET_IS_STS()	(curvnet->vnet_sts.sts_enabled)
+#define VNET_IS_STS(v)	((v) && (v)->vnet_sts.sts_enabled)
 #endif
 
 #define vnet_sts_invoke(which, c)		\
@@ -532,20 +532,20 @@ struct vnet_callout {
 
 
 #define vnet_callout_active(c)						\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(active, c) : callout_invoke(active, c))
 #define vnet_callout_deactivate(c)					\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(deactivate, c) : callout_invoke(deactivate, c))
 /*
  * In single-thread-stack mode, it's not possible for the callout to be in
  * progress when drain() is called, so it is mapped to stop().
  */
 #define vnet_callout_drain(c)						\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(stop, c) : callout_invoke(drain, c))
 #define vnet_callout_init(c, mps)					\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(init, c) : callout_invoke_va(init, c, mps))
 /*
  * It is assumed that vnet_callout_init_{mtx, rw} are not being used to
@@ -554,61 +554,61 @@ struct vnet_callout {
  * single-thread-stack mode, as no in-stack locks exist.
  */
 #define vnet_callout_init_mtx(c, mtx, flags)				\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(init, c) :					\
 	 callout_invoke_va(init_mtx, c, mtx, flags))
 #define vnet_callout_init_rw(c, rw, flags)				\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(init, c) :					\
 	 callout_invoke_va(init_rw, c, rw, flags))
 #define vnet_callout_msecs_remaining(c)					\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(msecs_remaining, c) :				\
 	 callout_invoke(msecs_remaining, c))
 #define vnet_callout_pending(c)						\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(pending, c) :					\
 	 callout_invoke(pending, c))
 /*
  * In single-thread-stack mode, there is no concept of multiple cpus. 
  */
 #define vnet_callout_reset_curcpu(c, on_tick, fn, arg)			\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke_va(reset, c, on_tick, fn, arg) :		\
 	 callout_invoke_va(reset_curcpu, c, on_tick, fn, arg))
 #define vnet_callout_reset_on(c, on_tick, fn, arg, cpu)			\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke_va(reset, c, on_tick, fn, arg) :		\
 	 callout_invoke_va(reset_on, c, on_tick, fn, arg, cpu))
 #define vnet_callout_reset(c, on_tick, fn, arg)				\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke_va(reset, c, on_tick, fn, arg) :		\
 	 callout_invoke_va(reset, c, on_tick, fn, arg))
 /*
  * In single-thread-stack mode, there is no concept of multiple cpus. 
  */
 #define vnet_callout_schedule_curcpu(c, on_tick)			\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke_va(schedule, c, on_tick) :			\
 	 callout_invoke_va(schedule_curcpu, c, on_tick))
 #define vnet_callout_schedule_on(c, on_tick, cpu)			\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke_va(schedule, c, on_tick) :			\
 	 callout_invoke_va(schedule_on, c, on_tick, cpu))
 #define vnet_callout_schedule(c, on_tick)				\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke_va(schedule, c, on_tick) :			\
 	 callout_invoke_va(schedule, c, on_tick))
 #define vnet_callout_stop(c)						\
-	(VNET_IS_STS() ?						\
+	(CURVNET_IS_STS() ?						\
 	 vnet_sts_invoke(stop, c) :					\
 	 callout_invoke(stop, c))
 
 /*
- * Caller ensures VNET_IS_STS() is true.  Note that this event mechanism is
- * designed such that multiple occurrences of a given event result in that
- * event being handled at least once, but not necesssarily once for each
- * occurrence.
+ * Caller ensures CURVNET_IS_STS() is true.  Note that this event mechanism
+ * is designed such that multiple occurrences of a given event result in
+ * that event being handled at least once, but not necesssarily once for
+ * each occurrence.
  */
 #define vnet_sts_event_send(e) do {					\
 		atomic_set_int(&curvnet->vnet_sts.sts_events, e);		\
@@ -618,40 +618,40 @@ struct vnet_callout {
 void	vnet_sts_events_process(struct vnet *vnet);
 
 
-#define VNET_MTX_INIT(m, n, t, o)	(VNET_IS_STS() ? (void)0 : mtx_init(m, n, t, o))
-#define VNET_MTX_DESTROY(m)		(VNET_IS_STS() ? (void)0 : mtx_destroy(m))
-#define VNET_MTX_LOCK(m)		(VNET_IS_STS() ? (void)0 : mtx_lock(m))
-#define VNET_MTX_TRYLOCK(m)		(VNET_IS_STS() ?       1 : mtx_trylock(m))
-#define VNET_MTX_UNLOCK(m)		(VNET_IS_STS() ? (void)0 : mtx_unlock(m))
-#define VNET_MTX_OWNED(m)		(VNET_IS_STS() ? (void)0 : mtx_owned(m))
-#define VNET_MTX_ASSERT(m, a)		(VNET_IS_STS() ? (void)0 : mtx_assert(m, a))
+#define VNET_MTX_INIT(m, n, t, o)	(CURVNET_IS_STS() ? (void)0 : mtx_init(m, n, t, o))
+#define VNET_MTX_DESTROY(m)		(CURVNET_IS_STS() ? (void)0 : mtx_destroy(m))
+#define VNET_MTX_LOCK(m)		(CURVNET_IS_STS() ? (void)0 : mtx_lock(m))
+#define VNET_MTX_TRYLOCK(m)		(CURVNET_IS_STS() ?       1 : mtx_trylock(m))
+#define VNET_MTX_UNLOCK(m)		(CURVNET_IS_STS() ? (void)0 : mtx_unlock(m))
+#define VNET_MTX_OWNED(m)		(CURVNET_IS_STS() ? (void)0 : mtx_owned(m))
+#define VNET_MTX_ASSERT(m, a)		(CURVNET_IS_STS() ? (void)0 : mtx_assert(m, a))
 
-#define VNET_RWLOCK_INIT(r, n, o) 	(VNET_IS_STS() ? (void)0 : rw_init_flags(r, n, o)) 
-#define VNET_RWLOCK_DESTROY(r)		(VNET_IS_STS() ? (void)0 : rw_destroy(r))
-#define VNET_RWLOCK_RLOCK(r) 		(VNET_IS_STS() ? (void)0 : rw_rlock(r))
-#define VNET_RWLOCK_WLOCK(r) 		(VNET_IS_STS() ? (void)0 : rw_wlock(r))
-#define VNET_RWLOCK_TRY_RLOCK(r)	(VNET_IS_STS() ?       1 : rw_try_rlock(r))
-#define VNET_RWLOCK_TRY_WLOCK(r)	(VNET_IS_STS() ?       1 : rw_try_wlock(r))
-#define VNET_RWLOCK_RUNLOCK(r) 		(VNET_IS_STS() ? (void)0 : rw_runlock(r))
-#define VNET_RWLOCK_WUNLOCK(r) 		(VNET_IS_STS() ? (void)0 : rw_wunlock(r))
-#define VNET_RWLOCK_TRY_UPGRADE(r)	(VNET_IS_STS() ?       1 : rw_try_upgrade(r))
-#define VNET_RWLOCK_DOWNGRADE(r)	(VNET_IS_STS() ? (void)0 : rw_downgrade(r))
-#define VNET_RWLOCK_WLOCKED(r) 		(VNET_IS_STS() ?       1 : rw_wowned(r))
-#define VNET_RWLOCK_ASSERT(r, a)	(VNET_IS_STS() ? (void)0 : rw_assert(r, a))
+#define VNET_RWLOCK_INIT(r, n, o) 	(CURVNET_IS_STS() ? (void)0 : rw_init_flags(r, n, o)) 
+#define VNET_RWLOCK_DESTROY(r)		(CURVNET_IS_STS() ? (void)0 : rw_destroy(r))
+#define VNET_RWLOCK_RLOCK(r) 		(CURVNET_IS_STS() ? (void)0 : rw_rlock(r))
+#define VNET_RWLOCK_WLOCK(r) 		(CURVNET_IS_STS() ? (void)0 : rw_wlock(r))
+#define VNET_RWLOCK_TRY_RLOCK(r)	(CURVNET_IS_STS() ?       1 : rw_try_rlock(r))
+#define VNET_RWLOCK_TRY_WLOCK(r)	(CURVNET_IS_STS() ?       1 : rw_try_wlock(r))
+#define VNET_RWLOCK_RUNLOCK(r) 		(CURVNET_IS_STS() ? (void)0 : rw_runlock(r))
+#define VNET_RWLOCK_WUNLOCK(r) 		(CURVNET_IS_STS() ? (void)0 : rw_wunlock(r))
+#define VNET_RWLOCK_TRY_UPGRADE(r)	(CURVNET_IS_STS() ?       1 : rw_try_upgrade(r))
+#define VNET_RWLOCK_DOWNGRADE(r)	(CURVNET_IS_STS() ? (void)0 : rw_downgrade(r))
+#define VNET_RWLOCK_WLOCKED(r) 		(CURVNET_IS_STS() ?       1 : rw_wowned(r))
+#define VNET_RWLOCK_ASSERT(r, a)	(CURVNET_IS_STS() ? (void)0 : rw_assert(r, a))
 
-#define VNET_SX_INIT(s, n, o)		(VNET_IS_STS() ? (void)0 : sx_init_flags(s, n, o))
-#define VNET_SX_DESTROY(s)		(VNET_IS_STS() ? (void)0 : sx_destroy(s))
-#define VNET_SX_XLOCK(s)		(VNET_IS_STS() ? (void)0 : sx_xlock(s))
-#define VNET_SX_XLOCK_SIG(s)		(VNET_IS_STS() ?       0 : sx_xlock_sig(s))
-#define VNET_SX_TRY_XLOCK(s)		(VNET_IS_STS() ?       1 : sx_try_xlock(s))
-#define VNET_SX_XUNLOCK(s)		(VNET_IS_STS() ? (void)0 : sx_xunlock(s))
+#define VNET_SX_INIT(s, n, o)		(CURVNET_IS_STS() ? (void)0 : sx_init_flags(s, n, o))
+#define VNET_SX_DESTROY(s)		(CURVNET_IS_STS() ? (void)0 : sx_destroy(s))
+#define VNET_SX_XLOCK(s)		(CURVNET_IS_STS() ? (void)0 : sx_xlock(s))
+#define VNET_SX_XLOCK_SIG(s)		(CURVNET_IS_STS() ?       0 : sx_xlock_sig(s))
+#define VNET_SX_TRY_XLOCK(s)		(CURVNET_IS_STS() ?       1 : sx_try_xlock(s))
+#define VNET_SX_XUNLOCK(s)		(CURVNET_IS_STS() ? (void)0 : sx_xunlock(s))
 
 #else /* !VIMAGE || !(VIMAGE_STS || VIMAGE_STS_ONLY) */
 
 /* struct vnet_callout -> struct callout */
 #define vnet_callout callout
 
-#define VNET_IS_STS() 0
+#define VNET_IS_STS(v) 0
 
 #define vnet_callout_active(c)				\
 	callout_active(c)
@@ -717,6 +717,8 @@ void	vnet_sts_events_process(struct vnet *vnet);
 #define VNET_SX_XUNLOCK(s)		sx_xunlock(s)
 
 #endif /* VIMAGE && (VIMAGE_STS || VIMAGE_STS_ONLY) */
+
+#define CURVNET_IS_STS(v)	VNET_IS_STS(curvnet)
 
 
 #endif /* _KERNEL */

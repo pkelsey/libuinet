@@ -576,7 +576,7 @@ pfdrain(void)
 	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET_QUIET(vnet_iter);
-		if (VNET_IS_STS())
+		if (CURVNET_IS_STS())
 			vnet_sts_event_send(VNET_STS_EVENT_PR_DRAIN);
 		else
 			_pfdrain_vnet();

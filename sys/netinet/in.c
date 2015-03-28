@@ -390,7 +390,7 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 			}
 
 			ifa = &ia->ia_ifa;
-			ifa_init(ifa);
+			ifa_init(ifa, ifp);
 			ifa->ifa_addr = (struct sockaddr *)&ia->ia_addr;
 			ifa->ifa_dstaddr = (struct sockaddr *)&ia->ia_dstaddr;
 			ifa->ifa_netmask = (struct sockaddr *)&ia->ia_sockmask;
@@ -401,7 +401,6 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 				ia->ia_broadaddr.sin_len = sizeof(ia->ia_addr);
 				ia->ia_broadaddr.sin_family = AF_INET;
 			}
-			ia->ia_ifp = ifp;
 
 			ifa_ref(ifa);			/* if_addrhead */
 			IF_ADDR_WLOCK(ifp);

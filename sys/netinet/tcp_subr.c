@@ -832,7 +832,7 @@ tcp_ccalgounload(struct cc_algo *unload_algo)
 	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
-		if (VNET_IS_STS()) {
+		if (CURVNET_IS_STS()) {
 			sts_count++;
 			continue;
 		}

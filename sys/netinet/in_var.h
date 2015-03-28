@@ -114,15 +114,18 @@ VNET_DECLARE(u_long, in_ifaddrhmask);		/* mask for hash table */
 #define INADDR_HASH(x) \
 	(&V_in_ifaddrhashtbl[INADDR_HASHVAL(x) & V_in_ifaddrhmask])
 
-extern	struct rwlock in_ifaddr_lock;
+VNET_DECLARE(struct rwlock, in_ifaddr_lock);
+#define V_in_ifaddr_lock	VNET_NAME(in_ifaddr_lock)
 
-#define	IN_IFADDR_LOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_LOCKED)
-#define	IN_IFADDR_RLOCK()	rw_rlock(&in_ifaddr_lock)
-#define	IN_IFADDR_RLOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_RLOCKED)
-#define	IN_IFADDR_RUNLOCK()	rw_runlock(&in_ifaddr_lock)
-#define	IN_IFADDR_WLOCK()	rw_wlock(&in_ifaddr_lock)
-#define	IN_IFADDR_WLOCK_ASSERT()	rw_assert(&in_ifaddr_lock, RA_WLOCKED)
-#define	IN_IFADDR_WUNLOCK()	rw_wunlock(&in_ifaddr_lock)
+#define IN_IFADDR_LOCK_INIT()		VNET_RWLOCK_INIT(&V_in_ifaddr_lock, "in_ifaddr_lock", 0)
+#define IN_IFADDR_LOCK_DESTROY()	VNET_RWLOCK_DESTROY(&V_in_ifaddr_lock)
+#define	IN_IFADDR_LOCK_ASSERT()		VNET_RWLOCK_ASSERT(&V_in_ifaddr_lock, RA_LOCKED)
+#define	IN_IFADDR_RLOCK()		VNET_RWLOCK_RLOCK(&V_in_ifaddr_lock)
+#define	IN_IFADDR_RLOCK_ASSERT()	VNET_RWLOCK_ASSERT(&V_in_ifaddr_lock, RA_RLOCKED)
+#define	IN_IFADDR_RUNLOCK()		VNET_RWLOCK_RUNLOCK(&V_in_ifaddr_lock)
+#define	IN_IFADDR_WLOCK()		VNET_RWLOCK_WLOCK(&V_in_ifaddr_lock)
+#define	IN_IFADDR_WLOCK_ASSERT()	VNET_RWLOCK_ASSERT(&V_in_ifaddr_lock, RA_WLOCKED)
+#define	IN_IFADDR_WUNLOCK()		VNET_RWLOCK_WUNLOCK(&V_in_ifaddr_lock)
 
 /*
  * Macro for finding the internet address structure (in_ifaddr)
@@ -353,11 +356,15 @@ SYSCTL_DECL(_net_inet_raw);
  * consumers of IN_*_MULTI() macros should acquire the locks before
  * calling them; users of the in_{add,del}multi() functions should not.
  */
-extern struct mtx in_multi_mtx;
-#define	IN_MULTI_LOCK()		mtx_lock(&in_multi_mtx)
-#define	IN_MULTI_UNLOCK()	mtx_unlock(&in_multi_mtx)
-#define	IN_MULTI_LOCK_ASSERT()	mtx_assert(&in_multi_mtx, MA_OWNED)
-#define	IN_MULTI_UNLOCK_ASSERT() mtx_assert(&in_multi_mtx, MA_NOTOWNED)
+VNET_DECLARE(struct mtx, in_multi_mtx);
+#define V_in_multi_mtx	VNET_NAME(in_multi_mtx)
+
+#define IN_MULTI_LOCK_INIT()	VNET_MTX_INIT(&V_in_multi_mtx, "in_multi_mtx", NULL, MTX_DEF)
+#define IN_MULTI_LOCK_DESTROY()	VNET_MTX_DESTROY(&V_in_multi_mtx)
+#define	IN_MULTI_LOCK()		VNET_MTX_LOCK(&V_in_multi_mtx)
+#define	IN_MULTI_UNLOCK()	VNET_MTX_UNLOCK(&V_in_multi_mtx)
+#define	IN_MULTI_LOCK_ASSERT()	VNET_MTX_ASSERT(&V_in_multi_mtx, MA_OWNED)
+#define	IN_MULTI_UNLOCK_ASSERT() VNET_MTX_ASSERT(&V_in_multi_mtx, MA_NOTOWNED)
 
 /*
  * Function for looking up an in_multi record for an IPv4 multicast address
