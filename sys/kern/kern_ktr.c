@@ -234,6 +234,7 @@ SYSCTL_PROC(_debug_ktr, OID_AUTO, alq_enable,
     "I", "Enable KTR logging");
 #endif
 
+#ifdef KTR
 void
 ktr_tracepoint(u_int mask, const char *file, int line, const char *format,
     u_long arg1, u_long arg2, u_long arg3, u_long arg4, u_long arg5,
@@ -324,6 +325,7 @@ done:
 	td->td_pflags &= ~TDP_INKTR;
 #endif
 }
+#endif /* KTR */
 
 #ifdef DDB
 
