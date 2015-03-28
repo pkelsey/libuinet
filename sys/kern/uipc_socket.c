@@ -853,7 +853,8 @@ soclose(struct socket *so)
 	KASSERT(!(so->so_state & SS_NOFDREF), ("soclose: SS_NOFDREF on enter"));
 
 	CURVNET_SET(so->so_vnet);
-	funsetown(&so->so_sigio);
+	if (!CURVNET_IS_STS())
+		funsetown(&so->so_sigio);
 	if (so->so_state & SS_ISCONNECTED) {
 		if ((so->so_state & SS_ISDISCONNECTING) == 0) {
 			error = sodisconnect(so);
