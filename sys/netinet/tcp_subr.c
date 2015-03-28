@@ -756,11 +756,12 @@ tcp_newtcpcb(struct inpcb *inp)
 		}
 
 	tp->osd = &tm->osd;
+#ifndef INET_NO_TCP_KHELP
 	if (khelp_init_osd(HELPER_CLASS_TCP, tp->osd)) {
 		uma_zfree(V_tcpcb_zone, tm);
 		return (NULL);
 	}
-
+#endif
 #ifdef VIMAGE
 	tp->t_vnet = inp->inp_vnet;
 #endif
@@ -1008,7 +1009,9 @@ tcp_discardcb(struct tcpcb *tp)
 	if (CC_ALGO(tp)->cb_destroy != NULL)
 		CC_ALGO(tp)->cb_destroy(tp->ccv);
 
+#ifndef INET_NO_TCP_KHELP
 	khelp_destroy_osd(tp->osd);
+#endif
 
 	CC_ALGO(tp) = NULL;
 	inp->inp_ppcb = NULL;
