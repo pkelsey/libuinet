@@ -1258,11 +1258,6 @@ int main(int argc, char **argv)
 	for (i = 0; i < num_event_loops; i++) {
 		curloopcfg = &elcfgs[i];
 
-		if (pthread_create(&curloopcfg->thread_id, NULL, loop_thread, curloopcfg))
-			curloopcfg->has_thread = 0;
-		else
-			curloopcfg->has_thread = 1;
-
 		ev_timer_init(&curloopcfg->shutdown_watcher, shutdown_cb, 0.5, 0.5);
 		ev_timer_start(curloopcfg->loop, &curloopcfg->shutdown_watcher);
 
@@ -1272,6 +1267,11 @@ int main(int argc, char **argv)
 			curloopcfg->stats_watcher.data = curloopcfg;
 			ev_timer_start(curloopcfg->loop, &curloopcfg->stats_watcher);
 		}
+
+		if (pthread_create(&curloopcfg->thread_id, NULL, loop_thread, curloopcfg))
+			curloopcfg->has_thread = 0;
+		else
+			curloopcfg->has_thread = 1;
 	}
 	
 	while (!shutting_down)
