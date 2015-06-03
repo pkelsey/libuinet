@@ -5565,6 +5565,12 @@ ev_uinet_attach (struct uinet_socket *so)
   return (ctx);
 }
 
+struct uinet_socket *
+ev_uinet_so (struct ev_uinet_ctx *ctx)
+{
+  return (ctx->so);
+}
+
 void
 ev_uinet_detach (struct ev_uinet_ctx *ctx)
 {

@@ -883,6 +883,7 @@ EV_API_DECL void ev_async_send     (EV_P_ ev_async *w) EV_THROW;
 
 # if EV_UINET_ENABLE
 EV_API_DECL struct ev_uinet_ctx *ev_uinet_attach  (struct uinet_socket *so) EV_THROW;
+EV_API_DECL struct uinet_socket *ev_uinet_so  (struct ev_uinet_ctx *ctx) EV_THROW;
 EV_API_DECL void ev_uinet_detach   (struct ev_uinet_ctx *ctx) EV_THROW;
 EV_API_DECL void ev_uinet_start    (EV_P_ ev_uinet *w) EV_THROW;
 EV_API_DECL void ev_uinet_stop     (EV_P_ ev_uinet *w) EV_THROW;

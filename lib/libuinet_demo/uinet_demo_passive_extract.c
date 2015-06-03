@@ -147,7 +147,7 @@ destroy_conn(struct passive_connection *conn)
 	ev_uinet_stop(conn->server->cfg.loop, &conn->connected_watcher);
 	ev_uinet_stop(conn->server->cfg.loop, w);
 	ev_uinet_detach(w->ctx);
-	uinet_soclose(w->so);
+	uinet_soclose(ev_uinet_so(w->ctx));
 	conn->server->num_sockets--;
 	if (conn->buffer)
 		free(conn->buffer);
