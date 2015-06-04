@@ -52,7 +52,8 @@ VNET_DECLARE(int, tcp_do_rfc1323);
 struct tseg_qent {
 	LIST_ENTRY(tseg_qent) tqe_q;
 	int	tqe_len;		/* TCP segment data length */
-	struct	tcphdr *tqe_th;		/* a pointer to tcp header */
+	uint32_t tqe_seq;		/* copy of TCP sequence no. */
+	uint8_t	tqe_flags;		/* copy of TCP header flags */
 	struct	mbuf	*tqe_m;		/* mbuf contains packet */
 #ifdef PASSIVE_INET
 	TAILQ_ENTRY(tseg_qent) tqe_ageq;

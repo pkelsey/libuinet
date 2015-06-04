@@ -782,8 +782,9 @@ sbcompress(struct sockbuf *sb, struct mbuf *m, struct mbuf *n)
 		    M_WRITABLE(n) &&
 		    ((sb->sb_flags & SB_NOCOALESCE) == 0) &&
 		    m->m_len <= M_TRAILINGSPACE(n) &&
-		    n->m_type == m->m_type) {
-			if (n->m_flags & M_HOLE) {
+		    n->m_type == m->m_type && 
+		    !((m->m_flags ^ n->m_flags) & M_HOLE)) {
+			if (n->m_flags & M_HOLE) { /* combine holes */
 				n->m_len += m->m_len;
 				sb->sb_cc += m->m_len;
 				m = m_free(m);
