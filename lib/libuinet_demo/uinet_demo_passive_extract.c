@@ -153,6 +153,8 @@ destroy_conn(struct passive_connection *conn)
 		free(conn->buffer);
 	if (conn->parser)
 		free(conn->parser);
+	if (conn->parser_settings)
+		free(conn->parser_settings);
 	free(conn);
 }
 
@@ -700,6 +702,7 @@ create_conn(struct uinet_demo_passive_extract *passive, struct uinet_socket *so,
 fail:
 	if (conn->buffer) free(conn->buffer);
 	if (conn->parser) free(conn->parser);
+	if (conn->parser_settings) free(conn->parser_settings);
 	if (conn) free(conn);
 	if (soctx) ev_uinet_detach(soctx);
 
