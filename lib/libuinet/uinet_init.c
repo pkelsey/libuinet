@@ -140,9 +140,6 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->kern.ipc.nmbclusters);
 	setenv("kern.ipc.nmbclusters", tmpbuf);
 
-	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->kern.ipc.somaxconn);
-	setenv("kern.ipc.somaxconn", tmpbuf);
-
 	/* The env var kern.ncallout will get read in proc0_init(), but
 	 * that's after we init the callwheel below.  So we set it here for
 	 * consistency, but the operative setting is the direct assignment
@@ -204,6 +201,9 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 	 * before continuing
 	 */
 	sleep(1);
+
+	kernel_sysctlbyname(curthread, "kern.ipc.somaxconn", NULL, NULL,
+			    &cfg->kern.ipc.somaxconn, sizeof(cfg->kern.ipc.somaxconn), NULL, 0);
 
 	uinet_instance_init(&uinst0, vnet0, inst_cfg);
 
