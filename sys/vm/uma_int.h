@@ -199,7 +199,7 @@ struct uma_cache {
 typedef struct uma_cache * uma_cache_t;
 
 #ifdef UINET
-#define UMA_CACHE_TABLE_SLOTS 128
+#define UMA_CACHE_TABLE_SLOTS 256
 struct uma_tls {
 	TAILQ_ENTRY(uma_tls) ut_link;	/* Link into uma tls list */
 	struct uma_cache ut_caches[UMA_CACHE_TABLE_SLOTS];
