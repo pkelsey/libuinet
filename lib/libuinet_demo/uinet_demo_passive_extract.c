@@ -153,6 +153,8 @@ destroy_conn(struct passive_connection *conn)
 		free(conn->buffer);
 	if (conn->parser)
 		free(conn->parser);
+	if (conn->parser_settings)
+		free(conn->parser_settings);
 	free(conn);
 }
 
@@ -664,8 +666,6 @@ create_conn(struct uinet_demo_passive_extract *passive, struct uinet_socket *so,
 		 server ? "SERVER" : "CLIENT",
 		 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
 		 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
-	uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
-	uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
 
 	if (!server) {
 		time(&now_timet);
@@ -676,6 +676,9 @@ create_conn(struct uinet_demo_passive_extract *passive, struct uinet_socket *so,
 			 uinet_inet_ntoa(sin1->sin_addr, buf1, sizeof(buf1)), ntohs(sin1->sin_port),
 			 uinet_inet_ntoa(sin2->sin_addr, buf2, sizeof(buf2)), ntohs(sin2->sin_port));
 	}
+
+	uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
+	uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
 
 	conn->verbose = passive->cfg.verbose;
 	conn->server = passive;
@@ -699,6 +702,7 @@ create_conn(struct uinet_demo_passive_extract *passive, struct uinet_socket *so,
 fail:
 	if (conn->buffer) free(conn->buffer);
 	if (conn->parser) free(conn->parser);
+	if (conn->parser_settings) free(conn->parser_settings);
 	if (conn) free(conn);
 	if (soctx) ev_uinet_detach(soctx);
 
