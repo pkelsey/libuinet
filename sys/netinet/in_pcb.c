@@ -1109,10 +1109,19 @@ in_pcbconnect_setup(struct inpcb *inp, struct sockaddr *nam,
 			return (error);
 	}
 #ifdef PROMISCUOUS_INET
-	if (inp->inp_flags2 & INP_PROMISC)
+	if (inp->inp_flags2 & INP_PROMISC) {
 		oinp = in_pcblookup_hash_promisc_locked(inp->inp_pcbinfo, faddr, fport,
 		    laddr, lport, 0, NULL, NULL, inp);
-	else
+		if ((inp->inp_flags2 & INP_REUSEPORT) && (oinp != NULL) &&
+		    (oinp->inp_flags & INP_TIMEWAIT) && (oinp->inp_flags2 & INP_REUSEPORT)) {
+			struct tcptw *tw;
+
+			tw = intotw(oinp);
+			if (tw != NULL)
+				tcp_twclose(tw, 0);
+			oinp = NULL;
+		}
+	} else
 		oinp = in_pcblookup_hash_locked(inp->inp_pcbinfo, faddr, fport,
 		    laddr, lport, 0, NULL);
 #else
