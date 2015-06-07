@@ -141,7 +141,7 @@ uinet_getifstat(uinet_if_t uif, struct uinet_ifstat *stat)
 	stat->ifi_ipackets   = ifp->if_data.ifi_ipackets;
 	stat->ifi_ierrors    = ifp->if_data.ifi_ierrors;
 	stat->ifi_opackets   = ifp->if_data.ifi_opackets;
-	stat->ifi_oerrors    = ifp->if_data.ifi_oerrors;
+	stat->ifi_oerrors    = ifp->if_data.ifi_oerrors + ifp->if_snd.ifq_drops;
 	stat->ifi_collisions = ifp->if_data.ifi_collisions;
 	stat->ifi_ibytes     = ifp->if_data.ifi_ibytes;
 	stat->ifi_obytes     = ifp->if_data.ifi_obytes;
