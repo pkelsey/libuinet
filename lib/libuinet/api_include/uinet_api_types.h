@@ -259,6 +259,7 @@ struct uinet_uio {
 #define	UINET_TCP_KEEPINTVL	0x200	/* L,N interval between keepalives */
 #define	UINET_TCP_KEEPCNT	0x400	/* L,N number of keepalives before close */
 #define UINET_TCP_REASSDL	0x800	/* wait this long for missing segments */
+#define UINET_TCP_TRIVIAL_ISN	0x1000	/* use cheap, insecure ISN */
 
 struct uinet_tcp_info {
 	uint8_t		tcpi_state;		/* TCP FSM state. */

@@ -1538,6 +1538,23 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 			break;
 #endif
 
+#ifdef PROMISCUOUS_INET
+		case TCP_TRIVIAL_ISN:
+			INP_WUNLOCK(inp);
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+			    sizeof optval);
+			if (error)
+				return (error);
+
+			INP_WLOCK_RECHECK(inp);
+			if (optval > 0)
+				tp->t_flags |= TF_TRIVIAL_ISN;
+			else
+				tp->t_flags &= ~TF_TRIVIAL_ISN;
+			INP_WUNLOCK(inp);
+			break;
+#endif
+
 		case TCP_KEEPCNT:
 			INP_WUNLOCK(inp);
 			error = sooptcopyin(sopt, &ui, sizeof(ui), sizeof(ui));
@@ -1596,6 +1613,14 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &ti, sizeof ti);
 			break;
+#ifdef PROMISCUOUS_INET
+		case TCP_TRIVIAL_ISN:
+			optval = (tp->t_flags & TF_TRIVIAL_ISN) ? 1 : 0;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof optval);
+			break;
+#endif
+
 		case TCP_CONGESTION:
 			bzero(buf, sizeof(buf));
 			strlcpy(buf, CC_ALGO(tp)->name, TCP_CA_NAME_MAX);

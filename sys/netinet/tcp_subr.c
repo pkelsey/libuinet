@@ -1664,8 +1664,16 @@ tcp_new_isn(struct tcpcb *tp)
 	u_int32_t md5_buffer[4];
 	tcp_seq new_isn;
 	u_int32_t projected_offset;
+#ifdef PROMISCUOUS_INET
+	static tcp_seq counter = 0;
+#endif
 
 	INP_WLOCK_ASSERT(tp->t_inpcb);
+
+#ifdef PROMISCUOUS_INET
+	if (tp->t_flags & TF_TRIVIAL_ISN)
+		return (counter++); /* do not care about non-atomic increment effects */
+#endif
 
 	ISN_LOCK();
 	/* Seed if this is the first use, reseed if requested. */

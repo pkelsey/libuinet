@@ -163,7 +163,8 @@ struct tcphdr {
 #define	TCP_KEEPIDLE	0x100	/* L,N,X start keepalives after this period */
 #define	TCP_KEEPINTVL	0x200	/* L,N interval between keepalives */
 #define	TCP_KEEPCNT	0x400	/* L,N number of keepalives before close */
-#define TCP_REASSDL	0x800	/* wait this long for missing segments */
+#define	TCP_REASSDL	0x800	/* wait this long for missing segments */
+#define	TCP_TRIVIAL_ISN	0x1000	/* use cheap, insecure ISN */
 
 #define	TCP_CA_NAME_MAX	16	/* max congestion control name length */
 
