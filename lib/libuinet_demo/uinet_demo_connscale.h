@@ -55,6 +55,7 @@ struct uinet_demo_connscale {
 	unsigned int connection_launch_rate;
 	ev_tstamp connection_launch_period;
 	double client_connections_per_period;
+	int client_rst_close;
 };
 
 

@@ -63,6 +63,7 @@ enum connscale_option_id {
 	CONNSCALE_OPT_LOCAL_PORT,
 	CONNSCALE_OPT_MAX_CONN,
 	CONNSCALE_OPT_RATE,
+	CONNSCALE_OPT_RST_CLOSE,
 	CONNSCALE_OPT_SERVER,
 	CONNSCALE_OPT_VLAN
 };
@@ -76,6 +77,7 @@ static const struct option connscale_long_options[] = {
 	{ "local-port",		required_argument,	NULL,	CONNSCALE_OPT_LOCAL_PORT },
 	{ "max-conn",		required_argument,	NULL,	CONNSCALE_OPT_MAX_CONN },
 	{ "rate",		required_argument,	NULL,	CONNSCALE_OPT_RATE },
+	{ "rst-close",		no_argument,		NULL,	CONNSCALE_OPT_RST_CLOSE },
 	{ "server",		no_argument,		NULL,	CONNSCALE_OPT_SERVER },
 	{ "verbose",		no_argument,		NULL, 	'v' },
 	{ "vlan",		required_argument,	NULL,	CONNSCALE_OPT_VLAN},
@@ -109,6 +111,7 @@ connscale_print_usage(void)
 	printf("                          Specify the local port or range to use (default is 22221)\n");
 	printf("  --max-conn <value>      Maximum number of client connections to attempt, 0 means unlimited (default is 0)\n");
 	printf("  --rate <value>          Number of client connections to attempt per second, 0 means serially (default is 0)\n");
+	printf("  --rst-close             Send RST when closing client connections (default is normal TCP close)\n");
 	printf("  --server                Function as a server instead of a client\n");
 	printf("  --verbose, -v           Increase connscale client/server verbosity above the baseline (can use multiple times)\n");
 	printf("  --vlan <vlan>|<vlan1>-<vlan2>\n");
@@ -198,6 +201,9 @@ connscale_process_args(struct uinet_demo_config *cfg, int argc, char **argv)
 			break;
 		case CONNSCALE_OPT_RATE:
 			connscale->connection_launch_rate = strtoul(optarg, NULL, 10);
+			break;
+		case CONNSCALE_OPT_RST_CLOSE:
+			connscale->client_rst_close = 1;
 			break;
 		case CONNSCALE_OPT_SERVER:
 			connscale->server = 1;
@@ -565,7 +571,8 @@ connscale_start_server(struct uinet_demo_connscale *connscale)
 		 */
 		uinet_sosetnonblocking(listen_socket, 1);
 		
-		/* Set NODELAY on the listen socket so it will be set on all
+		/* 
+		 * Set NODELAY on the listen socket so it will be set on all
 		 * accepted sockets via inheritance.
 		 */
 		optlen = sizeof(optval);
@@ -573,6 +580,18 @@ connscale_start_server(struct uinet_demo_connscale *connscale)
 		if ((error = uinet_sosetsockopt(listen_socket, UINET_IPPROTO_TCP, UINET_TCP_NODELAY,
 						&optval, optlen))) {
 			printf("%s: Failed to set TCP_NODELAY (%d)\n", connscale->cfg.name, error);
+			goto fail;
+		}
+
+		/* 
+		 * Set NOTIMEWAIT on the listen socket so it will be set on all
+		 * accepted sockets via inheritance.
+		 */
+		optlen = sizeof(optval);
+		optval = 1;
+		if ((error = uinet_sosetsockopt(listen_socket, UINET_IPPROTO_TCP, UINET_TCP_NOTIMEWAIT,
+						&optval, optlen))) {
+			printf("%s: Failed to set TCP_NOTIMEWAIT (%d)\n", connscale->cfg.name, error);
 			goto fail;
 		}
 
@@ -773,7 +792,7 @@ connscale_connect(struct uinet_demo_connscale *connscale, uint64_t index)
 #else
 	if (connscale->next_client_conn_if == NULL)
 		connscale->next_client_conn_if = uinet_ifnext(connscale->cfg.uinst,
-						      connscale->next_client_conn_if);
+							      connscale->next_client_conn_if);
 #endif
 	if ((error = uinet_make_socket_promiscuous(so, connscale->next_client_conn_if))) {
 		printf("%s: Failed to make socket promiscuous (%d)\n",
@@ -789,13 +808,23 @@ connscale_connect(struct uinet_demo_connscale *connscale, uint64_t index)
 		goto fail;
 	}
 
-	/* Drop connection on close */
-	optlen = sizeof(linger);
-	linger.l_onoff = 1;
-	linger.l_linger = 0;
-	if ((error = uinet_sosetsockopt(so, UINET_SOL_SOCKET, UINET_SO_LINGER, &linger, optlen))) {
-		printf("%s: Failed to set SO_LINGER (%d)\n", connscale->cfg.name, error);
+	/* Skip TIMEWAIT state on close */
+	optlen = sizeof(optval);
+	optval = 1;
+	if ((error = uinet_sosetsockopt(so, UINET_IPPROTO_TCP, UINET_TCP_NOTIMEWAIT, &optval, optlen))) {
+		printf("%s: Failed to set TCP_NOTIMEWAIT (%d)\n", connscale->cfg.name, error);
 		goto fail;
+	}
+
+	if (connscale->client_rst_close) {
+		/* Drop connection on close */
+		optlen = sizeof(linger);
+		linger.l_onoff = 1;
+		linger.l_linger = 0;
+		if ((error = uinet_sosetsockopt(so, UINET_SOL_SOCKET, UINET_SO_LINGER, &linger, optlen))) {
+			printf("%s: Failed to set SO_LINGER (%d)\n", connscale->cfg.name, error);
+			goto fail;
+		}
 	}
 
 	/*
