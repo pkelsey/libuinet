@@ -498,7 +498,7 @@ connscale_accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 			if (connected_conn) uinet_pool_free(connscale->connection_pool, connected_conn);
 			if (soctx) ev_uinet_detach(soctx);
 			if (newso) uinet_soclose(newso);
-		} else
+		} else if (error != UINET_ECONNABORTED)
 			printf("%s: Accept failed (%d)\n", connscale->cfg.name, error);
 	}
 
