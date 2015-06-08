@@ -113,6 +113,8 @@ UINET_IF_REGISTER_TYPE(NETMAP, &if_netmap_type_info);
 
 #define TRACE_ENABLE 0
 
+#define PKT_TRACE_DEPTH		64
+
 #define TRACE_CFG		0x00000001
 #define TRACE_RX_BATCH		0x00000010
 #define TRACE_RX_PKT		0x00000020
@@ -132,8 +134,15 @@ UINET_IF_REGISTER_TYPE(NETMAP, &if_netmap_type_info);
 		printf(__VA_ARGS__);					\
 	}								\
 } while (0)
+
+#define TRACE_PLAIN(mask, ...)	do {					\
+	if (sc->trace_mask & (mask)) {					\
+		printf(__VA_ARGS__);					\
+	}								\
+} while (0)
 #else
 #define TRACE(mask, ...) (void)sc
+#define TRACE_PLAIN(mask, ...) (void)sc
 #endif
 
 
@@ -1040,6 +1049,7 @@ if_netmap_process_tx_inject_ring(struct if_netmap_softc *sc, uint32_t avail, uin
 	uint32_t local_cur_inject_take;
 	unsigned int desc_type;
 	unsigned int this_pd_pool_id;
+	unsigned int i;
 
 	txr = sc->tx_inject_ring;
 	this_pd_pool_id = sc->pd_pool->pool_id;
@@ -1054,7 +1064,10 @@ if_netmap_process_tx_inject_ring(struct if_netmap_softc *sc, uint32_t avail, uin
 		pktlen = cur_pd->length; 
 		local_total_bytes += pktlen;
 
-		TRACE(TRACE_TX_PKT, " tx: pktlen=%u\n", pktlen);
+		TRACE(TRACE_TX_PKT, " tx: pktlen=%u [", pktlen);
+		for (i = 0; i < PKT_TRACE_DEPTH; i++)
+			TRACE_PLAIN(TRACE_TX_PKT, " %02x", cur_pd->data[i]);
+		TRACE_PLAIN(TRACE_TX_PKT, " ]\n");
 
 		slotbuf = if_netmap_txslot(sc->nm_host_ctx, local_curslot, &bufindex, (void **)&slot_pdctx);
 		TRACE(TRACE_TX_RING_STATE, " tx: slot %u: bufindex=%u ptr=%p\n", local_curslot, bufindex, slot_pdctx);
@@ -1114,6 +1127,7 @@ if_netmap_process_drv_queue(struct if_netmap_softc *sc, struct mbuf **m,
 	uint32_t bufindex;
 	uint32_t pktlen;
 	uint32_t local_n_copy;
+	unsigned int i;
 
 	ifp = sc->ifp;
 	local_n_copy = *n_copy;
@@ -1124,7 +1138,6 @@ if_netmap_process_drv_queue(struct if_netmap_softc *sc, struct mbuf **m,
 		local_n_copy++;
 
 		pktlen = m_length(local_m, NULL);
-		TRACE(TRACE_TX_PKT, " tx: pktlen=%u\n", pktlen);
 
 		slotbuf = if_netmap_txslot(sc->nm_host_ctx, local_curslot, &bufindex, (void **)&slot_pdctx);
 		TRACE(TRACE_TX_RING_STATE, " tx: slot %u: bufindex=%u ptr=%p\n", local_curslot, bufindex, slot_pdctx);
@@ -1133,6 +1146,11 @@ if_netmap_process_drv_queue(struct if_netmap_softc *sc, struct mbuf **m,
 		TRACE(TRACE_TX_RING_OPS, " tx: slot %u: setting bufindex=%u ptr=%p len=%u\n",
 		      local_curslot, bufindex, slot_pdctx, pktlen);
 		if_netmap_txsetslot(sc->nm_host_ctx, &local_curslot, bufindex, slot_pdctx, pktlen, 0);
+
+		TRACE(TRACE_TX_PKT, " tx: pktlen=%u [", pktlen);
+		for (i = 0; i < PKT_TRACE_DEPTH; i++)
+			TRACE_PLAIN(TRACE_TX_PKT, " %02x", ((uint8_t *)slotbuf)[i]);
+		TRACE_PLAIN(TRACE_TX_PKT, " ]\n");
 
 		if (last_m)
 			last_m->m_nextpkt = local_m;
@@ -1400,6 +1418,7 @@ if_netmap_batch_receive(struct uinet_if *uif, int *fd, uint64_t *wait_ns)
 	uint32_t new_pd_ctx_fill_size;
 	uint32_t num_new_pd_ctx;
 	int rv;
+	unsigned int i;
 
 	sc = uif->ifdata;
 	ifp = uif->ifp;
@@ -1450,7 +1469,11 @@ if_netmap_batch_receive(struct uinet_if *uif, int *fd, uint64_t *wait_ns)
 			new_pd_ctx = sc->rx_new_pd_ctx[num_new_pd_ctx - n_zero_copy + n];
 			slotbuf = if_netmap_rxslot(sc->nm_host_ctx, curslot, &bufindex, (void **)&slot_pdctx, &pktlen);
 			TRACE(TRACE_RX_RING_STATE, "rx: slot %u: bufindex=%u ptr=%p pktlen=%u\n", curslot, bufindex, slot_pdctx, pktlen);
-			TRACE(TRACE_RX_PKT, "rx: pktlen=%u\n", pktlen);
+			TRACE(TRACE_RX_PKT, " rx: pktlen=%u [", pktlen);
+			for (i = 0; i < PKT_TRACE_DEPTH; i++)
+				TRACE_PLAIN(TRACE_RX_PKT, " %02x", ((uint8_t *)slotbuf)[i]);
+			TRACE_PLAIN(TRACE_RX_PKT, " ]\n");
+
 			TRACE(TRACE_RX_RING_OPS, "rx: slot %u: taking bufindex %u, replacing with bufindex %u\n",
 			      curslot, bufindex, (unsigned int)new_pd_ctx->ref);
 			TRACE(TRACE_RX_RING_OPS, "rx: slot %u: setting bufindex=%u ptr=%p\n",
@@ -1477,7 +1500,10 @@ if_netmap_batch_receive(struct uinet_if *uif, int *fd, uint64_t *wait_ns)
 		for (n = 0; n < n_copy; n++, rx_pkt_desc++) {
 			slotbuf = if_netmap_rxslot(sc->nm_host_ctx, curslot, &bufindex, (void **)&slot_pdctx, &pktlen);
 			TRACE(TRACE_RX_RING_STATE, "rx: slot %u: bufindex=%u ptr=%p pktlen=%u\n", curslot, bufindex, slot_pdctx, pktlen);
-			TRACE(TRACE_RX_PKT, "rx: pktlen=%u\n", pktlen);
+			TRACE(TRACE_RX_PKT, " rx: pktlen=%u [", pktlen);
+			for (i = 0; i < PKT_TRACE_DEPTH; i++)
+				TRACE_PLAIN(TRACE_RX_PKT, " %02x", ((uint8_t *)slotbuf)[i]);
+			TRACE_PLAIN(TRACE_RX_PKT, " ]\n");
 			curslot = if_netmap_rxslotnext(sc->nm_host_ctx, curslot);
 
 			/* all other rx_pkt_desc fields were initialized by uinet_pd_mbuf_alloc_descs() */
