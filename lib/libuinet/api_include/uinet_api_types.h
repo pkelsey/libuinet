@@ -210,6 +210,13 @@ struct uinet_uio {
 #define	UINET_SO_PROTOTYPE	UINET_SO_PROTOCOL	/* alias for UINET_SO_PROTOCOL (SunOS name) */
 #define UINET_SO_L2INFO		0x1017		/* PROMISCUOUS_INET MAC addrs and tags */
 
+/*
+ * Structure used for manipulating linger option.
+ */
+struct uinet_linger {
+	int	l_onoff;		/* option on/off */
+	int	l_linger;		/* linger time */
+};
 
 #define	UINET_SOL_SOCKET	0xffff	/* options for socket level */
 

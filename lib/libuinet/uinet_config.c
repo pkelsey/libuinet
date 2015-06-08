@@ -271,4 +271,19 @@ uinet_iftypename(uinet_iftype_t type)
 }
 
 
+uinet_if_t
+uinet_ifnext(struct uinet_instance *uinst, uinet_if_t cur)
+{
+	uinet_if_t next;
 
+	CURVNET_SET(uinst->ui_vnet);
+
+	if ((cur == NULL) || (TAILQ_NEXT(cur, link) == NULL))
+		next = TAILQ_FIRST(&V_uinet_if_list);
+	else
+		next = TAILQ_NEXT(cur, link);
+
+	CURVNET_RESTORE();
+
+	return (next);
+}

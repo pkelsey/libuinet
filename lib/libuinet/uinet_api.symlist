@@ -14,6 +14,7 @@ uinet_if_default_config
 uinet_ifdestroy
 uinet_ifdestroy_byname
 uinet_ifgenericname
+uinet_ifnext
 uinet_iftypename
 uinet_if_inject_tx_packets
 uinet_if_pd_alloc

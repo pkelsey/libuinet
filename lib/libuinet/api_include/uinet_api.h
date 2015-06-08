@@ -122,7 +122,7 @@ void  uinet_soupcall_unlock(struct uinet_socket *so, int which);
 unsigned int uinet_sts_callout_max_size(void);
 int   uinet_sysctlbyname(uinet_instance_t uinst, const char *name, char *oldp, size_t *oldplen,
 			 const char *newp, size_t newplen, size_t *retval, int flags);
-int   uinet_sysctl(uinet_instance_t uinst, const int *name, u_int namelen, void *oldp, size_t *oldplen,
+int   uinet_sysctl(uinet_instance_t uinst, const int *name, unsigned int namelen, void *oldp, size_t *oldplen,
 		   const void *newp, size_t newplen, size_t *retval, int flags);
 void  uinet_synfilter_getconninfo(uinet_api_synfilter_cookie_t cookie, struct uinet_in_conninfo *inc);
 void  uinet_synfilter_getl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l2info *l2i);
@@ -212,6 +212,8 @@ int uinet_ifdestroy_byname(uinet_instance_t uinst, const char *ifname);
 const char *uinet_ifaliasname(uinet_if_t uif);
 const char *uinet_ifgenericname(uinet_if_t uif);
 const char *uinet_iftypename(uinet_iftype_t type);
+
+uinet_if_t uinet_ifnext(struct uinet_instance *uinst, uinet_if_t cur);
 
 
 /*
