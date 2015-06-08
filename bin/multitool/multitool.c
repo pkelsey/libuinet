@@ -56,6 +56,7 @@
 
 #include "uinet_api.h"
 #include "uinet_ev.h"
+#include "uinet_demo_connscale.h"
 #include "uinet_demo_echo.h"
 #include "uinet_demo_passive.h"
 #include "uinet_demo_passive_extract.h"
@@ -191,6 +192,7 @@ static const struct option long_options[] = {
 	{ "verbose",		optional_argument,	NULL, 'v' },
 
 /* demo app options */
+	{ "connscale",		optional_argument,	NULL, 'C' },
 	{ "echo",		optional_argument,	NULL, 'E' },
 	{ "passive",		optional_argument,	NULL, 'P' },
 	{ "passive-extract",	optional_argument,	NULL, 'X' },
@@ -231,7 +233,7 @@ usage(const char *progname)
 	printf("  --syncache-bucket-limit <value>\n");
 	printf("                          Set the maximum number of entries in each syncache hash bucket\n");
 	printf("  --syncache-cache-limit <value>\n");
-	printf("                          Set the maximum number of entries in each stack instance's syncacne\n");
+	printf("                          Set the maximum number of entries in each stack instance's syncache\n");
 	printf("  --tcb-hash-size <value> Set the number of buckets in each stack instance's tcp connection hash\n");
 	printf("  --verbose, -v [=level]  Increase baseline verbosity, or set to given level (can use multiple times)\n");
 	printf("\n");
@@ -267,6 +269,7 @@ usage(const char *progname)
 	printf("\n");
 	printf("Demo app creation options:\n");
 	printf("\n");
+	printf("  --connscale, -C [=name] Create a connscale client or server in the current stack, with optional name\n");
 	printf("  --echo, -E [=name]      Create an echo server in the current stack, with optional name\n");
 	printf("  --passive, -P [=name]   Create a passive reassembly server in the current stack, with optional name\n");
 	printf("  --passive-extract, -X [=name]\n");
@@ -678,11 +681,13 @@ static void *
 loop_thread(void *arg)
 {
 	struct event_loop_config *elcfg;
+	struct stack_config *curstackcfg;
+	struct uinet_demo_config *curappcfg;
 	struct uinet_pd_list *pkts = NULL;
 	struct uinet_pd *cur_pd;
 	uint32_t max_pkts;
 	uint64_t counter;
-	uint32_t i;
+	unsigned int i, j;
 
 	elcfg = arg;
 	if (elcfg->cpu >= 0)
@@ -692,6 +697,38 @@ loop_thread(void *arg)
 
 	if (elcfg->verbose)
 		printf("Event loop %s started on cpu %d\n", elcfg->name, elcfg->cpu);
+
+	/*
+	 * Time has passed, perhaps a lot of it, since this loop was
+	 * initialized.  Updating its current time here prevents newly
+	 * created timers from firing immediately due to the (irrelevant)
+	 * time that has passed between loop initialization and now.
+	 */
+	ev_now_update(elcfg->loop);
+
+	for (i = 0; i < elcfg->num_stacks; i++) {
+		curstackcfg = elcfg->scfgs[i];
+
+		/* start stats watchers */
+		if (curstackcfg->stats_interval > 0) {
+			ev_timer_init(&curstackcfg->stats_watcher, stack_stats_cb,
+				      curstackcfg->stats_interval, curstackcfg->stats_interval);
+			curstackcfg->stats_watcher.data = curstackcfg;
+			ev_timer_start(curstackcfg->elcfg->loop, &curstackcfg->stats_watcher);
+		}
+
+		/* start apps */
+		for (j = 0; j < curstackcfg->num_apps; j++) {
+			curappcfg = curstackcfg->acfgs[j];
+			if (0 != uinet_demo_start(curappcfg, curstackcfg->uinst,
+						  elcfg->loop))
+				printf("%s: %s: Failed to start %s %s\n",
+				       elcfg->name,
+				       curstackcfg->name,
+				       uinet_demo_name(curappcfg->which),
+				       curappcfg->name);
+		}
+	}
 
 	ev_run(elcfg->loop, 0);
 
@@ -717,6 +754,7 @@ int main(int argc, char **argv)
 	struct event_loop_config elcfgs[MAX_EVENT_LOOPS];
 	struct stack_config scfgs[MAX_STACKS];
 	struct interface_config ifcfgs[MAX_IFS];
+	struct uinet_demo_connscale connscalecfgs[MAX_APPS];
 	struct uinet_demo_echo echocfgs[MAX_APPS];
 	struct uinet_demo_passive passivecfgs[MAX_APPS];
 	struct uinet_demo_passive_extract passivexcfgs[MAX_APPS];
@@ -724,6 +762,7 @@ int main(int argc, char **argv)
 	struct stack_config *curstackcfg;
 	struct interface_config *curifcfg;
 	struct uinet_demo_config *curappcfg;
+	struct uinet_demo_connscale *curconnscalecfg;
 	struct uinet_demo_echo *curechocfg;
 	struct uinet_demo_passive *curpassivecfg;
 	struct uinet_demo_passive_extract *curpassivexcfg;
@@ -732,6 +771,7 @@ int main(int argc, char **argv)
 	unsigned int num_stacks;
 	unsigned int num_ifs;
 	unsigned int num_apps;
+	unsigned int num_connscale_servers;
 	unsigned int num_echo_servers;
 	unsigned int num_passive_servers;
 	unsigned int num_passivex_servers;
@@ -778,9 +818,7 @@ int main(int argc, char **argv)
 	} while (0)
 
 
-	uinet_demo_echo_init();
-	uinet_demo_passive_init();
-	uinet_demo_passive_extract_init();
+	uinet_demo_init();
 
 	error = pthread_mutex_init(&print_lock, NULL);
 	if (error != 0) {
@@ -817,6 +855,7 @@ int main(int argc, char **argv)
 	curstackcfg = &scfgs[0];
 	curifcfg = NULL;
 	curappcfg = NULL;
+	curconnscalecfg = NULL;
 	curechocfg = NULL;
 	curpassivecfg = NULL;
 	curpassivexcfg = NULL;
@@ -825,6 +864,7 @@ int main(int argc, char **argv)
 	num_stacks = 1;
 	num_ifs = 0;
 	num_apps = 0;
+	num_connscale_servers = 0;
 	num_echo_servers = 0;
 	num_passive_servers = 0;
 	num_passivex_servers = 0;
@@ -860,6 +900,27 @@ int main(int argc, char **argv)
 			curloopcfg->verbose = baseline_verbose;
 
 			config_state = CONFIGURING_LOOP;
+			break;
+		case 'C':
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_APP, "Creating a new connscale client/server");
+			LIMIT_OBJECTS("connscale clients/servers", num_echo_servers, MAX_APPS);
+
+			curconnscalecfg = &connscalecfgs[num_connscale_servers];
+			curappcfg = (struct uinet_demo_config *)curconnscalecfg;
+			if (0 != uinet_demo_init_cfg(&curconnscalecfg->cfg, UINET_DEMO_CONNSCALE, num_connscale_servers, optarg,
+						     baseline_verbose)) {
+				printf("Error initializing configuration for new connscale client/server\n");
+				return (EXIT_FAILURE);
+			}
+			num_apps++;
+			num_connscale_servers++;
+			
+			curstackcfg->acfgs[curstackcfg->num_apps++] = curappcfg;
+			
+			if (-1 == uinet_demo_process_args(curappcfg, argc, argv))
+				return (EXIT_FAILURE);
+
+			config_state = CONFIGURING_APP;
 			break;
 		case 'E':
 			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_APP, "Creating a new echo server");
@@ -1210,31 +1271,6 @@ int main(int argc, char **argv)
 	if (baseline_verbose)
 		printf("Starting %u app%s", num_apps, num_apps == 1 ? "" : "s");
 
-	for (i = 0; i < num_stacks; i++) {
-		curstackcfg = &scfgs[i];
-
-		/* start stats watchers */
-		if (curstackcfg->stats_interval > 0) {
-			ev_timer_init(&curstackcfg->stats_watcher, stack_stats_cb,
-				      curstackcfg->stats_interval, curstackcfg->stats_interval);
-			curstackcfg->stats_watcher.data = curstackcfg;
-			ev_timer_start(curstackcfg->elcfg->loop, &curstackcfg->stats_watcher);
-		}
-
-		/* start apps */
-		for (j = 0; j < curstackcfg->num_apps; j++) {
-			curappcfg = curstackcfg->acfgs[j];
-			curloopcfg = curstackcfg->elcfg;
-			if (0 != uinet_demo_start(curappcfg, curstackcfg->uinst,
-						  curloopcfg->loop))
-				printf("Failed to start %s %s in %s on %s\n",
-				       uinet_demo_name(curappcfg->which),
-				       curappcfg->name,
-				       curstackcfg->name,
-				       curloopcfg->name);
-		}
-	}
-
 	for (i = 0; i < num_ifs; i++) {
 		curifcfg = &ifcfgs[i];
 		error = uinet_interface_up(curifcfg->scfg->uinst, curifcfg->ucfg.alias, 1, 1);
@@ -1244,6 +1280,8 @@ int main(int argc, char **argv)
 		}
 	}
 
+	printf("Waiting 2 seconds for interfaces to settle\n");
+	sleep(2);
 
 	/*
 	 * Override SIGINT handler with one that will stop the threads that
