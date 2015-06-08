@@ -1553,6 +1553,21 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 				tp->t_flags &= ~TF_TRIVIAL_ISN;
 			INP_WUNLOCK(inp);
 			break;
+
+		case TCP_NOTIMEWAIT:
+			INP_WUNLOCK(inp);
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+			    sizeof optval);
+			if (error)
+				return (error);
+
+			INP_WLOCK_RECHECK(inp);
+			if (optval > 0)
+				tp->t_flags |= TF_NO_TIMEWAIT;
+			else
+				tp->t_flags &= ~TF_NO_TIMEWAIT;
+			INP_WUNLOCK(inp);
+			break;
 #endif
 
 		case TCP_KEEPCNT:
@@ -1616,6 +1631,11 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 #ifdef PROMISCUOUS_INET
 		case TCP_TRIVIAL_ISN:
 			optval = (tp->t_flags & TF_TRIVIAL_ISN) ? 1 : 0;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof optval);
+			break;
+		case TCP_NOTIMEWAIT:
+			optval = (tp->t_flags & TF_NO_TIMEWAIT) ? 1 : 0;
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &optval, sizeof optval);
 			break;
@@ -1929,8 +1949,8 @@ db_print_tflags(u_int t_flags)
 		db_printf("%sTF_MORETOCOME", comma ? ", " : "");
 		comma = 1;
 	}
-	if (t_flags & TF_LQ_OVERFLOW) {
-		db_printf("%sTF_LQ_OVERFLOW", comma ? ", " : "");
+	if (t_flags & TF_NO_TIMEWAIT) {
+		db_printf("%sTF_NO_TIMEWAIT", comma ? ", " : "");
 		comma = 1;
 	}
 	if (t_flags & TF_LASTIDLE) {

@@ -165,6 +165,7 @@ struct tcphdr {
 #define	TCP_KEEPCNT	0x400	/* L,N number of keepalives before close */
 #define	TCP_REASSDL	0x800	/* wait this long for missing segments */
 #define	TCP_TRIVIAL_ISN	0x1000	/* use cheap, insecure ISN */
+#define	TCP_NOTIMEWAIT	0x2000	/* skip TIMEWAIT state */
 
 #define	TCP_CA_NAME_MAX	16	/* max congestion control name length */
 

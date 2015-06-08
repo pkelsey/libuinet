@@ -249,7 +249,7 @@ struct tcpcb {
 #define	TF_NOPUSH	0x001000	/* don't push */
 #define	TF_PREVVALID	0x002000	/* saved values for bad rxmit valid */
 #define	TF_MORETOCOME	0x010000	/* More data to be appended to sock */
-#define	TF_LQ_OVERFLOW	0x020000	/* listen queue overflow */
+#define	TF_NO_TIMEWAIT	0x020000	/* skip TIME_WAIT state */
 #define	TF_LASTIDLE	0x040000	/* connection was previously idle */
 #define	TF_RXWIN0SENT	0x080000	/* sent a receiver win 0 in response */
 #define	TF_FASTRECOVERY	0x100000	/* in NewReno Fast Recovery */

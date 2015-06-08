@@ -267,6 +267,7 @@ struct uinet_linger {
 #define	UINET_TCP_KEEPCNT	0x400	/* L,N number of keepalives before close */
 #define UINET_TCP_REASSDL	0x800	/* wait this long for missing segments */
 #define UINET_TCP_TRIVIAL_ISN	0x1000	/* use cheap, insecure ISN */
+#define	UINET_TCP_NOTIMEWAIT	0x2000	/* skip TIMEWAIT state */
 
 struct uinet_tcp_info {
 	uint8_t		tcpi_state;		/* TCP FSM state. */

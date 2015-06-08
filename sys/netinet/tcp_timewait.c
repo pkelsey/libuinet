@@ -236,6 +236,13 @@ tcp_twstart(struct tcpcb *tp)
 		}
 	}
 
+	if (tp->t_flags & TF_NO_TIMEWAIT) {
+		tp = tcp_close(tp);
+		if (tp != NULL)
+			INP_WUNLOCK(inp);
+		return;
+	}
+
 	tw = uma_zalloc(V_tcptw_zone, M_NOWAIT);
 	if (tw == NULL) {
 		tw = tcp_tw_2msl_scan(1);

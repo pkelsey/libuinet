@@ -1223,7 +1223,7 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	tp->last_ack_sent = tp->rcv_nxt;
 #endif
 
-	tp->t_flags = sototcpcb(lso)->t_flags & (TF_NOPUSH|TF_NODELAY);
+	tp->t_flags = sototcpcb(lso)->t_flags & (TF_NOPUSH|TF_NODELAY|TF_NO_TIMEWAIT);
 	if (sc->sc_flags & SCF_NOOPT)
 		tp->t_flags |= TF_NOOPT;
 	else {
@@ -1546,7 +1546,7 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 	tp->rcv_adv += tp->rcv_wnd;
 	tp->last_ack_sent = tp->rcv_nxt;
 
-	tp->t_flags = sototcpcb(lso)->t_flags & (TF_NOPUSH|TF_NODELAY);
+	tp->t_flags = sototcpcb(lso)->t_flags & (TF_NOPUSH|TF_NODELAY|TF_NO_TIMEWAIT);
 	if (sc->sc_flags & SCF_NOOPT)
 		tp->t_flags |= TF_NOOPT;
 	else {
