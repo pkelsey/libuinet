@@ -46,7 +46,4 @@ struct uinet_demo_passive_extract {
 };
 
 
-void uinet_demo_passive_extract_init(void);
-
-
 #endif /* _UINET_DEMO_PASSIVE_EXTRACT_H_ */

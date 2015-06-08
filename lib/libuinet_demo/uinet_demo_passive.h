@@ -42,7 +42,4 @@ struct uinet_demo_passive {
 };
 
 
-void uinet_demo_passive_init(void);
-
-
 #endif /* _UINET_DEMO_PASSIVE_H_ */

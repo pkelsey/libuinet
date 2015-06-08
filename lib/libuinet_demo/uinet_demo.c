@@ -106,6 +106,27 @@ uinet_demo_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
 
 
 
+int
+uinet_demo_init(void)
+{
+	uinet_demo_util_init();
+
+	UINET_DEMO_INIT(connscale);
+	UINET_DEMO_INIT(echo);
+	UINET_DEMO_INIT(passive);
+	UINET_DEMO_INIT(passive_extract);
+
+	return (0);
+}
+
+
+void
+uinet_demo_shutdown(void)
+{
+	uinet_demo_util_shutdown();
+}
+
+
 /*
  * Internal methods
  */

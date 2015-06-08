@@ -42,7 +42,7 @@ static void echo_print_cfg(struct uinet_demo_config *cfg);
 static int echo_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
 		      struct ev_loop *loop);
 
-static struct uinet_demo_info echo_info = {
+struct uinet_demo_info echo_info = {
 	.which = UINET_DEMO_ECHO,
 	.name = "echo server",
 	.print_usage = echo_print_usage,
@@ -51,8 +51,6 @@ static struct uinet_demo_info echo_info = {
 	.print_cfg = echo_print_cfg,
 	.start = echo_start
 };
-
-UINET_DEMO_REGISTER(echo, &echo_info);
 
 
 enum echo_option_id {

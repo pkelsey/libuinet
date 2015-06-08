@@ -47,7 +47,7 @@ static void passive_extract_print_cfg(struct uinet_demo_config *cfg);
 static int passive_extract_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
 			 struct ev_loop *loop);
 
-static struct uinet_demo_info passive_extract_info = {
+struct uinet_demo_info passive_extract_info = {
 	.which = UINET_DEMO_PASSIVE_EXTRACT,
 	.name = "passive extract server",
 	.print_usage = passive_extract_print_usage,
@@ -56,8 +56,6 @@ static struct uinet_demo_info passive_extract_info = {
 	.print_cfg = passive_extract_print_cfg,
 	.start = passive_extract_start
 };
-
-UINET_DEMO_REGISTER(passive_extract, &passive_extract_info);
 
 
 enum passive_extract_option_id {

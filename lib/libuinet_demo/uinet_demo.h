@@ -33,6 +33,7 @@
 
 
 enum uinet_demo_id {
+	UINET_DEMO_CONNSCALE,
 	UINET_DEMO_ECHO,
 	UINET_DEMO_PASSIVE,
 	UINET_DEMO_PASSIVE_EXTRACT,
@@ -51,6 +52,9 @@ struct uinet_demo_config {
 	struct ev_loop *loop;
 };
 
+
+int uinet_demo_init(void);
+void uinet_demo_shutdown(void);
 
 const char *uinet_demo_name(enum uinet_demo_id which);
 void uinet_demo_print_usage(enum uinet_demo_id which);

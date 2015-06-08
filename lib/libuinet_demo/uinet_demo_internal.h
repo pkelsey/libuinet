@@ -42,12 +42,11 @@ struct uinet_demo_info {
 		     struct ev_loop *loop);
 };
 
-#define UINET_DEMO_REGISTER(which, demo_info)				\
-void									\
-uinet_demo_## which ##_init(void) {					\
-	uinet_demo_register(demo_info);					\
-}
-
+#define UINET_DEMO_INIT(which)					\
+	do {							\
+		extern struct uinet_demo_info which ## _info;	\
+		uinet_demo_register(&which ## _info);		\
+	} while (0)
 
 void uinet_demo_register(struct uinet_demo_info *info);
 void uinet_demo_base_init_cfg(struct uinet_demo_config *cfg, enum uinet_demo_id which,

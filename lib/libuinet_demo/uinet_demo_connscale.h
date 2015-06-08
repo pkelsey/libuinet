@@ -23,23 +23,42 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _UINET_DEMO_ECHO_H_
-#define _UINET_DEMO_ECHO_H_
+#ifndef _UINET_DEMO_CONNSCALE_H_
+#define _UINET_DEMO_CONNSCALE_H_
 
 #include "uinet_demo.h"
+#include "uinet_demo_util.h"
 
-
-struct uinet_demo_echo {
+struct uinet_demo_connscale {
 	struct uinet_demo_config cfg;
-	char listen_addr[UINET_NAME_BUF_LEN];
-	unsigned int listen_port;
-	int promisc;
-	int sink;
 
-	uint64_t next_id;
-	struct uinet_socket *listen_socket;
-	ev_uinet listen_watcher;
+	struct uinet_demo_mac_addr_range local_mac_addrs;
+	struct uinet_demo_mac_addr_range foreign_mac_addrs;
+	struct uinet_demo_ipv4_addr_range local_ipv4_addrs;
+	struct uinet_demo_ipv4_addr_range foreign_ipv4_addrs;
+	struct uinet_demo_port_range local_ports;
+	struct uinet_demo_port_range foreign_ports;
+	struct uinet_demo_vlan_range vlans;
+	unsigned int server;
+
+	uint64_t num_tuples;
+	uint64_t next_tuple;
+	uint64_t num_listens;
+	uint64_t num_connections;
+	uinet_pool_t connection_pool;
+	uinet_if_t next_client_conn_if;
+
+	uint64_t client_current_period;
+	uint64_t client_connections_launched;
+	uint64_t client_connections_max;
+	ev_timer connection_launch_watcher;
+	unsigned int connection_launch_rate;
+	ev_tstamp connection_launch_period;
+	double client_connections_per_period;
 };
 
 
-#endif /* _UINET_DEMO_ECHO_H_ */
+void uinet_demo_connscale_init(void);
+
+
+#endif /* _UINET_DEMO_CONNSCALE_H_ */

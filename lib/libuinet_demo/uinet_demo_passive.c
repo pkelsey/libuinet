@@ -43,7 +43,7 @@ static void passive_print_cfg(struct uinet_demo_config *cfg);
 static int passive_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
 			 struct ev_loop *loop);
 
-static struct uinet_demo_info passive_info = {
+struct uinet_demo_info passive_info = {
 	.which = UINET_DEMO_PASSIVE,
 	.name = "passive server",
 	.print_usage = passive_print_usage,
@@ -52,8 +52,6 @@ static struct uinet_demo_info passive_info = {
 	.print_cfg = passive_print_cfg,
 	.start = passive_start
 };
-
-UINET_DEMO_REGISTER(passive, &passive_info);
 
 
 enum passive_option_id {
