@@ -40,6 +40,10 @@ struct uinet_demo_connscale {
 	struct uinet_demo_port_range foreign_ports;
 	struct uinet_demo_vlan_range vlans;
 	unsigned int server;
+	unsigned int read_size;
+	unsigned int read_remaining;
+	unsigned int write_size;
+	unsigned int write_remaining;
 
 	uint64_t num_tuples;
 	uint64_t next_tuple;

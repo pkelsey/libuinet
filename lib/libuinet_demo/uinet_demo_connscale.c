@@ -64,7 +64,9 @@ enum connscale_option_id {
 	CONNSCALE_OPT_MAX_CONN,
 	CONNSCALE_OPT_RATE,
 	CONNSCALE_OPT_RST_CLOSE,
+	CONNSCALE_OPT_RX_SIZE,
 	CONNSCALE_OPT_SERVER,
+	CONNSCALE_OPT_TX_SIZE,
 	CONNSCALE_OPT_VLAN
 };
 
@@ -78,7 +80,9 @@ static const struct option connscale_long_options[] = {
 	{ "max-conn",		required_argument,	NULL,	CONNSCALE_OPT_MAX_CONN },
 	{ "rate",		required_argument,	NULL,	CONNSCALE_OPT_RATE },
 	{ "rst-close",		no_argument,		NULL,	CONNSCALE_OPT_RST_CLOSE },
+	{ "rx-size",		required_argument,	NULL,	CONNSCALE_OPT_RX_SIZE },
 	{ "server",		no_argument,		NULL,	CONNSCALE_OPT_SERVER },
+	{ "tx-size",		required_argument,	NULL,	CONNSCALE_OPT_TX_SIZE },
 	{ "verbose",		no_argument,		NULL, 	'v' },
 	{ "vlan",		required_argument,	NULL,	CONNSCALE_OPT_VLAN},
 	{ 0, 0, 0, 0 }
@@ -112,7 +116,9 @@ connscale_print_usage(void)
 	printf("  --max-conn <value>      Maximum number of client connections to attempt, 0 means unlimited (default is 0)\n");
 	printf("  --rate <value>          Number of client connections to attempt per second, 0 means serially (default is 0)\n");
 	printf("  --rst-close             Send RST when closing client connections (default is normal TCP close)\n");
+	printf("  --rx-size               Server receive size before transmitting or client receive size after transmitting (default is 0)\n");
 	printf("  --server                Function as a server instead of a client\n");
+	printf("  --tx-size               Server transmit size after receiving or client transmit size before receiving (default is 0)\n");
 	printf("  --verbose, -v           Increase connscale client/server verbosity above the baseline (can use multiple times)\n");
 	printf("  --vlan <vlan>|<vlan1>-<vlan2>\n");
 	printf("                          Specify the VLAN tag stack or range to use (default is none)\n");
@@ -205,8 +211,14 @@ connscale_process_args(struct uinet_demo_config *cfg, int argc, char **argv)
 		case CONNSCALE_OPT_RST_CLOSE:
 			connscale->client_rst_close = 1;
 			break;
+		case CONNSCALE_OPT_RX_SIZE:
+			connscale->read_size = strtoul(optarg, NULL, 10);
+			break;
 		case CONNSCALE_OPT_SERVER:
 			connscale->server = 1;
+			break;
+		case CONNSCALE_OPT_TX_SIZE:
+			connscale->write_size = strtoul(optarg, NULL, 10);
 			break;
 		case CONNSCALE_OPT_VLAN:
 			if (uinet_demo_get_vlan_range(optarg,
@@ -376,22 +388,14 @@ connscale_server_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 	struct uinet_demo_connscale *connscale = conn->connscale;
 	struct uinet_iovec iov;
 	struct uinet_uio uio;
-	int max_read;
 	int read_size;
+	int write_size;
 	int error;
 #define BUFFER_SIZE (64*1024)
 	char buffer[BUFFER_SIZE];
 
-	max_read = uinet_soreadable(w->so, 0);
-	if (max_read <= 0) {
-		/* the watcher should never be invoked if there is no error and there no bytes to be read */
-		assert(max_read != 0);
-		if (conn->verbose)
-			printf("%s: connection %llu: can't read, closing\n",
-			       connscale->cfg.name, (unsigned long long)conn->id);
-		goto err;
-	} else {
-		read_size = BUFFER_SIZE;
+	if (connscale->read_remaining > 0) {
+		read_size = connscale->read_remaining > BUFFER_SIZE ? BUFFER_SIZE : connscale->read_remaining;
 
 		uio.uio_iov = &iov;
 		iov.iov_base = buffer;
@@ -402,15 +406,44 @@ connscale_server_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 
 		error = uinet_soreceive(w->so, NULL, &uio, NULL);
 		if (0 != error) {
-			printf("%s: connection %llu: read error (%d), closing\n",
-			       connscale->cfg.name, (unsigned long long)conn->id, error);
+			if (conn->verbose)
+				printf("%s: connection %llu: read error (%d), closing\n",
+				       connscale->cfg.name, (unsigned long long)conn->id, error);
 			goto err;
+		}
+
+		connscale->read_remaining -= read_size - uio.uio_resid;
+	}
+
+	if ((connscale->read_remaining == 0) && (connscale->write_remaining > 0)) {
+		write_size = connscale->write_remaining > BUFFER_SIZE ? BUFFER_SIZE : connscale->write_remaining;
+
+		uio.uio_iov = &iov;
+		iov.iov_base = buffer;
+		iov.iov_len = write_size;
+		uio.uio_iovcnt = 1;
+		uio.uio_offset = 0;
+		uio.uio_resid = write_size;
+		error = uinet_sosend(w->so, NULL, &uio, 0);
+		if (0 != error) {
+			if (conn->verbose)
+				printf("%s: connection %llu: write error (%d), closing\n",
+				       connscale->cfg.name, (unsigned long long)conn->id, error);
+			goto err;
+		}
+
+		connscale->write_remaining -= write_size - uio.uio_resid;
+		if ((connscale->write_remaining > 0) && (w->events == EV_READ)) {
+			ev_uinet_stop(loop, w);
+			w->events = EV_WRITE;
+			ev_uinet_start(loop, w);
 		}
 	}
 
-	return;
+	if ((connscale->read_remaining > 0) || (connscale->write_remaining > 0))
+		return;
 
-err:
+ err:
 	ev_uinet_stop(loop, w);
 	ev_uinet_detach(w->ctx);
 	uinet_soclose(w->so);
@@ -493,8 +526,12 @@ connscale_accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 				ev_uinet_start(loop, &connected_conn->watcher);
 			}
 
+			connscale->read_remaining = connscale->read_size;
+			connscale->write_remaining = connscale->write_size;
+
 			ev_init(&conn->watcher, connscale_server_cb);
-			ev_uinet_set(&conn->watcher, soctx, EV_READ);
+			ev_uinet_set(&conn->watcher, soctx, 
+				     ((connscale->read_remaining > 0) || (connscale->write_remaining == 0)) ? EV_READ : EV_WRITE);
 			conn->watcher.data = conn;
 			ev_uinet_start(loop, &conn->watcher);
 			
@@ -668,45 +705,13 @@ connscale_client_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 {
 	struct connscale_connection *conn = w->data;
 	struct uinet_demo_connscale *connscale = conn->connscale;
-#if 0
 	struct uinet_iovec iov;
 	struct uinet_uio uio;
-	int max_read;
 	int read_size;
+	int write_size;
 	int error;
 #define BUFFER_SIZE (64*1024)
 	char buffer[BUFFER_SIZE];
-
-	max_read = uinet_soreadable(w->so, 0);
-	if (max_read <= 0) {
-		/* the watcher should never be invoked if there is no error and there no bytes to be read */
-		assert(max_read != 0);
-		if (conn->verbose)
-			printf("%s: connection %llu: can't read, closing\n",
-			       connscale->cfg.name, (unsigned long long)conn->id);
-		goto err;
-	} else {
-		read_size = BUFFER_SIZE;
-
-		uio.uio_iov = &iov;
-		iov.iov_base = buffer;
-		iov.iov_len = read_size;
-		uio.uio_iovcnt = 1;
-		uio.uio_offset = 0;
-		uio.uio_resid = read_size;
-
-		error = uinet_soreceive(w->so, NULL, &uio, NULL);
-		if (0 != error) {
-			printf("%s: connection %llu: read error (%d), closing\n",
-			       connscale->cfg.name, (unsigned long long)conn->id, error);
-			goto err;
-		}
-	}
-
-	return;
-
-err:
-#endif
 	struct uinet_sockaddr_in *sin1, *sin2;
 	char buf1[32], buf2[32];
 
@@ -721,6 +726,56 @@ err:
 		uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
 	}
 
+	if (connscale->write_remaining > 0) {
+		write_size = connscale->write_remaining > BUFFER_SIZE ? BUFFER_SIZE : connscale->write_remaining;
+
+		uio.uio_iov = &iov;
+		iov.iov_base = buffer;
+		iov.iov_len = write_size;
+		uio.uio_iovcnt = 1;
+		uio.uio_offset = 0;
+		uio.uio_resid = write_size;
+		error = uinet_sosend(w->so, NULL, &uio, 0);
+		if (0 != error) {
+			if (conn->verbose)
+				printf("%s: connection %llu: write error (%d), closing\n",
+				       connscale->cfg.name, (unsigned long long)conn->id, error);
+			goto err;
+		}
+
+		connscale->write_remaining -= write_size - uio.uio_resid;
+	}
+
+	if ((connscale->write_remaining == 0)  && (connscale->read_remaining > 0)) {
+		read_size = connscale->read_remaining > BUFFER_SIZE ? BUFFER_SIZE : connscale->read_remaining;
+
+		uio.uio_iov = &iov;
+		iov.iov_base = buffer;
+		iov.iov_len = read_size;
+		uio.uio_iovcnt = 1;
+		uio.uio_offset = 0;
+		uio.uio_resid = read_size;
+
+		error = uinet_soreceive(w->so, NULL, &uio, NULL);
+		if (0 != error) {
+			if (conn->verbose)
+				printf("%s: connection %llu: read error (%d), closing\n",
+				       connscale->cfg.name, (unsigned long long)conn->id, error);
+			goto err;
+		}
+
+		connscale->read_remaining -= read_size - uio.uio_resid;
+		if ((connscale->read_remaining > 0) && (w->events == EV_WRITE)) {
+			ev_uinet_stop(loop, w);
+			w->events = EV_READ;
+			ev_uinet_start(loop, w);
+		}
+	}
+
+	if ((connscale->read_remaining > 0) || (connscale->write_remaining > 0))
+		return;
+
+ err:
 	ev_uinet_stop(loop, w);
 	ev_uinet_detach(w->ctx);
 	uinet_soclose(w->so);
@@ -904,11 +959,15 @@ connscale_connect(struct uinet_demo_connscale *connscale, uint64_t index)
 
 	conn->id = connscale->client_connections_launched++;
 
+	connscale->write_remaining = connscale->write_size;
+	connscale->read_remaining = connscale->read_size;
+
 	/*
 	 * Set up a write watcher to continue when the connection is complete
 	 */
 	ev_init(&conn->watcher, connscale_client_cb);
-	ev_uinet_set(&conn->watcher, soctx, EV_WRITE);
+	ev_uinet_set(&conn->watcher, soctx, 
+		     ((connscale->write_remaining > 0) || (connscale->read_remaining == 0)) ? EV_WRITE : EV_READ);
 	conn->watcher.data = conn;
 	ev_uinet_start(connscale->cfg.loop, &conn->watcher);
 
