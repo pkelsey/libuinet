@@ -1477,7 +1477,7 @@ tcp_addoptions(struct tcpopt *to, u_char *optp)
 		case TOF_SACK:
 			{
 			int sackblks = 0;
-			struct sackblk *sack = (struct sackblk *)to->to_sacks;
+			const struct sackblk *sack = (const struct sackblk *)to->to_sacks;
 			tcp_seq sack_seq;
 
 			while (!optlen || optlen % 4 != 2) {
