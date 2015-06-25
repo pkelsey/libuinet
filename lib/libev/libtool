@@ -1,4 +1,499 @@
 #! /bin/sh
+# Generated automatically by config.status (libev) 4.20
+# Libtool was configured on host carbon:
+# NOTE: Changes made to this file will be lost: look at ltmain.sh.
+
+# Provide generalized library-building support services.
+# Written by Gordon Matzigkeit, 1996
+
+# Copyright (C) 2014 Free Software Foundation, Inc.
+# This is free software; see the source for copying conditions.  There is NO
+# warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+# GNU Libtool is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of of the License, or
+# (at your option) any later version.
+#
+# As a special exception to the GNU General Public License, if you
+# distribute this file as part of a program or library that is built
+# using GNU Libtool, you may include this file under the  same
+# distribution terms that you use for the rest of that program.
+#
+# GNU Libtool is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
+# The names of the tagged configurations supported by this script.
+available_tags=''
+
+# Configured defaults for sys_lib_dlsearch_path munging.
+: ${LT_SYS_LIBRARY_PATH=""}
+
+# ### BEGIN LIBTOOL CONFIG
+
+# Which release of libtool.m4 was used?
+macro_version=2.4.6
+macro_revision=2.4.6
+
+# Whether or not to build shared libraries.
+build_libtool_libs=no
+
+# Whether or not to build static libraries.
+build_old_libs=yes
+
+# What type of objects to build.
+pic_mode=default
+
+# Whether or not to optimize for fast installation.
+fast_install=needless
+
+# Shared archive member basename,for filename based shared library versioning on AIX.
+shared_archive_member_spec=
+
+# Shell to use when invoking shell scripts.
+SHELL="/bin/sh"
+
+# An echo program that protects backslashes.
+ECHO="printf %s\\n"
+
+# The PATH separator for the build system.
+PATH_SEPARATOR=":"
+
+# The host system.
+host_alias=
+host=amd64-unknown-freebsd11.0
+host_os=freebsd11.0
+
+# The build system.
+build_alias=
+build=amd64-unknown-freebsd11.0
+build_os=freebsd11.0
+
+# A sed program that does not truncate output.
+SED="/usr/local/bin/gsed"
+
+# Sed that helps us avoid accidentally triggering echo(1) options like -n.
+Xsed="$SED -e 1s/^X//"
+
+# A grep program that handles long lines.
+GREP="/usr/bin/grep"
+
+# An ERE matcher.
+EGREP="/usr/bin/grep -E"
+
+# A literal string matcher.
+FGREP="/usr/bin/grep -F"
+
+# A BSD- or MS-compatible name lister.
+NM="/usr/bin/nm"
+
+# Whether we need soft or hard links.
+LN_S="ln -s"
+
+# What is the maximum length of a command?
+max_cmd_len=196608
+
+# Object file suffix (normally "o").
+objext=o
+
+# Executable file suffix (normally "").
+exeext=
+
+# whether the shell understands "unset".
+lt_unset=unset
+
+# turn spaces into newlines.
+SP2NL="tr \\040 \\012"
+
+# turn newlines into spaces.
+NL2SP="tr \\015\\012 \\040\\040"
+
+# convert $build file names to $host format.
+to_host_file_cmd=func_convert_file_noop
+
+# convert $build files to toolchain format.
+to_tool_file_cmd=func_convert_file_noop
+
+# An object symbol dumper.
+OBJDUMP="objdump"
+
+# Method to check whether dependent libraries are shared objects.
+deplibs_check_method="pass_all"
+
+# Command to use when deplibs_check_method = "file_magic".
+file_magic_cmd="\$MAGIC_CMD"
+
+# How to find potential files when deplibs_check_method = "file_magic".
+file_magic_glob=""
+
+# Find potential files using nocaseglob when deplibs_check_method = "file_magic".
+want_nocaseglob="no"
+
+# DLL creation program.
+DLLTOOL="false"
+
+# Command to associate shared and link libraries.
+sharedlib_from_linklib_cmd="printf %s\\n"
+
+# The archiver.
+AR="ar"
+
+# Flags to create an archive.
+AR_FLAGS="cru"
+
+# How to feed a file listing to the archiver.
+archiver_list_spec=""
+
+# A symbol stripping program.
+STRIP="strip"
+
+# Commands used to install an old-style archive.
+RANLIB="ranlib"
+old_postinstall_cmds="chmod 644 \$oldlib~\$RANLIB \$tool_oldlib"
+old_postuninstall_cmds=""
+
+# Whether to use a lock for old archive extraction.
+lock_old_archive_extraction=no
+
+# A C compiler.
+LTCC="cc"
+
+# LTCC compiler flags.
+LTCFLAGS="-O3 -ggdb"
+
+# Take the output of nm and produce a listing of raw symbols and C names.
+global_symbol_pipe="sed -n -e 's/^.*[	 ]\\([BCDEGRST][BCDEGRST]*\\)[	 ][	 ]*\\([_A-Za-z][_A-Za-z0-9]*\\)\$/\\1 \\2 \\2/p' | sed '/ __gnu_lto/d'"
+
+# Transform the output of nm in a proper C declaration.
+global_symbol_to_cdecl="sed -n -e 's/^T .* \\(.*\\)\$/extern int \\1();/p' -e 's/^[BCDEGRST][BCDEGRST]* .* \\(.*\\)\$/extern char \\1;/p'"
+
+# Transform the output of nm into a list of symbols to manually relocate.
+global_symbol_to_import=""
+
+# Transform the output of nm in a C name address pair.
+global_symbol_to_c_name_address="sed -n -e 's/^: \\(.*\\) .*\$/  {\"\\1\", (void *) 0},/p' -e 's/^[BCDEGRST][BCDEGRST]* .* \\(.*\\)\$/  {\"\\1\", (void *) \\&\\1},/p'"
+
+# Transform the output of nm in a C name address pair when lib prefix is needed.
+global_symbol_to_c_name_address_lib_prefix="sed -n -e 's/^: \\(.*\\) .*\$/  {\"\\1\", (void *) 0},/p' -e 's/^[BCDEGRST][BCDEGRST]* .* \\(lib.*\\)\$/  {\"\\1\", (void *) \\&\\1},/p' -e 's/^[BCDEGRST][BCDEGRST]* .* \\(.*\\)\$/  {\"lib\\1\", (void *) \\&\\1},/p'"
+
+# The name lister interface.
+nm_interface="BSD nm"
+
+# Specify filename containing input files for $NM.
+nm_file_list_spec=""
+
+# The root where to search for dependent libraries,and where our libraries should be installed.
+lt_sysroot=
+
+# Command to truncate a binary pipe.
+lt_truncate_bin="/bin/dd bs=4096 count=1"
+
+# The name of the directory that contains temporary libtool files.
+objdir=.libs
+
+# Used to examine libraries when file_magic_cmd begins with "file".
+MAGIC_CMD=file
+
+# Must we lock files when doing compilation?
+need_locks="no"
+
+# Manifest tool.
+MANIFEST_TOOL=":"
+
+# Tool to manipulate archived DWARF debug symbol files on Mac OS X.
+DSYMUTIL=""
+
+# Tool to change global to local symbols on Mac OS X.
+NMEDIT=""
+
+# Tool to manipulate fat objects and archives on Mac OS X.
+LIPO=""
+
+# ldd/readelf like tool for Mach-O binaries on Mac OS X.
+OTOOL=""
+
+# ldd/readelf like tool for 64 bit Mach-O binaries on Mac OS X 10.4.
+OTOOL64=""
+
+# Old archive suffix (normally "a").
+libext=a
+
+# Shared library suffix (normally ".so").
+shrext_cmds=".so"
+
+# The commands to extract the exported symbol list from a shared archive.
+extract_expsyms_cmds=""
+
+# Variables whose values should be saved in libtool wrapper scripts and
+# restored at link time.
+variables_saved_for_relink="PATH LD_LIBRARY_PATH LD_RUN_PATH GCC_EXEC_PREFIX COMPILER_PATH LIBRARY_PATH"
+
+# Do we need the "lib" prefix for modules?
+need_lib_prefix=no
+
+# Do we need a version for libraries?
+need_version=no
+
+# Library versioning type.
+version_type=freebsd-elf
+
+# Shared library runtime path variable.
+runpath_var=LD_RUN_PATH
+
+# Shared library path variable.
+shlibpath_var=LD_LIBRARY_PATH
+
+# Is shlibpath searched before the hard-coded library search path?
+shlibpath_overrides_runpath=yes
+
+# Format of library name prefix.
+libname_spec="lib\$name"
+
+# List of archive names.  First name is the real one, the rest are links.
+# The last name is the one that the linker finds with -lNAME
+library_names_spec="\$libname\$release\$shared_ext\$versuffix \$libname\$release\$shared_ext\$major \$libname\$shared_ext"
+
+# The coded name of the library, if different from the real name.
+soname_spec="\$libname\$release\$shared_ext\$major"
+
+# Permission mode override for installation of shared libraries.
+install_override_mode=""
+
+# Command to use after installation of a shared archive.
+postinstall_cmds=""
+
+# Command to use after uninstallation of a shared archive.
+postuninstall_cmds=""
+
+# Commands used to finish a libtool library installation in a directory.
+finish_cmds=""
+
+# As "finish_cmds", except a single script fragment to be evaled but
+# not shown.
+finish_eval=""
+
+# Whether we should hardcode library paths into libraries.
+hardcode_into_libs=yes
+
+# Compile-time system search path for libraries.
+sys_lib_search_path_spec="/usr/lib/clang/3.6.1 /usr/lib "
+
+# Detected run-time system search path for libraries.
+sys_lib_dlsearch_path_spec="/lib /usr/lib"
+
+# Explicit LT_SYS_LIBRARY_PATH set during ./configure time.
+configure_time_lt_sys_library_path=""
+
+# Whether dlopen is supported.
+dlopen_support=unknown
+
+# Whether dlopen of programs is supported.
+dlopen_self=unknown
+
+# Whether dlopen of statically linked programs is supported.
+dlopen_self_static=unknown
+
+# Commands to strip libraries.
+old_striplib=""
+striplib=""
+
+
+# The linker used to build libraries.
+LD="/usr/bin/ld"
+
+# How to create reloadable object files.
+reload_flag=" -r"
+reload_cmds="\$LD\$reload_flag -o \$output\$reload_objs"
+
+# Commands used to build an old-style archive.
+old_archive_cmds="\$AR \$AR_FLAGS \$oldlib\$oldobjs~\$RANLIB \$tool_oldlib"
+
+# A language specific compiler.
+CC="cc"
+
+# Is the compiler the GNU compiler?
+with_gcc=yes
+
+# Compiler flag to turn off builtin functions.
+no_builtin_flag=" -fno-builtin -fno-rtti -fno-exceptions"
+
+# Additional compiler flags for building library objects.
+pic_flag=" -fPIC -DPIC"
+
+# How to pass a linker flag through the compiler.
+wl="-Wl,"
+
+# Compiler flag to prevent dynamic linking.
+link_static_flag="-static"
+
+# Does compiler simultaneously support -c and -o options?
+compiler_c_o="yes"
+
+# Whether or not to add -lc for building shared libraries.
+build_libtool_need_lc=yes
+
+# Whether or not to disallow shared libs when runtime libs are static.
+allow_libtool_libs_with_static_runtimes=no
+
+# Compiler flag to allow reflexive dlopens.
+export_dynamic_flag_spec="\$wl--export-dynamic"
+
+# Compiler flag to generate shared objects directly from archives.
+whole_archive_flag_spec="\$wl--whole-archive\$convenience \$wl--no-whole-archive"
+
+# Whether the compiler copes with passing no objects directly.
+compiler_needs_object="no"
+
+# Create an old-style archive from a shared archive.
+old_archive_from_new_cmds=""
+
+# Create a temporary old-style archive to link instead of a shared archive.
+old_archive_from_expsyms_cmds=""
+
+# Commands used to build a shared archive.
+archive_cmds="\$CC -shared \$pic_flag \$libobjs \$deplibs \$compiler_flags \$wl-soname \$wl\$soname -o \$lib"
+archive_expsym_cmds="\$CC -shared \$pic_flag \$libobjs \$deplibs \$compiler_flags \$wl-soname \$wl\$soname \$wl-retain-symbols-file \$wl\$export_symbols -o \$lib"
+
+# Commands used to build a loadable module if different from building
+# a shared archive.
+module_cmds=""
+module_expsym_cmds=""
+
+# Whether we are building with GNU ld or not.
+with_gnu_ld="yes"
+
+# Flag that allows shared libraries with undefined symbols to be built.
+allow_undefined_flag=""
+
+# Flag that enforces no undefined symbols.
+no_undefined_flag=""
+
+# Flag to hardcode $libdir into a binary during linking.
+# This must work even if $libdir does not exist
+hardcode_libdir_flag_spec="\$wl-rpath \$wl\$libdir"
+
+# Whether we need a single "-rpath" flag with a separated argument.
+hardcode_libdir_separator=""
+
+# Set to "yes" if using DIR/libNAME$shared_ext during linking hardcodes
+# DIR into the resulting binary.
+hardcode_direct=no
+
+# Set to "yes" if using DIR/libNAME$shared_ext during linking hardcodes
+# DIR into the resulting binary and the resulting library dependency is
+# "absolute",i.e impossible to change by setting $shlibpath_var if the
+# library is relocated.
+hardcode_direct_absolute=no
+
+# Set to "yes" if using the -LDIR flag during linking hardcodes DIR
+# into the resulting binary.
+hardcode_minus_L=no
+
+# Set to "yes" if using SHLIBPATH_VAR=DIR during linking hardcodes DIR
+# into the resulting binary.
+hardcode_shlibpath_var=unsupported
+
+# Set to "yes" if building a shared library automatically hardcodes DIR
+# into the library and all subsequent libraries and executables linked
+# against it.
+hardcode_automatic=no
+
+# Set to yes if linker adds runtime paths of dependent libraries
+# to runtime path list.
+inherit_rpath=no
+
+# Whether libtool must link a program against all its dependency libraries.
+link_all_deplibs=unknown
+
+# Set to "yes" if exported symbols are required.
+always_export_symbols=no
+
+# The commands to list exported symbols.
+export_symbols_cmds="\$NM \$libobjs \$convenience | \$global_symbol_pipe | \$SED 's/.* //' | sort | uniq > \$export_symbols"
+
+# Symbols that should not be listed in the preloaded symbols.
+exclude_expsyms="_GLOBAL_OFFSET_TABLE_|_GLOBAL__F[ID]_.*"
+
+# Symbols that must always be exported.
+include_expsyms=""
+
+# Commands necessary for linking programs (against libraries) with templates.
+prelink_cmds=""
+
+# Commands necessary for finishing linking programs.
+postlink_cmds=""
+
+# Specify filename containing input files.
+file_list_spec=""
+
+# How to hardcode a shared library path into an executable.
+hardcode_action=immediate
+
+# ### END LIBTOOL CONFIG
+
+
+# ### BEGIN FUNCTIONS SHARED WITH CONFIGURE
+
+# func_munge_path_list VARIABLE PATH
+# -----------------------------------
+# VARIABLE is name of variable containing _space_ separated list of
+# directories to be munged by the contents of PATH, which is string
+# having a format:
+# "DIR[:DIR]:"
+#       string "DIR[ DIR]" will be prepended to VARIABLE
+# ":DIR[:DIR]"
+#       string "DIR[ DIR]" will be appended to VARIABLE
+# "DIRP[:DIRP]::[DIRA:]DIRA"
+#       string "DIRP[ DIRP]" will be prepended to VARIABLE and string
+#       "DIRA[ DIRA]" will be appended to VARIABLE
+# "DIR[:DIR]"
+#       VARIABLE will be replaced by "DIR[ DIR]"
+func_munge_path_list ()
+{
+    case x$2 in
+    x)
+        ;;
+    *:)
+        eval $1=\"`$ECHO $2 | $SED 's/:/ /g'` \$$1\"
+        ;;
+    x:*)
+        eval $1=\"\$$1 `$ECHO $2 | $SED 's/:/ /g'`\"
+        ;;
+    *::*)
+        eval $1=\"\$$1\ `$ECHO $2 | $SED -e 's/.*:://' -e 's/:/ /g'`\"
+        eval $1=\"`$ECHO $2 | $SED -e 's/::.*//' -e 's/:/ /g'`\ \$$1\"
+        ;;
+    *)
+        eval $1=\"`$ECHO $2 | $SED 's/:/ /g'`\"
+        ;;
+    esac
+}
+
+
+# Calculate cc_basename.  Skip known compiler wrappers and cross-prefix.
+func_cc_basename ()
+{
+    for cc_temp in $*""; do
+      case $cc_temp in
+        compile | *[\\/]compile | ccache | *[\\/]ccache ) ;;
+        distcc | *[\\/]distcc | purify | *[\\/]purify ) ;;
+        \-*) ;;
+        *) break;;
+      esac
+    done
+    func_cc_basename_result=`$ECHO "$cc_temp" | $SED "s%.*/%%; s%^$host_alias-%%"`
+}
+
+
+# ### END FUNCTIONS SHARED WITH CONFIGURE
+
+#! /bin/sh
 ## DO NOT EDIT - This file generated from ./build-aux/ltmain.in
 ##               by inline-source v2014-01-03.01
 
