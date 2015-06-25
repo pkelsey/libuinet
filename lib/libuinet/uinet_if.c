@@ -35,7 +35,7 @@
 
 
 
-static struct uinet_if_type_info *uinet_if_types[UINET_IFTYPE_COUNT];
+static const struct uinet_if_type_info *uinet_if_types[UINET_IFTYPE_COUNT];
 
 
 int
@@ -54,14 +54,14 @@ uinet_if_attach(struct uinet_if *uif, struct ifnet *ifp, void *sc)
 void
 uinet_if_register_type(const void *arg)
 {
-	struct uinet_if_type_info *ti;
+	const struct uinet_if_type_info *ti;
 
-	ti = (struct uinet_if_type_info *)arg;
+	ti = (const struct uinet_if_type_info *)arg;
 	uinet_if_types[ti->type] = ti;
 }
 
 
-struct uinet_if_type_info *
+const struct uinet_if_type_info *
 uinet_if_get_type_info(uinet_iftype_t type)
 {
 	return ((type < UINET_IFTYPE_COUNT) ? uinet_if_types[type] : NULL);

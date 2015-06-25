@@ -101,7 +101,7 @@ struct uinet_if {
 
 
 int uinet_if_attach(struct uinet_if *uif, struct ifnet *ifp, void *sc);
-struct uinet_if_type_info *uinet_if_get_type_info(uinet_iftype_t type);
+const struct uinet_if_type_info *uinet_if_get_type_info(uinet_iftype_t type);
 
 /* only used in SYSINIT via UINET_IF_REGISTER_TYPE() */
 void uinet_if_register_type(const void *arg);

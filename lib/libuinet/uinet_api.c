@@ -1890,7 +1890,7 @@ uinet_instance_destroy(uinet_instance_t uinst)
 void
 uinet_if_default_config(uinet_iftype_t type, struct uinet_if_cfg *cfg)
 {
-	struct uinet_if_type_info *ti;
+	const struct uinet_if_type_info *ti;
 
 	ti = uinet_if_get_type_info(type);
 	if (ti && cfg) {

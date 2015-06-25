@@ -261,7 +261,7 @@ uinet_ifgenericname(uinet_if_t uif)
 const char *
 uinet_iftypename(uinet_iftype_t type)
 {
-	struct uinet_if_type_info *ti;
+	const struct uinet_if_type_info *ti;
 
 	ti = uinet_if_get_type_info(type);
 	if (ti == NULL)
