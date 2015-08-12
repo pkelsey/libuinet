@@ -548,9 +548,9 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 	ifr.ifr_reqcap = ifr.ifr_curcap;
 
 	if (on)
-		ifr.ifr_reqcap |= IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO;
+		ifr.ifr_reqcap |= IFCAP_HWCSUM | IFCAP_LRO | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO;
 	else
-		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
+		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_LRO | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
 
 	if (-1 == ioctl(ctx->cfgfd, SIOCSIFCAP, &ifr)) {
 		perror("set interface capabilities failed");
@@ -558,9 +558,9 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 	}
 #elif defined(__linux__)
 
-	/* XXX 
-	 * Apparently there's no way to disable VLAN offload before 2.6.37?
-	 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
+	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_LRO, on);
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
 	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_RXVLAN, on);
 	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_TXVLAN, on);
