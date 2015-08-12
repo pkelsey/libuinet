@@ -1181,7 +1181,7 @@ int main(int argc, char **argv)
 	}
 
 	if (baseline_verbose)
-		printf("Creating %u event loop%s", num_event_loops, 
+		printf("Creating %u event loop%s\n", num_event_loops, 
 		       num_event_loops == 1 ? "" : "s");
 
 	for (i = 1; i < num_event_loops; i++) {
@@ -1221,7 +1221,7 @@ int main(int argc, char **argv)
 	scfgs[0].uinst = uinet_instance_default();
 
 	if (baseline_verbose)
-		printf("Creating %u stack instance%s", num_stacks, 
+		printf("Creating %u stack instance%s\n", num_stacks, 
 		       num_stacks == 1 ? "" : "s");
 
 	for (i = 1; i < num_stacks; i++) {
@@ -1239,7 +1239,7 @@ int main(int argc, char **argv)
 
 
 	if (baseline_verbose)
-		printf("Creating %u network interface%s", num_ifs, 
+		printf("Creating %u network interface%s\n", num_ifs, 
 		       num_ifs == 1 ? "" : "s");
 
 	for (i = 0; i < num_ifs; i++) {
@@ -1269,7 +1269,7 @@ int main(int argc, char **argv)
 	}
 
 	if (baseline_verbose)
-		printf("Starting %u app%s", num_apps, num_apps == 1 ? "" : "s");
+		printf("Starting %u app%s\n", num_apps, num_apps == 1 ? "" : "s");
 
 	for (i = 0; i < num_ifs; i++) {
 		curifcfg = &ifcfgs[i];
