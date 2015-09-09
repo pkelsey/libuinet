@@ -30,9 +30,10 @@
 #include <sys/socket.h>
 
 #include <net/if.h>
-#include <net/vnet.h>
 
 #include "uinet_api.h"
+
+struct vnet;
 
 struct uinet_instance {
 	struct vnet *ui_vnet;

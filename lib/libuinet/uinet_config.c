@@ -85,7 +85,7 @@ int
 uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configstr,
 	       const char *alias, unsigned int cdom, int cpu, uinet_if_t *uif)
 {
-	struct uinet_if *new_uif;
+	struct uinet_if *new_uif = 0;
 	int alias_len;
 	int error = 0;
 
