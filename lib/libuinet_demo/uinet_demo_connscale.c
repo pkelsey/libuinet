@@ -36,8 +36,7 @@
 #include "uinet_demo_internal.h"
 
 static void connscale_print_usage(void);
-static int connscale_init_cfg(struct uinet_demo_config *cfg, uint64_t id, const char *name,
-			 int verbose);
+static int connscale_init_cfg(struct uinet_demo_config *cfg);
 static int connscale_process_args(struct uinet_demo_config *cfg, int argc, char **argv);
 static void connscale_print_cfg(struct uinet_demo_config *cfg);
 static int connscale_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
@@ -47,6 +46,7 @@ static int connscale_connect(struct uinet_demo_connscale *connscale, uint64_t in
 struct uinet_demo_info connscale_info = {
 	.which = UINET_DEMO_CONNSCALE,
 	.name = "connscale client/server",
+	.cfg_size = sizeof(struct uinet_demo_connscale),
 	.print_usage = connscale_print_usage,
 	.init_cfg = connscale_init_cfg,
 	.process_args = connscale_process_args,
@@ -71,6 +71,7 @@ enum connscale_option_id {
 };
 
 static const struct option connscale_long_options[] = {
+	UINET_DEMO_BASE_LONG_OPTS,
 	{ "foreign-ip",		required_argument,	NULL,	CONNSCALE_OPT_FOREIGN_IP },
 	{ "foreign-mac",	required_argument,	NULL,	CONNSCALE_OPT_FOREIGN_MAC },
 	{ "foreign-port",	required_argument,	NULL,	CONNSCALE_OPT_FOREIGN_PORT },
@@ -83,7 +84,6 @@ static const struct option connscale_long_options[] = {
 	{ "rx-size",		required_argument,	NULL,	CONNSCALE_OPT_RX_SIZE },
 	{ "server",		no_argument,		NULL,	CONNSCALE_OPT_SERVER },
 	{ "tx-size",		required_argument,	NULL,	CONNSCALE_OPT_TX_SIZE },
-	{ "verbose",		no_argument,		NULL, 	'v' },
 	{ "vlan",		required_argument,	NULL,	CONNSCALE_OPT_VLAN},
 	{ 0, 0, 0, 0 }
 };
@@ -119,21 +119,16 @@ connscale_print_usage(void)
 	printf("  --rx-size               Server receive size before transmitting or client receive size after transmitting (default is 0)\n");
 	printf("  --server                Function as a server instead of a client\n");
 	printf("  --tx-size               Server transmit size after receiving or client transmit size before receiving (default is 0)\n");
-	printf("  --verbose, -v           Increase connscale client/server verbosity above the baseline (can use multiple times)\n");
 	printf("  --vlan <vlan>|<vlan1>-<vlan2>\n");
 	printf("                          Specify the VLAN tag stack or range to use (default is none)\n");
 }
 
 
 static int
-connscale_init_cfg(struct uinet_demo_config *cfg, uint64_t id, const char *name, int verbose)
+connscale_init_cfg(struct uinet_demo_config *cfg)
 {
 	struct uinet_demo_connscale *connscale = (struct uinet_demo_connscale *)cfg;
 
-	memset(connscale, 0, sizeof(*connscale));
-	
-	uinet_demo_base_init_cfg(cfg, UINET_DEMO_CONNSCALE, id, name, verbose);
-	
 	uinet_demo_get_mac_addr_range("02:00:00:00:00:01", &connscale->local_mac_addrs);
 	uinet_demo_get_mac_addr_range("02:00:00:00:00:02", &connscale->foreign_mac_addrs);
 	uinet_demo_get_ipv4_addr_range("192.0.2.1", &connscale->local_ipv4_addrs, 1);
@@ -151,7 +146,7 @@ connscale_process_args(struct uinet_demo_config *cfg, int argc, char **argv)
 	struct uinet_demo_connscale *connscale = (struct uinet_demo_connscale *)cfg;
 	int opt;
 
-	while ((opt = getopt_long(argc, argv, ":v",
+	while ((opt = getopt_long(argc, argv, ":" UINET_DEMO_BASE_OPT_STRING,
 				  connscale_long_options, NULL)) != -1) {
 		switch (opt) {
 		case CONNSCALE_OPT_FOREIGN_IP:
@@ -228,12 +223,13 @@ connscale_process_args(struct uinet_demo_config *cfg, int argc, char **argv)
 				return (1);
 			}
 			break;
-		case 'v':
-			cfg->verbose++;
-			break;
 		case ':':
 		case '?':
 			return (opt);
+		default:
+			if (uinet_demo_base_process_arg(cfg, opt, optarg))
+				return (opt);
+			break;
 		}
 	}
 
@@ -1074,8 +1070,6 @@ static int
 connscale_start(struct uinet_demo_config *cfg, uinet_instance_t uinst, struct ev_loop *loop)
 {
 	struct uinet_demo_connscale *connscale = (struct uinet_demo_connscale *)cfg;
-
-	uinet_demo_base_start(cfg, uinst, loop);
 
 	connscale->connection_pool =
 	    uinet_pool_create("connscale connections", sizeof(struct connscale_connection),

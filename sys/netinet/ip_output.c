@@ -32,6 +32,7 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:19:14Z glebius $");
 
+#include "opt_inet.h"
 #include "opt_ipfw.h"
 #include "opt_ipsec.h"
 #include "opt_route.h"
@@ -69,6 +70,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 #include <net/vnet.h>
 
 #include <netinet/in.h>
+#ifdef INET_COPY
+#include <netinet/in_copy.h>
+#endif
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
@@ -981,6 +985,7 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 {
 	struct	inpcb *inp = sotoinpcb(so);
 	int	error, optval;
+	uint64_t optval64;
 
 	error = optval = 0;
 	if (sopt->sopt_level != IPPROTO_IP) {
@@ -1300,6 +1305,85 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		}
 #endif /* PROMISCUOUS_INET */
 
+#ifdef INET_COPY
+		case IP_COPY_MODE:
+			error = sooptcopyin(sopt, &optval, sizeof optval, sizeof optval);
+			if (error)
+				return (error);
+
+			/* XXX copy mode on the TX side is not yet supported */
+			if (optval & IP_COPY_MODE_TX)
+				return (EINVAL);
+
+			/*
+			 * If capture is a possibility, at least one
+			 * direction must be chosen, and if one direction is
+			 * chosen, then capture must be a possibility.
+			 */
+			if (((optval & (IP_COPY_MODE_MAYBE|IP_COPY_MODE_ON)) &&
+			     !(optval & (IP_COPY_MODE_TX|IP_COPY_MODE_RX))) ||
+			    (!(optval & (IP_COPY_MODE_MAYBE|IP_COPY_MODE_ON)) &&
+			     (optval & (IP_COPY_MODE_TX|IP_COPY_MODE_RX))))
+				return (EINVAL);
+
+			/* ON trumps MAYBE */
+			if (optval & IP_COPY_MODE_ON)
+				optval &= ~IP_COPY_MODE_MAYBE;
+				
+			INP_WLOCK(inp);
+			if (optval & IP_COPY_MODE_ON) {
+				if (inp->inp_copy_mode == IP_COPY_MODE_OFF) {
+					/* OFF -> ON */
+					inp->inp_copy_mode = optval;
+				} else if (inp->inp_copy_mode & IP_COPY_MODE_MAYBE) {
+					inp->inp_copy_mode &= ~IP_COPY_MODE_MAYBE;
+					/* MAYBE -> ON */
+					inp->inp_copy_mode |= IP_COPY_MODE_ON;
+					in_copy_flush(inp, 0);
+				}
+			} else if (optval == IP_COPY_MODE_OFF) {
+				if (inp->inp_copy_mode & IP_COPY_MODE_MAYBE) {
+					/* MAYBE -> OFF */
+					in_copy_dispose(inp);
+				} else if (inp->inp_copy_mode & IP_COPY_MODE_ON) {
+					/* ON -> OFF */
+					in_copy_flush(inp, 1);
+				}
+			}
+			inp->inp_copy_mode = optval;
+			INP_WUNLOCK(inp);
+			break;
+
+		case IP_COPY_LIMIT:
+			error = sooptcopyin(sopt, &optval64, sizeof optval64, sizeof optval64);
+			if (error)
+				return (error);
+
+			INP_WLOCK(inp);
+			inp->inp_copy_limit = optval64;
+			INP_WUNLOCK(inp);
+			break;
+
+		case IP_COPY_IF:
+		{
+			struct ifnet *ifp;
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+					    sizeof optval);
+			if (error)
+				break;
+
+			ifp = ifnet_byindex(optval);
+			if (ifp == NULL) {
+				error = EINVAL;
+				break;
+			}
+			INP_WLOCK(inp);
+			inp->inp_copyif = ifp;
+			INP_WUNLOCK(inp);
+			break;
+		}
+#endif /* INET_COPY */
+			
 		default:
 			error = ENOPROTOOPT;
 			break;
@@ -1436,6 +1520,28 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			break;
 #endif /* PROMISCUOUS_INET */
 
+#ifdef INET_COPY
+		case IP_COPY_MODE:
+			INP_WLOCK(inp);
+			optval = inp->inp_copy_mode;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof optval);
+			break;
+
+		case IP_COPY_LIMIT:
+			INP_WLOCK(inp);
+			optval64 = inp->inp_copy_limit;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval64, sizeof optval64);
+			break;
+#endif /* INET_COPY */
+
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+		case IP_SERIALNO:
+			optval64 = inp->inp_serialno;
+			error = sooptcopyout(sopt, &optval64, sizeof optval64);
+			break;
+#endif			
 		default:
 			error = ENOPROTOOPT;
 			break;

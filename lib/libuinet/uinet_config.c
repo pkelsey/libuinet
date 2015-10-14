@@ -47,8 +47,8 @@ vnet_if_list_init(const void *unused __unused)
 }
 VNET_SYSINIT(vnet_if_list_init, SI_SUB_VNET, SI_ORDER_ANY, vnet_if_list_init, 0);
 
-struct uinet_if *
-uinet_iffind_byname(const char *ifname)
+static struct uinet_if *
+uinet_iffind_byname_internal(const char *ifname)
 {
 	struct uinet_if *uif;
 
@@ -66,6 +66,18 @@ uinet_iffind_byname(const char *ifname)
 }
 
 
+uinet_if_t
+uinet_iffind_byname(uinet_instance_t uinst, const char *ifname)
+{
+	struct uinet_if *uif;
+
+	CURVNET_SET(uinst->ui_vnet);
+	uif = uinet_iffind_byname_internal(ifname);
+	CURVNET_RESTORE();
+
+	return (uif);
+}
+
 int
 uinet_ifcreate(uinet_instance_t uinst, struct uinet_if_cfg *cfg, uinet_if_t *uif)
 {
@@ -82,13 +94,13 @@ uinet_ifcreate(uinet_instance_t uinst, struct uinet_if_cfg *cfg, uinet_if_t *uif
 			goto out;
 		}
 		
-		if ((alias_len > 0) && (NULL != uinet_iffind_byname(cfg->alias))) {
+		if ((alias_len > 0) && (NULL != uinet_iffind_byname_internal(cfg->alias))) {
 			error = EEXIST;
 			goto out;
 		}
 	}
 
-	new_uif = malloc(sizeof(struct uinet_if), M_DEVBUF, M_WAITOK);
+	new_uif = malloc(sizeof(struct uinet_if), M_DEVBUF, M_WAITOK | M_ZERO);
 	if (NULL == new_uif) {
 		error = ENOMEM;
 		goto out;
@@ -113,11 +125,13 @@ uinet_ifcreate(uinet_instance_t uinst, struct uinet_if_cfg *cfg, uinet_if_t *uif
 	}
 	new_uif->rx_cpu = cfg->rx_cpu;
 	new_uif->tx_cpu = cfg->tx_cpu;
+	new_uif->rx_batch_size = cfg->rx_batch_size;
 	new_uif->tx_inject_queue_len = cfg->tx_inject_queue_len;
 	new_uif->batch_event_handler = NULL;
 	new_uif->batch_event_handler_arg = NULL;
 	new_uif->first_look_handler = cfg->first_look_handler;
 	new_uif->first_look_handler_arg = cfg->first_look_handler_arg;
+	new_uif->timestamp_mode = cfg->timestamp_mode;
 	new_uif->type_cfg = cfg->type_cfg;
 	
 	new_uif->ifdata = NULL;
@@ -235,7 +249,7 @@ uinet_ifdestroy_byname(uinet_instance_t uinst, const char *ifname)
 	int error = EINVAL;
 
 	CURVNET_SET(uinst->ui_vnet);
-	uif = uinet_iffind_byname(ifname);
+	uif = uinet_iffind_byname_internal(ifname);
 	if (uif)
 		error = uinet_ifdestroy_internal(uinst, uif);
 	CURVNET_RESTORE();

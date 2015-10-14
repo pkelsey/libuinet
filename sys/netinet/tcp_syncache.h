@@ -34,6 +34,7 @@
 #define _NETINET_TCP_SYNCACHE_H_
 #ifdef _KERNEL
 
+#include "opt_inet.h"
 #include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 
@@ -67,7 +68,7 @@ void	 syncache_chkrst(struct in_conninfo *, struct tcphdr *);
 void	 syncache_badack(struct in_conninfo *);
 #endif /* PROMISCUOUS_INET */
 #ifdef PASSIVE_INET
-void	 syncache_passive_synack(struct in_conninfo *, struct tcpopt *,
+int	 syncache_passive_synack(struct in_conninfo *, struct tcpopt *,
 	     struct tcphdr *, struct mbuf *);
 #endif
 int	 syncache_pcbcount(void);
@@ -105,6 +106,12 @@ struct syncache {
 	struct ifnet	*sc_client_txif;	/* Transmit interface to use */
 #endif /* PASSIVE_INET */
 #endif /* PROMISCUOUS_INET */
+#ifdef INET_COPY
+	struct mbuf	*sc_syn;
+#ifdef PASSIVE_INET
+	struct mbuf	*sc_synack;
+#endif /* PASSIVE_INET */
+#endif /* INET_COPY */
 	u_int32_t	sc_spare[2];		/* UTO */
 };
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -30,9 +30,14 @@ struct if_pcap_host_context;
 
 typedef void (*if_pcap_handler)(void *ctx, const uint8_t *buf, unsigned int size);
 
-struct if_pcap_host_context *if_pcap_create_handle(const char *ifname, unsigned int isfile, if_pcap_handler handler, void *handlerarg);
+struct if_pcap_host_context * if_pcap_create_handle(const char *rx_ifname, unsigned int rx_isfile, int *rx_fd, unsigned int rx_isnonblock,
+						    const char *tx_ifname, unsigned int tx_isfile, unsigned int tx_file_snaplen,
+						    unsigned int tx_file_per_flow, unsigned int tx_file_concurrent_flows, unsigned int tx_file_dirbits,
+						    uint32_t tx_file_epoch_no, uint32_t tx_file_instance_index);
 void if_pcap_destroy_handle(struct if_pcap_host_context *ctx);
-int if_pcap_sendpacket(struct if_pcap_host_context *ctx, const uint8_t *buf, unsigned int size);
-int if_pcap_loop(struct if_pcap_host_context *ctx);
+int if_pcap_sendpacket(struct if_pcap_host_context *ctx, const uint8_t *buf, unsigned int size,
+		       uint64_t flowid, uint64_t ts_nsec);
+int if_pcap_getpacket(struct if_pcap_host_context *ctx, uint64_t now,
+		      uint32_t *buffer, uint16_t max_length, uint16_t *length, uint64_t *wait_ns);
 
 #endif /* _UINET_IF_PCAP_HOST_H_ */

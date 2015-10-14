@@ -48,6 +48,20 @@
 #define UHI_O_TRUNC	0x0400
 #define UHI_O_EXCL	0x0800
 
+#define	UHI_S_IRWXU	0000700
+#define	UHI_S_IRUSR	0000400
+#define	UHI_S_IWUSR	0000200
+#define	UHI_S_IXUSR	0000100
+
+#define	UHI_S_IRWXG	0000070
+#define	UHI_S_IRGRP	0000040
+#define	UHI_S_IWGRP	0000020
+#define	UHI_S_IXGRP	0000010
+
+#define	UHI_S_IRWXO	0000007
+#define	UHI_S_IROTH	0000004
+#define	UHI_S_IWOTH	0000002
+#define	UHI_S_IXOTH	0000001
 
 struct uhi_pollfd {
 	int	fd;
@@ -149,6 +163,7 @@ int   uhi_nanosleep(uint64_t nsecs);
 
 int   uhi_open(const char *path, int flags);
 int   uhi_close(int d);
+int   uhi_mkdir(const char *path, unsigned int mode);
 void *uhi_mmap(void *addr, uint64_t len, int prot, int flags, int fd, uint64_t offset);
 int   uhi_munmap(void *addr, uint64_t len);
 int   uhi_poll(struct uhi_pollfd *fds, unsigned int nfds, int timeout);

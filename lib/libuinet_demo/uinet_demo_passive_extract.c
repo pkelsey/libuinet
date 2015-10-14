@@ -40,8 +40,7 @@
 
 
 static void passive_extract_print_usage(void);
-static int passive_extract_init_cfg(struct uinet_demo_config *cfg, uint64_t id, const char *name,
-			    int verbose);
+static int passive_extract_init_cfg(struct uinet_demo_config *cfg);
 static int passive_extract_process_args(struct uinet_demo_config *cfg, int argc, char **argv);
 static void passive_extract_print_cfg(struct uinet_demo_config *cfg);
 static int passive_extract_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
@@ -50,6 +49,7 @@ static int passive_extract_start(struct uinet_demo_config *cfg, uinet_instance_t
 struct uinet_demo_info passive_extract_info = {
 	.which = UINET_DEMO_PASSIVE_EXTRACT,
 	.name = "passive extract server",
+	.cfg_size = sizeof(struct uinet_demo_passive_extract),
 	.print_usage = passive_extract_print_usage,
 	.init_cfg = passive_extract_init_cfg,
 	.process_args = passive_extract_process_args,
@@ -64,9 +64,9 @@ enum passive_extract_option_id {
 };
 
 static const struct option passive_extract_long_options[] = {
+	UINET_DEMO_BASE_LONG_OPTS,
 	{ "content-type", required_argument,	NULL, PASSIVE_EXTRACT_OPT_CONTENT_TYPE },
 	{ "listen",	required_argument,	NULL, PASSIVE_EXTRACT_OPT_LISTEN },
-	{ "verbose",	no_argument,		NULL, 	'v' },
 	{ 0, 0, 0, 0 }
 };
 
@@ -786,19 +786,14 @@ passive_extract_print_usage(void)
 		curtype++;
 	}
 	printf("  --listen <ip:port>      Specify the listen address and port (default is 0.0.0.0:0 - promiscuous listen on all ip:port pairs)\n");
-	printf("  --verbose, -v           Increase passive extract server verbosity above the baseline (can use multiple times)\n");
 }
 
 
 static int
-passive_extract_init_cfg(struct uinet_demo_config *cfg, uint64_t id, const char *name, int verbose)
+passive_extract_init_cfg(struct uinet_demo_config *cfg)
 {
 	struct uinet_demo_passive_extract *passive = (struct uinet_demo_passive_extract *)cfg;
 
-	memset(passive, 0, sizeof(*passive));
-	
-	uinet_demo_base_init_cfg(cfg, UINET_DEMO_PASSIVE_EXTRACT, id, name, verbose);
-	
 	snprintf(passive->listen_addr, sizeof(passive->listen_addr), "%s", "0.0.0.0");
 	passive->promisc = 1;
 
@@ -813,7 +808,7 @@ passive_extract_process_args(struct uinet_demo_config *cfg, int argc, char **arg
 	int opt;
 	unsigned int num_content_types = 0;
 
-	while ((opt = getopt_long(argc, argv, ":v",
+	while ((opt = getopt_long(argc, argv, ":" UINET_DEMO_BASE_OPT_STRING,
 				 passive_extract_long_options, NULL)) != -1) {
 		switch (opt) {
 		case PASSIVE_EXTRACT_OPT_CONTENT_TYPE:
@@ -836,12 +831,13 @@ passive_extract_process_args(struct uinet_demo_config *cfg, int argc, char **arg
 				return (1);
 			}
 			break;
-		case 'v':
-			cfg->verbose++;
-			break;
 		case ':':
 		case '?':
 			return (opt);
+		default:
+			if (uinet_demo_base_process_arg(cfg, opt, optarg))
+				return (opt);
+			break;
 		}
 	}
 
@@ -880,8 +876,6 @@ passive_extract_start(struct uinet_demo_config *cfg, uinet_instance_t uinst, str
 	int optlen, optval;
 	int error;
 	struct uinet_sockaddr_in sin;
-
-	uinet_demo_base_start(cfg, uinst, loop);
 
 	if (uinet_inet_pton(UINET_AF_INET, passive->listen_addr, &addr) <= 0) {
 		printf("%s: Malformed address %s\n", passive->cfg.name, passive->listen_addr);

@@ -28,10 +28,12 @@
 #include <sys/param.h>
 #include <sys/kernel.h>
 #include <sys/socket.h>
+#include <sys/systm.h>
 
 #include <net/if.h>
 
 #include "uinet_if.h"
+#include "uinet_internal.h"
 
 
 
@@ -65,4 +67,57 @@ const struct uinet_if_type_info *
 uinet_if_get_type_info(uinet_iftype_t type)
 {
 	return ((type < UINET_IFTYPE_COUNT) ? uinet_if_types[type] : NULL);
+}
+
+
+void
+uinet_if_pd_timestamp(struct uinet_if *uif, struct uinet_pd_list *pkts)
+{
+	uint32_t i;
+	uint64_t timestamp;
+
+	switch (uif->timestamp_mode) {
+	case UINET_IF_TIMESTAMP_COUNTER:
+		for (i = 0; i < pkts->num_descs; i++) {
+			/*
+			 * The uinet_pd_ctx timestamp field is in
+			 * nanoseconds.  We multiply the counter value by
+			 * 1000 so that the count will be visible at
+			 * microsecond resolution.
+			 */
+			pkts->descs[i].ctx->timestamp = uif->timestamp_counter * 1000;
+			uif->timestamp_counter++;
+		}
+		break;
+	case UINET_IF_TIMESTAMP_GLOBAL_COUNTER:
+		timestamp = atomic_fetchadd_64(&global_timestamp_counter, pkts->num_descs);
+		for (i = 0; i < pkts->num_descs; i++) {
+			/*
+			 * The uinet_pd_ctx timestamp field is in
+			 * nanoseconds.  We multiply the counter value by
+			 * 1000 so that the count will be visible at
+			 * microsecond resolution.
+			 */
+			pkts->descs[i].ctx->timestamp = timestamp * 1000;
+			timestamp++;
+		}
+		break;
+	case UINET_IF_TIMESTAMP_MONOTONIC:
+	case UINET_IF_TIMESTAMP_MONOTONIC_FAST:
+		timestamp =
+		    uhi_clock_gettime_ns(UINET_IF_TIMESTAMP_MONOTONIC ?
+					 UHI_CLOCK_MONOTONIC : UHI_CLOCK_MONOTONIC_FAST);
+		for (i = 0; i < pkts->num_descs; i++) {
+			/* XXX on interfaces with a known line rate, we
+			 * could extrapolate the timestamp based on line
+			 * rate and packet size
+			 */
+			pkts->descs[i].ctx->timestamp = timestamp;
+		}
+		break;
+	case UINET_IF_TIMESTAMP_NONE:
+	case UINET_IF_TIMESTAMP_HW:
+	default:
+		break;
+	}
 }

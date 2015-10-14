@@ -132,7 +132,7 @@ tcp_usr_attach(struct socket *so, int proto, struct thread *td)
 	struct tcpcb *tp = NULL;
 	int error;
 	TCPDEBUG0;
-
+	
 	inp = sotoinpcb(so);
 	KASSERT(inp == NULL, ("tcp_usr_attach: inp != NULL"));
 	TCPDEBUG1();
@@ -146,6 +146,7 @@ tcp_usr_attach(struct socket *so, int proto, struct thread *td)
 
 	inp = sotoinpcb(so);
 	tp = intotcpcb(inp);
+
 out:
 	TCPDEBUG2(PRU_ATTACH);
 	return error;
@@ -1681,6 +1682,9 @@ tcp_attach(struct socket *so)
 	struct tcpcb *tp;
 	struct inpcb *inp;
 	int error;
+#ifdef INET_COPY
+	struct inpcb *head_inp = NULL;
+#endif
 
 	if (so->so_snd.sb_hiwat == 0 || so->so_rcv.sb_hiwat == 0) {
 		error = soreserve(so, tcp_sendspace, tcp_recvspace);
@@ -1704,6 +1708,20 @@ tcp_attach(struct socket *so)
 	else
 #endif
 	inp->inp_vflag |= INP_IPV4;
+#ifdef INET_COPY
+	if (so->so_head) {
+		/*
+		 * Sockets created passively inherit their copy settings
+		 * from the listen socket.  The listen socket inp lock is
+		 * already held, having been acquired in tcp_input() on the
+		 * way here.
+		 */
+		head_inp = sotoinpcb(so->so_head);
+		inp->inp_copy_mode = head_inp->inp_copy_mode;
+		inp->inp_copy_limit = head_inp->inp_copy_limit;
+		inp->inp_copyif = head_inp->inp_copyif;
+	}
+#endif
 	tp = tcp_newtcpcb(inp);
 	if (tp == NULL) {
 		in_pcbdetach(inp);

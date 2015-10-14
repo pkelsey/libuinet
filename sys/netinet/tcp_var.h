@@ -36,6 +36,7 @@
 #include <netinet/tcp.h>
 
 #ifdef _KERNEL
+#include "opt_inet.h"
 #include "opt_passiveinet.h"
 
 #include <net/vnet.h>
@@ -115,6 +116,7 @@ struct tcpcb {
 	struct	tsegageqe_head t_segageq; /* segment age queue */
 #endif
 	void	*t_pspare[2];		/* new reassembly queue */
+	
 	int	t_segqlen;		/* segment reassembly queue length */
 	int	t_dupacks;		/* consecutive dup acks recd */
 
@@ -222,11 +224,9 @@ struct tcpcb {
 	u_int	t_keepcnt;		/* number of keepalives before close */
 
 #ifdef PASSIVE_INET
-	uint32_t t_ispare[7];		/* 5 UTO, 3 TBD, 1 PASSIVE */
 	uint32_t t_reassdl;
-#else
-	uint32_t t_ispare[8];		/* 5 UTO, 3 TBD */
 #endif
+	uint32_t t_ispare[8];	/* 5 UTO, 3 TBD */
 	void	*t_pspare2[4];		/* 4 TBD */
 	uint64_t _pad[6];		/* 6 TBD (1-2 CC/RTT?) */
 };

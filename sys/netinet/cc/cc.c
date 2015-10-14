@@ -173,6 +173,7 @@ cc_list_available(SYSCTL_HANDLER_ARGS)
 	return (err);
 }
 
+#ifndef INET_NO_CC_UNLOAD
 /*
  * Reset the default CC algo to NewReno for any netstack which is using the algo
  * that is about to go away as its default.
@@ -194,6 +195,7 @@ cc_checkreset_default(struct cc_algo *remove_cc)
 	}
 	VNET_LIST_RUNLOCK_NOSLEEP();
 }
+#endif
 
 /*
  * Initialise CC subsystem on system boot.
@@ -211,7 +213,9 @@ cc_init(void)
 int
 cc_deregister_algo(struct cc_algo *remove_cc)
 {
+#ifndef INET_NO_CC_UNLOAD
 	struct cc_algo *funcs, *tmpfuncs;
+#endif
 	int err;
 
 #ifdef INET_NO_CC_UNLOAD

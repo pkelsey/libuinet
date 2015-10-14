@@ -135,6 +135,19 @@ static pthread_mutex_t print_lock;
 static volatile int shutting_down;
 
 
+struct {
+	uinet_if_timestamp_mode_t mode;
+	const char *name;
+	const char *desc;
+} timestamp_mode_table[] = {
+	{ UINET_IF_TIMESTAMP_NONE,	     "none",           "Timestamps are all zero" },
+	{ UINET_IF_TIMESTAMP_HW,	     "hw",             "Supplied by driver" },
+	{ UINET_IF_TIMESTAMP_COUNTER,	     "counter",        "Interface-local counter" },
+	{ UINET_IF_TIMESTAMP_GLOBAL_COUNTER, "global-counter", "Global counter" },
+	{ UINET_IF_TIMESTAMP_MONOTONIC,	     "monotonic",      "System CLOCK_MONOTONIC" },
+	{ UINET_IF_TIMESTAMP_MONOTONIC_FAST, "monotonic-fast", "System CLOCK_MONOTONIC_FAST" }
+};
+
 enum multitool_opt_id {
 	MIN_MT_OPT_VALUE = 1000, /* always first */
 
@@ -142,6 +155,8 @@ enum multitool_opt_id {
 	MT_OPT_MAXSOCKETS,
 	MT_OPT_NETMAP_EXTRA_BUFS,
 	MT_OPT_NMBCLUSTERS,
+	MT_OPT_PCAP_TX_FILE_DIRBITS,
+	MT_OPT_PCAP_TX_FILE_MODE,
 	MT_OPT_SOMAXCONN,
 	MT_OPT_SYNCACHE_HASHSIZE,
 	MT_OPT_SYNCACHE_BUCKETLIMIT,
@@ -184,8 +199,11 @@ static const struct option long_options[] = {
 	{ "gen",		optional_argument, 	NULL, 'g' },
 	{ "iqlen",		required_argument,	NULL, 'I' },
 	{ "rxcpu",		required_argument,	NULL, 'r' },
+	{ "pcap-tx-file-dirbits", required_argument,	NULL, MT_OPT_PCAP_TX_FILE_DIRBITS },
+	{ "pcap-tx-file-mode",	required_argument,	NULL, MT_OPT_PCAP_TX_FILE_MODE },
 	{ "txcpu",		required_argument,	NULL, 't' },
 	{ "rxbatch",		required_argument,	NULL, 'R' },
+	{ "timestamp-mode",	required_argument,	NULL, 'T' },
 	{ "trace-mask",		required_argument,	NULL, 'Z' },
 
 	{ "help",		no_argument,		NULL, 'h' },
@@ -262,9 +280,18 @@ usage(const char *progname)
 	printf("                          Transmit all inbound packets on this interface from each of the given list of interfaces\n");
 	printf("  --gen, -g [=packet_len] Generate transmit packets of the given size (default %u)\n", DEFAULT_GEN_LEN);
 	printf("  --iqlen, -I <value>     Set max transmit inject queue length\n");
+	printf("  --pcap-tx-file-dirbits <n>\n");
+	printf("                          Set number of bits of flow serial number to use for choosing subdirectories in pcap file-per-flow transmit-to-file mode (default 10)\n");
+	printf("  --pcap-tx-file-mode <mode>\n");
+	printf("                          Set pcap transmit-to-file mode to one of [single-file, file-per-flow] (default single-file)\n");
 	printf("  --rxbatch, -R <value>   Set receive processing batch size limit\n");
 	printf("  --rxcpu, -r <cpu>       Bind interface receive thread to the given CPU (ignored in STS mode)\n");
 	printf("  --txcpu, -t <cpu>       Bind interface transmit thread to the given CPU (ignored in STS mode)\n");
+	printf("  --timestamp-mode, -T <mode>\n");
+	printf("                          Set interface timestamp mode to one of:\n");
+	for (i = 0; i < sizeof(timestamp_mode_table) / sizeof(timestamp_mode_table[0]); i++) {
+		printf("                            %16s  %s\n",  timestamp_mode_table[i].name, timestamp_mode_table[i].desc);
+	}
 	printf("  --trace-mask, -Z <mask> Mask of driver trace message enables (see driver source)\n");
 	printf("\n");
 	printf("Demo app creation options:\n");
@@ -301,6 +328,21 @@ uhi_thread_bind(unsigned int cpu)
 #endif /* __APPLE__ */
 }
 
+
+int
+get_timestamp_mode(const char *name, uinet_if_timestamp_mode_t *mode)
+{
+	unsigned int i;
+
+	for (i = 0; i < sizeof(timestamp_mode_table) / sizeof(timestamp_mode_table[0]); i++) {
+		if (0 == strcmp(name, timestamp_mode_table[i].name)) {
+			*mode = timestamp_mode_table[i].mode;
+			return (0);
+		}
+	}
+	
+	return (1);
+}
 
 static void
 first_look_handler(void *arg, struct uinet_pd_list *pkts)
@@ -507,8 +549,7 @@ print_cfg(struct event_loop_config *elcfgs, unsigned int num_event_loops)
 				printf("    Interface [%s (%s)]: type=%s rxbatch=%u txiqlen=%u gen=%s len=%u",
 				       curifcfg->ucfg.alias, curifcfg->ucfg.configstr,
 				       curifcfg->type_name,
-				       (curifcfg->ucfg.type == UINET_IFTYPE_NETMAP) ?
-				       curifcfg->ucfg.type_cfg.netmap.rx_batch_size : 0,
+				       curifcfg->ucfg.rx_batch_size,
 				       curifcfg->ucfg.tx_inject_queue_len,
 				       curifcfg->generate ? "yes" : "no",
 				       curifcfg->generate ? curifcfg->gen_len : 0);
@@ -902,7 +943,7 @@ int main(int argc, char **argv)
 			config_state = CONFIGURING_LOOP;
 			break;
 		case 'C':
-			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_APP, "Creating a new connscale client/server");
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new connscale client/server");
 			LIMIT_OBJECTS("connscale clients/servers", num_echo_servers, MAX_APPS);
 
 			curconnscalecfg = &connscalecfgs[num_connscale_servers];
@@ -923,7 +964,7 @@ int main(int argc, char **argv)
 			config_state = CONFIGURING_APP;
 			break;
 		case 'E':
-			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_APP, "Creating a new echo server");
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new echo server");
 			LIMIT_OBJECTS("echo servers", num_echo_servers, MAX_APPS);
 
 			curechocfg = &echocfgs[num_echo_servers];
@@ -1008,7 +1049,7 @@ int main(int argc, char **argv)
 			exit_after_config = 1;
 			break;
 		case 'P':
-			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_APP, "Creating a new passive server");
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new passive server");
 			LIMIT_OBJECTS("passive servers", num_passive_servers, MAX_APPS);
 
 			curpassivecfg = &passivecfgs[num_passive_servers];
@@ -1036,12 +1077,7 @@ int main(int argc, char **argv)
 			break;
 		case 'R':
 			REQUIRE_STATE(CONFIGURING_IF, "Specifying rx batch size");
-			if (curifcfg->ucfg.type == UINET_IFTYPE_NETMAP)
-				curifcfg->ucfg.type_cfg.netmap.rx_batch_size = strtoul(optarg, NULL, 10);
-			else {
-				printf("Interface type %s (%s) does not support the rx batch option\n",
-				       curifcfg->type_name, curifcfg->ucfg.configstr);
-			}
+			curifcfg->ucfg.rx_batch_size = strtoul(optarg, NULL, 10);
 			break;
 		case 's':
 			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_LOOP|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new stack instance");
@@ -1070,6 +1106,13 @@ int main(int argc, char **argv)
 			if (curifcfg->ucfg.tx_cpu < 0)
 				curifcfg->ucfg.tx_cpu = -1;
 			break;
+		case 'T':
+			REQUIRE_STATE(CONFIGURING_IF, "Specifying a timestamp mode");
+			if (0 != get_timestamp_mode(optarg, &curifcfg->ucfg.timestamp_mode)) {
+				printf("%s is not a valid timestamp mode\n", optarg);
+				return (EXIT_FAILURE);
+			}
+			break;
 		case 'v':
 		{
 			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_IF, "Increasing verbosity");
@@ -1092,7 +1135,7 @@ int main(int argc, char **argv)
 			break;
 		}
 		case 'X':
-			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_APP, "Creating a new passive extract server");
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new passive extract server");
 			LIMIT_OBJECTS("passive extract servers", num_passivex_servers, MAX_APPS);
 
 			curpassivexcfg = &passivexcfgs[num_passivex_servers];
@@ -1151,6 +1194,31 @@ int main(int argc, char **argv)
 			REQUIRE_STATE(CONFIGURING_GLOBALS, "Specifying a global option");
 			OPTION_SET(opt) = 1;
 			OPTION_VALUE(opt) = strtoul(optarg, NULL, 10);
+			break;
+		case MT_OPT_PCAP_TX_FILE_DIRBITS:
+			REQUIRE_STATE(CONFIGURING_IF, "Specifying directory bits for pcap file-per-flow transmit-to-file mode");
+			if (curifcfg->ucfg.type == UINET_IFTYPE_PCAP)
+				curifcfg->ucfg.type_cfg.pcap.dir_bits = strtoul(optarg, NULL, 10);
+			else {
+				printf("Interface type %s (%s) does not support the pcap tx file dirbits option\n",
+				       curifcfg->type_name, curifcfg->ucfg.configstr);
+			}
+			break;
+		case MT_OPT_PCAP_TX_FILE_MODE:
+			REQUIRE_STATE(CONFIGURING_IF, "Specifying pcap transmit-to-file mode");
+			if (curifcfg->ucfg.type == UINET_IFTYPE_PCAP)
+				if (0 == strcmp(optarg, "file-per-flow"))
+					curifcfg->ucfg.type_cfg.pcap.file_per_flow = 1;
+				else if (0 == strcmp(optarg, "single-file"))
+					curifcfg->ucfg.type_cfg.pcap.file_per_flow = 0;
+				else {
+					printf("Invalid pcap transmit-to-file mode\n");
+					return (EXIT_FAILURE);
+				}
+			else {
+				printf("Interface type %s (%s) does not support the pcap transmit-to-file mode option\n",
+				       curifcfg->type_name, curifcfg->ucfg.configstr);
+			}
 			break;
 		default: 
 			usage(argv[0]);

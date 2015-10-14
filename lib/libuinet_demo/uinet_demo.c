@@ -25,11 +25,13 @@
 
 #include <getopt.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "uinet_demo.h"
 #include "uinet_demo_internal.h"
 
 static struct uinet_demo_info demo_db[UINET_NUM_DEMO_APPS];
+
 
 const char *
 uinet_demo_name(enum uinet_demo_id which)
@@ -39,12 +41,40 @@ uinet_demo_name(enum uinet_demo_id which)
 }
 
 
+static void
+uinet_demo_base_print_usage(const char *name)
+{
+	printf("  --copy-every <nth>      Copy packets for every nth flow (default 1)\n");
+	printf("  --copy-limit <limit>    Stop copying packets after 'limit' raw bytes have been copied (default 0, unlimited)\n");
+	printf("  --copy-to <ifname>      Copied packets will be injected to the TX side of this interface (default NULL, disabled)\n");
+	printf("  --verbose, -v           Increase %s verbosity above the baseline (can use multiple times)\n", name);
+}
+
+
 void uinet_demo_print_usage(enum uinet_demo_id which)
 {
-	if ((which < UINET_NUM_DEMO_APPS)  && demo_db[which].print_usage)
+	if ((which < UINET_NUM_DEMO_APPS) && demo_db[which].print_usage) {
 		demo_db[which].print_usage();
-	else
+		uinet_demo_base_print_usage(demo_db[which].name);
+	} else
 		printf("  <invalid app id>\n");
+}
+
+
+static void
+uinet_demo_base_init_cfg(struct uinet_demo_config *cfg, enum uinet_demo_id which,
+			 uint64_t instance_id, const char *name, int verbose)
+{
+	if (name)
+		snprintf(cfg->name, sizeof(cfg->name), "%s", name);
+	else
+		snprintf(cfg->name, sizeof(cfg->name), "%s %llu",
+			 uinet_demo_name(which), (unsigned long long)instance_id);
+
+	cfg->id = instance_id;
+	cfg->which = which;
+	cfg->verbose = verbose;
+	cfg->copy_every = 1;
 }
 
 
@@ -52,15 +82,31 @@ int
 uinet_demo_init_cfg(struct uinet_demo_config *cfg, enum uinet_demo_id which, 
 		    uint64_t instance_id, const char *name, int verbose)
 {
-	return ((which < UINET_NUM_DEMO_APPS) && demo_db[which].init_cfg ?
-		demo_db[which].init_cfg(cfg, instance_id, name, verbose) : -1);
+	if (which < UINET_NUM_DEMO_APPS) {
+		memset(cfg, 0, demo_db[which].cfg_size);
+		uinet_demo_base_init_cfg(cfg, which, instance_id, name, verbose);
+		if (demo_db[which].init_cfg)
+			return (demo_db[which].init_cfg(cfg));
+		return (0);
+	}
+	return (-1);
+}
+
+
+static void
+uinet_demo_base_print_cfg(struct uinet_demo_config *cfg)
+{
+	printf(" copy-to=%s copy-limit=%llu copy-every=%u verbose=%u",
+	       cfg->copy_to ? cfg->copy_to : "<disabled>", (unsigned long long)cfg->copy_limit, cfg->copy_every, cfg->verbose);
 }
 
 
 void
 uinet_demo_print_cfg(struct uinet_demo_config *cfg)
 {
-	demo_db[cfg->which].print_cfg(cfg);
+	if (demo_db[cfg->which].print_cfg)
+		demo_db[cfg->which].print_cfg(cfg);
+	uinet_demo_base_print_cfg(cfg);
 }
 
 
@@ -97,11 +143,44 @@ uinet_demo_process_args(struct uinet_demo_config *cfg, int argc, char **argv)
 }
 
 
+static int
+uinet_demo_base_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
+		      struct ev_loop *loop)
+{
+	uinet_if_t uif;
+	
+	cfg->uinst = uinst;
+	cfg->loop = loop;
+
+	if (cfg->copy_to != NULL) {
+		cfg->copy_uif = uinet_iffind_byname(cfg->uinst, cfg->copy_to);
+		if (cfg->copy_uif == NULL)
+			return (UINET_EINVAL);
+		if (cfg->copy_every) {
+			cfg->copy_mode = UINET_IP_COPY_MODE_RX;
+			if (cfg->copy_every > 1)
+				cfg->copy_mode |= UINET_IP_COPY_MODE_MAYBE;
+			else
+				cfg->copy_mode |= UINET_IP_COPY_MODE_ON;
+		}
+	} else
+		cfg->copy_uif = NULL;
+		
+	return (0);
+}
+
+
 int
 uinet_demo_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
 		 struct ev_loop *loop)
 {
-	return (demo_db[cfg->which].start(cfg, uinst, loop));
+	int error;
+	
+	error = uinet_demo_base_start(cfg, uinst, loop);
+	if (!error && demo_db[cfg->which].start)
+		error = demo_db[cfg->which].start(cfg, uinst, loop);
+
+	return (error);
 }
 
 
@@ -138,27 +217,25 @@ uinet_demo_register(struct uinet_demo_info *info)
 }
 
 
-void
-uinet_demo_base_init_cfg(struct uinet_demo_config *cfg, enum uinet_demo_id which,
-			 uint64_t instance_id, const char *name, int verbose)
+int
+uinet_demo_base_process_arg(struct uinet_demo_config *cfg, int opt, const char *arg)
 {
-	if (name)
-		snprintf(cfg->name, sizeof(cfg->name), "%s", name);
-	else
-		snprintf(cfg->name, sizeof(cfg->name), "%s %llu",
-			 uinet_demo_name(which), (unsigned long long)instance_id);
-
-	cfg->id = instance_id;
-	cfg->which = which;
-	cfg->verbose = verbose;
-}
-
-
-void
-uinet_demo_base_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
-		      struct ev_loop *loop)
-{
-	cfg->uinst = uinst;
-	cfg->loop = loop;
+	switch(opt) {
+	case DEMO_BASE_OPT_COPY_EVERY:
+		cfg->copy_every = strtoul(arg, NULL, 10);
+		break;
+	case DEMO_BASE_OPT_COPY_LIMIT:
+		cfg->copy_limit = strtoul(arg, NULL, 10);
+		break;
+	case DEMO_BASE_OPT_COPY_TO:
+		cfg->copy_to = arg;
+		break;
+	case 'v':
+		cfg->verbose++;
+		break;
+	default:
+		return (UINET_EINVAL);
+	}
+	return (0);
 }
 

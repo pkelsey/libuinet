@@ -67,6 +67,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_syncache.c 238247 2012-07-08 1
 #include <net/vnet.h>
 
 #include <netinet/in.h>
+#ifdef INET_COPY
+#include <netinet/in_copy.h>
+#endif
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_var.h>
@@ -234,7 +237,14 @@ syncache_free(struct syncache *sc)
 	if (sc->sc_l2tag) 
 		m_tag_free(sc->sc_l2tag);
 #endif
-
+#ifdef INET_COPY
+	if (sc->sc_syn)
+		m_free(sc->sc_syn);
+#ifdef PASSIVE_INET
+	if (sc->sc_synack)
+		m_free(sc->sc_synack);
+#endif /* PASSIVE_INET */
+#endif /* INET_COPY */
 	uma_zfree(V_tcp_syncache.zone, sc);
 }
 
@@ -749,7 +759,7 @@ syncache_badack(struct in_conninfo *inc)
  * Extract parameters from the SYN|ACK coming from the server in a passively
  * reconstructed connection and update the corresponding syncache entry.
  */
-void
+int
 syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
     struct tcphdr *th, struct mbuf *m)
 {
@@ -760,7 +770,8 @@ syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
 #endif
 	struct in_addr inaddrtmp;
 	uint16_t porttmp;
-
+	int consumed_mbuf = 0;
+	
 	/*
 	 * Swap the endpoints before doing the syncache lookup, as the
 	 * SYN|ACK is moving in the other direction.  It's OK to modify inc
@@ -795,7 +806,10 @@ syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
 #ifdef PROMISCUOUS_INET
 		sc->sc_client_txif = m->m_pkthdr.rcvif;
 #endif
-
+#ifdef INET_COPY
+		sc->sc_synack = m;
+		consumed_mbuf = 1;
+#endif
 		sc->sc_iss = th->th_seq;
 
 		if (!(th->th_flags & TH_ECE))
@@ -840,6 +854,8 @@ syncache_passive_synack(struct in_conninfo *inc, struct tcpopt *to,
 	/* or this is a SYN|ACK unrelated to a passive syncache entry */
 
 	SCH_UNLOCK(sch);
+
+	return (consumed_mbuf);
 }
 #endif /* PASSIVE_INET */
 
@@ -1269,6 +1285,10 @@ syncache_passive_client_socket(struct syncache *sc, struct socket *lso, struct m
 	 * configure it so that it won't be freed instead of trying to
 	 * dynamically allocate an mbuf in syncache_synthesize_synack(),
 	 * which may fail, and is likely more costly.
+	 *
+	 * XXX the INET_COPY support now retains the synack mbuf, so that
+	 * could now be done even if INET_COPY is not defined and it could
+	 * be used here (and the header byte swapping below addressed)
 	 */
 	m1 = syncache_synthesize_synack(sc, &th);
 	if (m1 == NULL)
@@ -1597,6 +1617,26 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 #endif
 	tcp_timer_activate(tp, TT_KEEP, TP_KEEPINIT(tp));
 
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+	if (VNET_IS_STS(curvnet))
+		inp->inp_serialno = V_ip_flow_serial_next++;
+	else
+		inp->inp_serialno = atomic_fetchadd_64(&V_ip_flow_serial_next, 1);
+#ifdef PASSIVE_INET
+	if (client_inp)
+		client_inp->inp_serialno = inp->inp_serialno;
+#endif
+#endif
+	
+#ifdef INET_COPY
+	if (sc->sc_syn)
+		in_copy(inp, sc->sc_syn);
+#ifdef PASSIVE_INET
+	if (sc->sc_synack)
+		in_copy(client_inp, sc->sc_synack);
+#endif
+#endif
+	
 	INP_WUNLOCK(inp);
 #ifdef PASSIVE_INET
 	if (client_inp)
@@ -2208,6 +2248,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 #ifdef PROMISCUOUS_INET
 	if (synfilter)
 		INP_RUNLOCK(inp);
+#endif
+#ifdef INET_COPY
+	sc->sc_syn = m;
+	m = NULL; /* don't free m below */
 #endif
 
 	/*

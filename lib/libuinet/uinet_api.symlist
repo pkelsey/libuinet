@@ -13,6 +13,7 @@ uinet_if_batch_tx
 uinet_if_default_config
 uinet_ifdestroy
 uinet_ifdestroy_byname
+uinet_iffind_byname
 uinet_ifgenericname
 uinet_ifnext
 uinet_iftypename
@@ -30,6 +31,7 @@ uinet_instance_create
 uinet_instance_default
 uinet_instance_default_cfg
 uinet_instance_destroy
+uinet_instance_index
 uinet_instance_sts_enabled
 uinet_instance_sts_events_process
 uinet_interface_add_alias
@@ -67,6 +69,7 @@ uinet_sogetconninfo
 uinet_sogeterror
 uinet_sogetinstance
 uinet_sogetpassivepeer
+uinet_sogetserialno
 uinet_sogetsockopt
 uinet_sogetstate
 uinet_sogetuserctx
@@ -74,6 +77,7 @@ uinet_solisten
 uinet_soreadable
 uinet_sowritable
 uinet_soreceive
+uinet_sosetcopymode
 uinet_sosetnonblocking
 uinet_sosetsockopt
 uinet_sosettxif

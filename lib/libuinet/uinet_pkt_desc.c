@@ -31,6 +31,7 @@
 
 #include <vm/uma.h>
 
+#include "uinet_api.h"
 #include "uinet_pkt_desc.h"
 
 static void uinet_pd_mbuf_free_ctx(struct uinet_pd_ctx *pdctx);
@@ -47,6 +48,8 @@ static unsigned int pd_mbuf_ctx_pool_id;
 #define UINET_PD_MAX_POOLS	32
 
 static struct uinet_pd_pool_info *pd_pool_table[UINET_PD_MAX_POOLS];
+
+static uma_zone_t zone_pd_xlist;
 
 
 /*
@@ -95,7 +98,7 @@ uinet_pd_mbuf_zinit_pd_ctx(void *mem, int size, int how)
 	/* call the free routine when the last reference is released */
 	m->m_ext.ext_type = EXT_EXTREF;
 	m->m_ext.ext_free = uinet_pd_mbuf_ext_free;
-	m->m_ext.ext_arg1 = pdctx;
+	m->m_ext.ext_arg2 = pdctx;
 
 	pdctx->m = m;
 	pdctx->refcnt = m->m_ext.ref_cnt;
@@ -120,7 +123,7 @@ uinet_pd_mbuf_zfini_pd_ctx(void *mem, int size)
 	 */
 	m->m_ext.ext_type = EXT_PACKET;	
 	m->m_ext.ext_free = NULL;
-	m->m_ext.ext_arg1 = NULL;
+	m->m_ext.ext_arg2 = NULL;
 
 	/* mb_free_ext(), case EXT_PACKET */
 	if (*(m->m_ext.ref_cnt) == 0)
@@ -159,6 +162,7 @@ uinet_pd_mbuf_ctor_pd_ctx(void *mem, int size, void *arg, int how)
 	m->m_type = MT_DATA;
 
 	pdctx->flags = UINET_PD_CTX_SINGLE_REF;
+	pdctx->timestamp = 0;
 	*(pdctx->refcnt) = 1;
 
 	return (0);
@@ -360,3 +364,128 @@ uinet_pd_drop_injected(struct uinet_pd *pd, uint32_t n)
 	}
 }
 
+
+static int
+uinet_pd_xlist_pool_ctor(void *mem, int size, void *arg, int how)
+{
+	struct uinet_pd_xlist *xlist;
+
+	xlist = (struct uinet_pd_xlist *)mem;
+	xlist->next = NULL;
+	xlist->list.num_descs = 0;
+
+	return (0);
+}
+
+
+static void
+uinet_pd_xlist_pool_init(const void *unused __unused)
+{
+	zone_pd_xlist = uma_zcreate("pd_xlist", sizeof(struct uinet_pd_xlist) + sizeof(struct uinet_pd) * UINET_PD_XLIST_MAX_DESCS,
+				    uinet_pd_xlist_pool_ctor, NULL,
+				    NULL, NULL,
+				    UMA_ALIGN_PTR, 0);
+}
+SYSINIT(uinet_pd_xlist_pool_init, SI_SUB_INIT_IF, SI_ORDER_ANY, uinet_pd_xlist_pool_init, 0);
+
+
+struct uinet_pd_xlist *
+uinet_pd_xlist_pool_alloc(void)
+{
+	return uma_zalloc(zone_pd_xlist, M_NOWAIT);
+}
+
+
+void
+uinet_pd_xlist_pool_free(struct uinet_pd_xlist *xlist)
+{
+	uma_zfree(zone_pd_xlist, xlist);
+}
+
+
+int
+uinet_pd_xlist_add_mbuf(struct uinet_pd_xlist **head, struct uinet_pd_xlist **tail,
+			struct mbuf *m, uint16_t flags, uint64_t serialno)
+{
+	struct uinet_pd_xlist *cur;
+	struct uinet_pd *pd;
+	struct uinet_pd_ctx *pdctx;
+	uint64_t total_bytes;
+
+	total_bytes = 0;
+	cur = *tail;
+	if ((cur == NULL) || (cur->list.num_descs == UINET_PD_XLIST_MAX_DESCS)) {
+		cur = uinet_pd_xlist_pool_alloc();
+		if (cur == NULL)
+			return (1);
+		if (*tail)
+			(*tail)->next = cur;
+		*tail = cur;
+		if (*head == NULL)
+			*head = cur;
+	}
+
+	/*
+	 * The pdctx pointer is always in ext_arg2, regardless of pool of
+	 * origin.
+	 */
+	pdctx = m->m_ext.ext_arg2;
+	pd = &cur->list.descs[cur->list.num_descs];
+	cur->list.num_descs++;
+	pd->flags = UINET_PD_CTX_MBUF_USED | flags;
+	pd->length = pdctx->m_orig_len;
+	pd->pool_id = pdctx->pool_id;
+	pd->ref = pdctx->ref;
+	pd->data = (uint32_t *)m->m_ext.ext_buf;
+	pd->ctx = pdctx;
+	pd->serialno = serialno;
+
+	atomic_add_int(m->m_ext.ref_cnt, 1);
+
+	return (0);
+}
+
+
+void
+uinet_pd_xlist_release(struct uinet_pd_xlist *xlist)
+{
+	struct uinet_pd_ctx *pdctx[UINET_PD_XLIST_MAX_DESCS];
+	unsigned int i;
+
+	if (xlist == NULL)
+		return;
+	
+	for (i = 0; i < xlist->list.num_descs; i++)
+		pdctx[i] = xlist->list.descs[i].ctx;
+
+	uinet_pd_ref_release(pdctx, xlist->list.num_descs);
+}
+
+
+void
+uinet_pd_xlist_release_all(struct uinet_pd_xlist *xlist)
+{
+	struct uinet_pd_xlist *cur;
+
+	cur = xlist;
+	while (cur) {
+		uinet_pd_xlist_release(cur);
+		cur = cur->next;
+	}
+}
+
+
+struct uinet_pd_xlist *
+uinet_pd_xlist_free(struct uinet_pd_xlist *xlist, struct uinet_pd_xlist *stop_at)
+{
+	struct uinet_pd_xlist *cur, *tmp;
+
+	cur = xlist;
+	while (cur && (cur != stop_at)) {
+		tmp = cur->next;
+		uinet_pd_xlist_pool_free(cur);
+		cur = tmp;
+	}
+
+	return (cur);
+}

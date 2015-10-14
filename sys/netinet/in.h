@@ -487,6 +487,21 @@ __END_DECLS
 /* Promiscuous INET outpu interface control */
 #define IP_TXIF				92   /* set index of interface to use for transmit */
 
+/* Packet copy control */
+#define IP_COPY_MODE			93   /* set copy mode for socket */
+#define IP_COPY_LIMIT			94   /* set max copy size */
+#define IP_COPY_IF			95   /* interface to copy to */
+
+#define IP_SERIALNO			96   /* flow serial number */
+
+/* Flags for IP_COPY_MODE */
+#define IP_COPY_MODE_OFF	0x00
+#define IP_COPY_MODE_MAYBE	0x01
+#define IP_COPY_MODE_ON		0x02
+#define IP_COPY_MODE_RX		0x04
+#define IP_COPY_MODE_TX		0x08
+#define IP_COPY_MODE_TXRX	(IP_COPY_MODE_TX|IP_COPY_MODE_RX)
+
 /*
  * Defaults and limits for options
  */

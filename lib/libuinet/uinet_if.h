@@ -60,7 +60,10 @@ struct uinet_if {
 	char alias[IF_NAMESIZE];	/* assigned by user (optional) */
 	int rx_cpu;
 	int tx_cpu;
+	uint32_t rx_batch_size;
 	uint32_t tx_inject_queue_len;
+	uinet_if_timestamp_mode_t timestamp_mode;
+	uint64_t timestamp_counter;
 	union uinet_if_type_cfg type_cfg;
 
 	unsigned int ifindex;
@@ -79,7 +82,7 @@ struct uinet_if {
 	void (*first_look_handler)(void *arg, struct uinet_pd_list *pkts);
 	void *first_look_handler_arg;
 
-	/* Invoked to allocate packet descriptors sutiable for zero-copy transmit on this interface */
+	/* Invoked to allocate packet descriptors suitable for zero-copy transmit on this interface */
 	void (*pd_alloc)(struct uinet_if *uif, struct uinet_pd_list *pkts);
 
 	/* Invoked to send packets directly to the transmit interface. */
@@ -98,10 +101,11 @@ struct uinet_if {
 #define UIF_INJECT_TX(uif_, p_) (uif_)->inject_tx_pkts((uif_), (p_))
 #define UIF_BATCH_RX(uif_, fd_, ns_) (uif_)->batch_rx((uif_), (fd_), (ns_))
 #define UIF_BATCH_TX(uif_, fd_, ns_) (uif_)->batch_tx((uif_), (fd_), (ns_))
-
+#define UIF_TIMESTAMP(uif_, p_) if ((uif_)->timestamp_mode != UINET_IF_TIMESTAMP_NONE) uinet_if_pd_timestamp((uif_), (p_))
 
 int uinet_if_attach(struct uinet_if *uif, struct ifnet *ifp, void *sc);
 const struct uinet_if_type_info *uinet_if_get_type_info(uinet_iftype_t type);
+void uinet_if_pd_timestamp(struct uinet_if *uif, struct uinet_pd_list *pkts);
 
 /* only used in SYSINIT via UINET_IF_REGISTER_TYPE() */
 void uinet_if_register_type(const void *arg);

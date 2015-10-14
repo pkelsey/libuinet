@@ -205,9 +205,7 @@ uinet_ifconfig_begin(uinet_instance_t uinst, struct socket **so,
 	struct uinet_if *uif;
 	int error;
 
-	CURVNET_SET(uinst->ui_vnet);
-	uif = uinet_iffind_byname(name);
-	CURVNET_RESTORE();
+	uif = uinet_iffind_byname(uinst, name);
 	if (NULL == uif) {
 		printf("could not find interface %s\n", name);
 		return (EINVAL);
@@ -748,6 +746,16 @@ uinet_sogetpassivepeer(struct uinet_socket *so)
 }
 
 
+uint64_t
+uinet_sogetserialno(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+	struct inpcb *inp = sotoinpcb(so_internal);
+
+	return (inp->inp_serialno);
+}
+
+
 int
 uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval,
 		   unsigned int *optlen)
@@ -918,6 +926,39 @@ uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uin
 	uio->uio_resid = uio_internal.uio_resid;
 
 	return (result);
+}
+
+
+int
+uinet_sosetcopymode(struct uinet_socket *so, unsigned int mode, uint64_t limit, uinet_if_t uif)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int optval, optlen;
+	uint64_t optval64;
+	int error;
+
+	optlen = sizeof(optval);
+	optval = mode;
+	error = so_setsockopt(so_internal, IPPROTO_IP, IP_COPY_MODE, &optval, optlen);
+	if (error)
+		goto out;
+	
+	if (uif != NULL) {
+		optlen = sizeof(optval);
+		optval = uif->ifp->if_index;
+		error = so_setsockopt(so_internal, IPPROTO_IP, IP_COPY_IF, &optval, optlen);
+		if (error)
+			goto out;
+	}
+
+	optlen = sizeof(optval64);
+	optval64 = limit;
+	error = so_setsockopt(so_internal, IPPROTO_IP, IP_COPY_LIMIT, &optval64, optlen);
+	if (error)
+		goto out;
+
+out:
+	return (error);
 }
 
 
@@ -1614,6 +1655,7 @@ uinet_default_cfg(struct uinet_global_cfg *cfg, enum uinet_global_cfg_type which
 		*cfg = (struct uinet_global_cfg) {
 			.ncpus = 1,
 			.netmap_extra_bufs = 1000,
+			.epoch_number = 0,
 			.kern = {
 				.ipc = {
 					.maxsockets = 1024,
@@ -1730,7 +1772,8 @@ uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
 	uinst->ui_vnet->vnet_uinet = uinst;
 	uinst->ui_sts = cfg->sts;
 	uinst->ui_userdata = cfg->userdata;
-
+	uinst->ui_index = instance_count++;
+	
 	/*
 	 * Don't respond with a reset to TCP segments that the stack will
 	 * not claim nor with an ICMP port unreachable message to UDP
@@ -1835,7 +1878,7 @@ uinet_instance_create(struct uinet_instance_cfg *cfg)
 
 	return (uinst);
 #else
-	return (NULL);
+	return (NULL);  /* XXX use uinst0 instead of NULL? */
 #endif
 }
 
@@ -1857,6 +1900,12 @@ void
 uinet_instance_sts_events_process(uinet_instance_t uinst)
 {
 	vnet_sts_events_process(uinst->ui_vnet);
+}
+
+uint32_t
+uinet_instance_index(uinet_instance_t uinst)
+{
+	return (uinst ? uinst->ui_index : 0);
 }
 
 unsigned int
@@ -1899,9 +1948,11 @@ uinet_if_default_config(uinet_iftype_t type, struct uinet_if_cfg *cfg)
 		cfg->alias = NULL;
 		cfg->rx_cpu = -1;
 		cfg->tx_cpu = -1;
+		cfg->rx_batch_size = 512;
 		cfg->tx_inject_queue_len = 2048;
 		cfg->first_look_handler = NULL;
 		cfg->first_look_handler_arg = NULL;
+		cfg->timestamp_mode = UINET_IF_TIMESTAMP_NONE;
 
 		if (ti->default_cfg)
 			ti->default_cfg(&cfg->type_cfg);
@@ -1986,7 +2037,7 @@ uinet_if_batch_tx(uinet_if_t uif, int *fd, uint64_t *wait_ns)
  *
  * num_extra is the number of extra refs needed beyond what would be
  * required for passage to the stack and/or injection to a single interface.
- * This routine correctlys add any needed refs for passage to the stack
+ * This routine correctly adds any needed refs for passage to the stack
  * and/or injection to a single interface, based on the UINET_PD_INJECT and
  * UINET_PD_TO_STACK flags and only needs to be informed about refs required
  * above and beyond those.
@@ -2103,6 +2154,7 @@ uinet_pd_deliver_to_stack(struct uinet_if *uif, struct uinet_pd_list *pkts)
 			pdctx = pd->ctx;
 			pdctx->flags &= ~UINET_PD_CTX_SINGLE_REF;  /* no telling how many refs the stack will add */
 			pdctx->flags |= UINET_PD_CTX_MBUF_USED;
+			pdctx->m_orig_len = pd->length;
 			m = pdctx->m;
 			m->m_pkthdr.len = m->m_len = pd->length;
 			m->m_pkthdr.rcvif = ifp;

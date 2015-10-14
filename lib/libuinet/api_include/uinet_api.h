@@ -93,6 +93,7 @@ void  uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc
 int   uinet_sogeterror(struct uinet_socket *so);
 uinet_instance_t uinet_sogetinstance(struct uinet_socket *so);
 struct uinet_socket *uinet_sogetpassivepeer(struct uinet_socket *so);
+uint64_t uinet_sogetserialno(struct uinet_socket *so);
 int   uinet_sogetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int *optlen);
 int   uinet_sogetstate(struct uinet_socket *so);
 void *uinet_sogetuserctx(struct uinet_socket *so, int key);
@@ -100,6 +101,7 @@ int   uinet_solisten(struct uinet_socket *so, int backlog);
 int   uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall);
 int   uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall);
 int   uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uinet_uio *uio, int *flagsp);
+int   uinet_sosetcopymode(struct uinet_socket *so, unsigned int mode, uint64_t limit, uinet_if_t uif);
 void  uinet_sosetnonblocking(struct uinet_socket *so, unsigned int nonblocking);
 int   uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int optlen);
 int   uinet_sosettxif(struct uinet_socket *so, uinet_if_t uif);
@@ -146,6 +148,8 @@ int uinet_if_xmit(uinet_if_t uif, const char *buf, int len);
 int uinet_lock_log_set_file(const char *file);
 int uinet_lock_log_enable(void);
 int uinet_lock_log_disable(void);
+
+uinet_if_t uinet_iffind_byname(uinet_instance_t uinst, const char *ifname);
 
 /*
  *  Create a new network inteface of the given type and configuration.
@@ -226,6 +230,7 @@ void uinet_instance_default_cfg(struct uinet_instance_cfg *cfg);
 uinet_instance_t uinet_instance_create(struct uinet_instance_cfg *cfg);
 uinet_instance_t uinet_instance_default(void);
 unsigned int uinet_instance_sts_enabled(uinet_instance_t uinst);
+uint32_t uinet_instance_index(uinet_instance_t uinst);
 void uinet_instance_sts_events_process(uinet_instance_t uinst);
 void uinet_instance_destroy(uinet_instance_t uinst);
 

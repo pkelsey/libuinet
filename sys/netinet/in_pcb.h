@@ -44,6 +44,11 @@
 #include <sys/_rwlock.h>
 
 #ifdef _KERNEL
+
+#include "opt_inet.h"
+#include "opt_passiveinet.h"
+#include "opt_promiscinet.h"
+
 #include <sys/lock.h>
 #include <sys/rwlock.h>
 #include <net/vnet.h>
@@ -175,20 +180,29 @@ struct inpcb {
 	struct	ucred	*inp_cred;	/* (c) cache of socket cred */
 	u_int32_t inp_flow;		/* (i) IPv6 flow information */
 	int	inp_flags;		/* (i) generic IP/datagram flags */
-	int	inp_flags2;		/* (i) generic IP/datagram flags #2*/
+	int	inp_flags2;		/* (i) ingeneric IP/datagram flags #2*/
 	u_char	inp_vflag;		/* (i) IP version flag (v4/v6) */
 	u_char	inp_ip_ttl;		/* (i) time to live proto */
 	u_char	inp_ip_p;		/* (c) protocol proto */
 	u_char	inp_ip_minttl;		/* (i) minimum TTL or drop */
 	uint32_t inp_flowid;		/* (x) flow id / queue id */
 	u_int	inp_refcount;		/* (i) refcount */
+	void	*inp_pspare[5];		/* (x) route caching / general use */
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+	uint64_t inp_serialno;		/* (c) flow serial number */
+#endif
 #ifdef PROMISCUOUS_INET
-	void	*inp_pspare[2];		/* (x) route caching / general use */
 	struct	ifnet *inp_txif;	/* (i) transmit interface */
 	void	*inp_synf;		/* (i) SYN filter instance cookie */
 	struct	in_l2info *inp_l2info;	/* (i/p) L2 details */
-#else
-	void	*inp_pspare[5];		/* (x) route caching / general use */
+#endif
+#ifdef INET_COPY
+	struct	uinet_pd_xlist *inp_copyq; /* (i) head of copy queue */
+	struct	uinet_pd_xlist *inp_copyq_tail; /* (i) tail of copy queue */
+	struct	ifnet *inp_copyif;	/* (i) interface to copy to */
+	uint64_t inp_copy_limit;	/* (i) max bytes to copy */
+	uint64_t inp_copy_total;	/* (i) bytes copied so far */
+	uint32_t inp_copy_mode;		/* (i) copy mode control */
 #endif
 	u_int	inp_ispare[6];		/* (x) route caching / user cookie /
 					 *     general use */
@@ -610,6 +624,12 @@ VNET_DECLARE(int, ipport_tcpallocs);
 #define	V_ipport_randomtime	VNET(ipport_randomtime)
 #define	V_ipport_stoprandom	VNET(ipport_stoprandom)
 #define	V_ipport_tcpallocs	VNET(ipport_tcpallocs)
+
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+VNET_DECLARE(uint64_t, ip_flow_serial_next);
+
+#define V_ip_flow_serial_next	VNET(ip_flow_serial_next)
+#endif
 
 void	in_pcbinfo_destroy(struct inpcbinfo *);
 void	in_pcbinfo_init(struct inpcbinfo *, const char *, struct inpcbhead *,

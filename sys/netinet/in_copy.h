@@ -1,4 +1,4 @@
-/*
+/*-
  * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,51 +23,12 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _UINET_DEMO_H_
-#define _UINET_DEMO_H_
-
-#include <stdint.h>
-
-#include "uinet_ev.h"
-#include "uinet_api.h"
+#ifndef _NETINET_IN_COPY_H_
+#define _NETINET_IN_COPY_H_
 
 
-enum uinet_demo_id {
-	UINET_DEMO_CONNSCALE,
-	UINET_DEMO_ECHO,
-	UINET_DEMO_PASSIVE,
-	UINET_DEMO_PASSIVE_EXTRACT,
+void in_copy(struct inpcb *inp, struct mbuf *m);
+void in_copy_dispose(struct inpcb *inp);
+void in_copy_flush(struct inpcb *inp, unsigned int finished);
 
-	UINET_NUM_DEMO_APPS /* always last */
-};
-
-
-struct uinet_demo_config {
-	char name[UINET_NAME_BUF_LEN];
-	uint64_t id;
-	enum uinet_demo_id which;
-	unsigned int verbose;
-	unsigned int copy_every;
-	uint64_t copy_limit;
-	const char *copy_to;
-
-	uinet_if_t copy_uif;
-	unsigned int copy_mode;
-	uinet_instance_t uinst;
-	struct ev_loop *loop;
-};
-
-
-int uinet_demo_init(void);
-void uinet_demo_shutdown(void);
-
-const char *uinet_demo_name(enum uinet_demo_id which);
-void uinet_demo_print_usage(enum uinet_demo_id which);
-int uinet_demo_init_cfg(struct uinet_demo_config *cfg, enum uinet_demo_id which,
-			uint64_t instance_id, const char *name, int verbose);
-int uinet_demo_process_args(struct uinet_demo_config *cfg, int argc, char **argv);
-void uinet_demo_print_cfg(struct uinet_demo_config *cfg);
-int uinet_demo_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
-		     struct ev_loop *loop);
-
-#endif /* _UINET_DEMO_H_ */
+#endif /* !_NETINET_IN_COPY_H_ */

@@ -238,7 +238,6 @@ if_netmap_default_config(union uinet_if_type_cfg *cfg)
 
 	nmcfg->trace_mask = 0;
 	nmcfg->vale_num_extra_bufs = 1024;
-	nmcfg->rx_batch_size = 512;
 }
 
 
@@ -607,6 +606,7 @@ if_netmap_pd_free(struct if_netmap_pd_pool *pool, struct uinet_pd_ctx *pdctx[], 
 		if (pdctx[i]->flags & UINET_PD_CTX_MBUF_USED)
 			if_netmap_pd_ctx_init_mutables(pool->pool_info, pdctx[i]);
 		pdctx[i]->flags = UINET_PD_CTX_SINGLE_REF;
+		pdctx[i]->timestamp = 0;
 	}
 
 	mtx_lock(&pool->lock);
@@ -799,7 +799,7 @@ if_netmap_attach(struct uinet_if *uif)
 		goto fail;
 	}
 
-	sc->rx_batch_size = nm_cfg->rx_batch_size;
+	sc->rx_batch_size = uif->rx_batch_size;
 	if (sc->rx_batch_size < 1)
 		sc->rx_batch_size = 1;
 	else if (sc->rx_batch_size > sc->rxslots)
@@ -854,7 +854,7 @@ if_netmap_attach(struct uinet_if *uif)
 	sc->tx_pdctx_to_free = malloc(sizeof(*sc->tx_pdctx_to_free) * sc->tx_inject_ring->num_descs,
 				      M_DEVBUF, M_WAITOK);
 	if (sc->tx_pdctx_to_free == NULL) {
-		printf("%s: Failed to allocate transmit pdctx retirment list\n", uif->name);
+		printf("%s: Failed to allocate transmit pdctx retirement list\n", uif->name);
 		error = ENOMEM;
 		goto fail;
 	}
@@ -966,6 +966,7 @@ if_netmap_inject_tx_pkts(struct uinet_if *uif, struct uinet_pd_list *pkts)
 	uint32_t space;
 	uint32_t cur;
 	uint32_t num_drops;
+	uint32_t pds_to_check_for_drops;
 
 	txr = sc->tx_inject_ring;
 	pd = &pkts->descs[0];
@@ -974,6 +975,7 @@ if_netmap_inject_tx_pkts(struct uinet_if *uif, struct uinet_pd_list *pkts)
 	space = uinet_pd_ring_space(txr);
 	cur = txr->put;
 	num_drops = 0;
+	pds_to_check_for_drops = 0;
 	for (i = 0; i < pkts->num_descs; i++, pd++) {
 		if (pd->flags & UINET_PD_INJECT) {
 			if (space) {
@@ -981,8 +983,10 @@ if_netmap_inject_tx_pkts(struct uinet_if *uif, struct uinet_pd_list *pkts)
 				cur = uinet_pd_ring_next(txr, cur);
 				space--;
 			} else {
-				if (num_drops == 0)
+				if (num_drops == 0) {
 					first_drop_pd = pd;
+					pds_to_check_for_drops = pkts->num_descs - i;
+				}
 				num_drops++;
 			}
 		}
@@ -992,8 +996,8 @@ if_netmap_inject_tx_pkts(struct uinet_if *uif, struct uinet_pd_list *pkts)
 	if_netmap_send_queue_has_grown_locked(sc);
 	TX_UNLOCK(sc);
 
-	if (num_drops)
-		uinet_pd_drop_injected(first_drop_pd, num_drops); 
+	if (pds_to_check_for_drops)
+		uinet_pd_drop_injected(first_drop_pd, pds_to_check_for_drops); 
 }
 
 
@@ -1061,7 +1065,7 @@ if_netmap_process_tx_inject_ring(struct if_netmap_softc *sc, uint32_t avail, uin
 	local_pdctx_to_free = *pdctx_to_free;
 	while (avail && (local_cur_inject_take != cur_inject_put)) {
 		cur_pd = &txr->descs[local_cur_inject_take];
-		pktlen = cur_pd->length; 
+		pktlen = cur_pd->length;
 		local_total_bytes += pktlen;
 
 		TRACE(TRACE_TX_PKT, " tx: pktlen=%u [", pktlen);
@@ -1539,6 +1543,8 @@ if_netmap_batch_receive(struct uinet_if *uif, int *fd, uint64_t *wait_ns)
 	/* assign to sc->rx_avail for use on next entry */
 	sc->rx_avail = if_netmap_rxavail(sc->nm_host_ctx);
 
+	UIF_TIMESTAMP(uif, sc->rx_pkts);
+	
 	/*
 	 * Process the packets
 	 */
@@ -1608,9 +1614,9 @@ if_netmap_setup_interface(struct if_netmap_softc *sc)
 	uif = sc->uif;
 
 	if (uinet_uifsts(uif))
-		ifp->if_init =  if_netmap_sts_init;
+		ifp->if_init = if_netmap_sts_init;
 	else
-		ifp->if_init =  if_netmap_init;
+		ifp->if_init = if_netmap_init;
 	ifp->if_softc = sc;
 
 	if_initname(ifp, sc->uif->name, IF_DUNIT_NONE);

@@ -33,14 +33,30 @@
 struct uinet_demo_info {
 	enum uinet_demo_id which;
 	const char *name;
+	unsigned int cfg_size;
 	void (*print_usage)(void);
-	int (*init_cfg)(struct uinet_demo_config *cfg, uint64_t id,
-			const char *name, int verbose);
+	int (*init_cfg)(struct uinet_demo_config *cfg);
 	int (*process_args)(struct uinet_demo_config *cfg, int argc, char **argv);
 	void (*print_cfg)(struct uinet_demo_config *cfg);
 	int (*start)(struct uinet_demo_config *cfg, uinet_instance_t uinst,
 		     struct ev_loop *loop);
 };
+
+
+enum uinet_demo_base_option_id {
+	DEMO_BASE_OPT_COPY_EVERY = 2000,
+	DEMO_BASE_OPT_COPY_LIMIT,
+	DEMO_BASE_OPT_COPY_TO,
+};
+
+#define UINET_DEMO_BASE_LONG_OPTS					\
+	{ "copy-every",	required_argument,	NULL,	DEMO_BASE_OPT_COPY_EVERY }, \
+	{ "copy-limit",	required_argument,	NULL,	DEMO_BASE_OPT_COPY_LIMIT }, \
+	{ "copy-to",	required_argument,	NULL,	DEMO_BASE_OPT_COPY_TO }, \
+	{ "verbose",	no_argument,		NULL, 	'v' }
+
+#define UINET_DEMO_BASE_OPT_STRING	"v"
+	
 
 #define UINET_DEMO_INIT(which)					\
 	do {							\
@@ -49,10 +65,7 @@ struct uinet_demo_info {
 	} while (0)
 
 void uinet_demo_register(struct uinet_demo_info *info);
-void uinet_demo_base_init_cfg(struct uinet_demo_config *cfg, enum uinet_demo_id which,
-			      uint64_t instance_id, const char *name, int verbose);
-void uinet_demo_base_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
-			   struct ev_loop *loop);
+int uinet_demo_base_process_arg(struct uinet_demo_config *cfg, int opt, const char *arg);
 
 
 #endif /* _UINET_DEMO_INTERNAL_H_ */

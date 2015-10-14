@@ -252,6 +252,12 @@ struct uinet_linger {
  */
 #define	UINET_IP_BINDANY	24   /* bool: allow bind to any address */
 
+#define UINET_IP_COPY_MODE_OFF		0x00
+#define UINET_IP_COPY_MODE_MAYBE	0x01
+#define UINET_IP_COPY_MODE_ON		0x02
+#define UINET_IP_COPY_MODE_RX		0x04
+#define UINET_IP_COPY_MODE_TX		0x08
+#define UINET_IP_COPY_MODE_TXRX		(UINET_IP_COPY_MODE_TX|UINET_IP_COPY_MODE_RX)
 
 
 #define	UINET_TCP_NODELAY	0x01	/* don't delay send to coalesce packets */
@@ -548,6 +554,7 @@ struct uinet_pd {
 	uintptr_t ref;
 	uint32_t *data;
 	struct uinet_pd_ctx *ctx;
+	uint64_t serialno;
 };
 
 struct uinet_pd_list {
@@ -582,17 +589,62 @@ struct uinet_if_netmap_cfg {
 	 * ports.
 	 */
 	uint32_t vale_num_extra_bufs;
+};
+
+struct uinet_if_pcap_cfg {
+	/*
+	 * If non-zero, TX file capture will be offloaded to a dedicated
+	 * thread, separating file I/O from the network datapath.
+	 */
+	unsigned int use_file_io_thread;
+	
+	/*
+	 * CPU number to bind the I/O thread to when offloading TX file
+	 * capture to a dedicated thread.  A value of -1 leaves the thread
+	 * floating.
+	 */
+	int file_io_cpu;
 
 	/*
-	 * The maximum number of received packets to process in each receive
-	 * pass.
+	 * Packet length limit for TX file capture.
 	 */
-	uint32_t rx_batch_size;
+	unsigned int file_snapshot_length;
+
+	/*
+	 * When transmitting to file, create separate files based on flow
+	 * ID.
+	 */
+	unsigned int file_per_flow;
+
+	/*
+	 * When creating separate files per flow, the maximum number of
+	 * concurrently open files.
+	 */
+	unsigned int max_concurrent_files;
+
+	/*
+	 * When creating separate files per flow, the number of LSBs of the
+	 * flow serial number to use to select the capture file
+	 * subdirectory.
+	 */
+	unsigned int dir_bits;
 };
 
 union uinet_if_type_cfg {
 	struct uinet_if_netmap_cfg netmap;
+	struct uinet_if_pcap_cfg pcap;
 };
+
+
+typedef enum {
+	UINET_IF_TIMESTAMP_NONE,
+	UINET_IF_TIMESTAMP_HW,		   /* supplied by interface */
+	UINET_IF_TIMESTAMP_COUNTER,	   /* per-interface counter */
+	UINET_IF_TIMESTAMP_GLOBAL_COUNTER, /* application-wide counter */
+	UINET_IF_TIMESTAMP_MONOTONIC,	   /* use CLOCK_MONOTONIC */
+	UINET_IF_TIMESTAMP_MONOTONIC_FAST, /* use CLOCK_MONOTONIC_FAST (may be the same as CLOCK_MONOTONIC) */
+} uinet_if_timestamp_mode_t;
+
 
 struct uinet_if_cfg {
 	uinet_iftype_t type;	/* interface driver type to attach */
@@ -624,11 +676,19 @@ struct uinet_if_cfg {
 	int rx_cpu;
 	int tx_cpu;
 
+	/*
+	 * The maximum number of received packets to process in each receive
+	 * pass.
+	 */
+	uint32_t rx_batch_size;
+
 	uint32_t tx_inject_queue_len;
 
 	void (*first_look_handler)(void *arg, struct uinet_pd_list *pkts);
 	void *first_look_handler_arg;
 
+	uinet_if_timestamp_mode_t timestamp_mode;
+	
 	union uinet_if_type_cfg type_cfg;	/* type-specific config */
 };
 
@@ -642,6 +702,7 @@ enum uinet_global_cfg_type {
 
 struct uinet_global_cfg {
 	unsigned int ncpus;
+	uint32_t epoch_number; /* used to distinguish one run of the application from another when persisting data */
 	uint32_t netmap_extra_bufs;
 	struct {
 		struct {

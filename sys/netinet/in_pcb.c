@@ -80,6 +80,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/in_pcb.c 237910 2012-07-01 08:47:1
 
 #if defined(INET) || defined(INET6)
 #include <netinet/in.h>
+#ifdef INET_COPY
+#include <netinet/in_copy.h>
+#endif
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp_var.h>
@@ -140,6 +143,10 @@ VNET_DEFINE(int, ipport_tcpallocs);
 static VNET_DEFINE(int, ipport_tcplastcount);
 
 #define	V_ipport_tcplastcount		VNET(ipport_tcplastcount)
+
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+VNET_DEFINE(uint64_t, ip_flow_serial_next);
+#endif
 
 static void	in_pcbremlists(struct inpcb *inp);
 #ifdef INET
@@ -1357,6 +1364,12 @@ in_pcbdrop(struct inpcb *inp)
 		in_pcbgroup_remove(inp);
 #endif
 	}
+#ifdef INET_COPY
+	if (inp->inp_copy_mode & IP_COPY_MODE_ON)
+		in_copy_flush(inp, 1);
+	else
+		in_copy_dispose(inp);
+#endif
 }
 
 #ifdef INET

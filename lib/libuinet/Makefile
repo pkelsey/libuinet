@@ -232,7 +232,9 @@ KERN_MSRCS+=		\
 LIBKERN_SRCS+=		\
 	bcd.c		\
 	inet_ntoa.c	\
-	strlcpy.c
+	strlcpy.c	\
+	strndup.c	\
+	strnlen.c
 
 
 MACHINE_SRCS+=		\
@@ -263,6 +265,7 @@ NETINET_SRCS+=		\
 	if_ether.c	\
 	igmp.c		\
 	in.c		\
+	in_copy.c	\
 	in_mcast.c	\
 	in_passive.c	\
 	in_pcb.c	\

@@ -114,6 +114,7 @@ struct uinet_pd_pool_info {
 
 #define UINET_PD_TYPE_MASK	0x0007
 
+/* XXX now that there are pool ids, these should be able to go away */
 #define UINET_PD_TYPE_NETMAP	0x0000
 #define UINET_PD_TYPE_MBUF	0x0001
 #define UINET_PD_TYPE_PTR	0x0002
@@ -124,8 +125,10 @@ struct uinet_pd_pool_info {
 #define uinet_pd_type(pd)	((pd)->flags & UINET_PD_TYPE_MASK)
 
 struct uinet_pd_ctx {
+	uint64_t timestamp;  /* this should really be in the pd and in the mbuf instead of here */
 	struct mbuf *m;
 	uintptr_t ref;
+	uint16_t m_orig_len; /* used for remembering original packet length when passing to the stack */
 	uint16_t flags;
 	uint16_t pool_id;
 	volatile unsigned int *refcnt;
@@ -134,6 +137,16 @@ struct uinet_pd_ctx {
 
 /* XXX struct uinet_pd, struct uinet_pd_list in uinet_api_types.h
  */
+
+#define UINET_PD_XLIST_MAX_DESCS	16
+
+/* extensible pd list */
+/* XXX maybe this should merge with uinet_pd_list? */
+struct uinet_pd_xlist {
+	struct uinet_pd_xlist *next;
+	struct uinet_pd_list list;
+};
+
 
 struct uinet_pd_ring {
 	uint32_t num_descs;
@@ -186,5 +199,12 @@ void uinet_pd_ring_free(struct uinet_pd_ring *ring);
 
 void uinet_pd_drop_injected(struct uinet_pd *pd, uint32_t n);
 
+struct uinet_pd_xlist *uinet_pd_xlist_pool_alloc(void);
+void uinet_pd_xlist_pool_free(struct uinet_pd_xlist *xlist);
+int uinet_pd_xlist_add_mbuf(struct uinet_pd_xlist **head, struct uinet_pd_xlist **tail,
+			    struct mbuf *m, uint16_t flags, uint64_t serialno);
+void uinet_pd_xlist_release(struct uinet_pd_xlist *xlist);
+void uinet_pd_xlist_release_all(struct uinet_pd_xlist *xlist);
+struct uinet_pd_xlist *uinet_pd_xlist_free(struct uinet_pd_xlist *xlist, struct uinet_pd_xlist *stop_at);
 
 #endif /* _UINET_PKT_DESC_H_ */

@@ -50,8 +50,6 @@
 #include "uinet_if_netmap.h"
 
 
-pid_t     getpid(void);
-char *strndup(const char *str, size_t len);
 unsigned int     sleep(unsigned int seconds);
 
 extern void mi_startup(void);
@@ -72,6 +70,9 @@ static struct thread *shutdown_helper_thread;
 static struct thread *at_least_one_sighandling_thread;
 static struct uhi_msg shutdown_helper_msg;
 struct uinet_instance uinst0;
+uint64_t global_timestamp_counter;
+uint32_t epoch_number;
+uint32_t instance_count;
 
 unsigned int uinet_hz;
 
@@ -112,6 +113,8 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 		cfg = &default_cfg;
 	}
 
+	epoch_number = cfg->epoch_number;
+	
 #if defined(VIMAGE_STS) || defined(VIMAGE_STS_ONLY)
 	if (inst_cfg) {
 		uinet_instance_init_vnet_sts(&vnet0_sts, inst_cfg);

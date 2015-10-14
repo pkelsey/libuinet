@@ -87,6 +87,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_input.c 238247 2012-07-08 14:2
 
 #include <netinet/cc.h>
 #include <netinet/in.h>
+#ifdef INET_COPY
+#include <netinet/in_copy.h>
+#endif
 #include <netinet/in_pcb.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
@@ -1183,6 +1186,9 @@ relocked:
 			tp = intotcpcb(inp);
 			KASSERT(tp->t_state == TCPS_SYN_RECEIVED,
 			    ("%s: ", __func__));
+#ifdef INET_COPY
+			in_copy(inp, m);
+#endif
 #ifdef TCP_SIGNATURE
 			if (sig_checked == 0)  {
 				tcp_dooptions(&to, optp, optlen,
@@ -1249,7 +1255,8 @@ relocked:
 		 */
 		if (passive_reverse_syn_ack && (thflags & TH_ACK)) {
 			tcp_dooptions(&to, optp, optlen, TH_SYN);
-			syncache_passive_synack(&inc, &to, th, m);
+			if (syncache_passive_synack(&inc, &to, th, m))
+				m = NULL; /* don't free mbuf */
 			goto dropunlock;
 		}
 #endif /* PASSIVE_INET */
@@ -1433,6 +1440,10 @@ relocked:
 		return;
 	}
 
+#ifdef INET_COPY
+	in_copy(inp, m);
+#endif
+	
 #ifdef TCP_SIGNATURE
 	if (sig_checked == 0)  {
 		tcp_dooptions(&to, optp, optlen,
@@ -3799,3 +3810,4 @@ tcp_newreno_partial_ack(struct tcpcb *tp, struct tcphdr *th)
 		tp->snd_cwnd = 0;
 	tp->snd_cwnd += tp->t_maxseg;
 }
+

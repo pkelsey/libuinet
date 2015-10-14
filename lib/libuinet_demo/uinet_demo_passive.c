@@ -36,8 +36,7 @@
 
 
 static void passive_print_usage(void);
-static int passive_init_cfg(struct uinet_demo_config *cfg, uint64_t id, const char *name,
-			    int verbose);
+static int passive_init_cfg(struct uinet_demo_config *cfg);
 static int passive_process_args(struct uinet_demo_config *cfg, int argc, char **argv);
 static void passive_print_cfg(struct uinet_demo_config *cfg);
 static int passive_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
@@ -46,6 +45,7 @@ static int passive_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
 struct uinet_demo_info passive_info = {
 	.which = UINET_DEMO_PASSIVE,
 	.name = "passive server",
+	.cfg_size = sizeof(struct uinet_demo_passive),
 	.print_usage = passive_print_usage,
 	.init_cfg = passive_init_cfg,
 	.process_args = passive_process_args,
@@ -59,8 +59,8 @@ enum passive_option_id {
 };
 
 static const struct option passive_long_options[] = {
+	UINET_DEMO_BASE_LONG_OPTS,
 	{ "listen",	required_argument,	NULL, PASSIVE_OPT_LISTEN },
-	{ "verbose",	no_argument,		NULL, 	'v' },
 	{ 0, 0, 0, 0 }
 };
 
@@ -325,19 +325,14 @@ static void
 passive_print_usage(void)
 {
 	printf("  --listen <ip:port>      Specify the listen address and port (default is 0.0.0.0:0 - promiscuous listen on all ip:port pairs)\n");
-	printf("  --verbose, -v           Increase passive reassembly server verbosity above the baseline (can use multiple times)\n");
 }
 
 
 static int
-passive_init_cfg(struct uinet_demo_config *cfg, uint64_t id, const char *name, int verbose)
+passive_init_cfg(struct uinet_demo_config *cfg)
 {
 	struct uinet_demo_passive *passive = (struct uinet_demo_passive *)cfg;
 
-	memset(passive, 0, sizeof(*passive));
-	
-	uinet_demo_base_init_cfg(cfg, UINET_DEMO_PASSIVE, id, name, verbose);
-	
 	snprintf(passive->listen_addr, sizeof(passive->listen_addr), "%s", "0.0.0.0");
 	passive->promisc = 1;
 
@@ -351,7 +346,7 @@ passive_process_args(struct uinet_demo_config *cfg, int argc, char **argv)
 	struct uinet_demo_passive *passive = (struct uinet_demo_passive *)cfg;
 	int opt;
 
-	while ((opt = getopt_long(argc, argv, ":v",
+	while ((opt = getopt_long(argc, argv, ":" UINET_DEMO_BASE_OPT_STRING,
 				 passive_long_options, NULL)) != -1) {
 		switch (opt) {
 		case PASSIVE_OPT_LISTEN:
@@ -363,12 +358,13 @@ passive_process_args(struct uinet_demo_config *cfg, int argc, char **argv)
 				return (1);
 			}
 			break;
-		case 'v':
-			cfg->verbose++;
-			break;
 		case ':':
 		case '?':
 			return (opt);
+		default:
+			if (uinet_demo_base_process_arg(cfg, opt, optarg))
+				return (opt);
+			break;
 		}
 	}
 
@@ -395,8 +391,6 @@ passive_start(struct uinet_demo_config *cfg, uinet_instance_t uinst, struct ev_l
 	int optlen, optval;
 	int error;
 	struct uinet_sockaddr_in sin;
-
-	uinet_demo_base_start(cfg, uinst, loop);
 
 	if (uinet_inet_pton(UINET_AF_INET, passive->listen_addr, &addr) <= 0) {
 		printf("%s: Malformed address %s\n", passive->cfg.name, passive->listen_addr);
