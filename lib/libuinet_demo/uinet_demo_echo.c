@@ -193,10 +193,9 @@ echo_connected_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 		uinet_free_sockaddr((struct uinet_sockaddr *)sin1);
 		uinet_free_sockaddr((struct uinet_sockaddr *)sin2);
 	}
-	printf("socket serial no = %llu\n", (unsigned long long)uinet_sogetserialno(w->so));
+
 	if ((echo->cfg.copy_mode & UINET_IP_COPY_MODE_MAYBE) &&
 	    ((uinet_sogetserialno(w->so) % echo->cfg.copy_every) == 0)){
-		printf("setting copy mode to ON\n");
 		if ((error =
 		     uinet_sosetcopymode(w->so, UINET_IP_COPY_MODE_RX|UINET_IP_COPY_MODE_ON,
 					 echo->cfg.copy_limit, echo->cfg.copy_uif)))

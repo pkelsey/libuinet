@@ -197,8 +197,19 @@ passive_connected_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 {
 	struct passive_connection *conn = w->data;
 	struct uinet_demo_passive *passive = conn->server;
+	int error;
 
-	printf("%s: %s: connection established\n", passive->cfg.name, conn->label);
+	if (passive->cfg.verbose)
+		printf("%s: %s: connection established\n", passive->cfg.name, conn->label);
+
+	if ((passive->cfg.copy_mode & UINET_IP_COPY_MODE_MAYBE) &&
+	    ((uinet_sogetserialno(w->so) % passive->cfg.copy_every) == 0)){
+		if ((error =
+		     uinet_sosetcopymode(w->so, UINET_IP_COPY_MODE_RX|UINET_IP_COPY_MODE_ON,
+					 passive->cfg.copy_limit, passive->cfg.copy_uif)))
+			printf("%s: Failed to set copy mode (%d)\n",
+			       passive->cfg.name, error);
+	}
 	ev_uinet_stop(loop, w);
 }
 
@@ -300,10 +311,10 @@ passive_accept_cb(struct ev_loop *loop, ev_uinet *w, int revents)
 			ev_uinet_start(loop, &conn->watcher);
 			ev_uinet_start(loop, &peerconn->watcher);
 
-			if (conn->verbose)
+			if (conn->verbose || (passive->cfg.copy_mode & UINET_IP_COPY_MODE_MAYBE))
 				ev_uinet_start(loop, &conn->connected_watcher);
 
-			if (peerconn->verbose)
+			if (peerconn->verbose || (passive->cfg.copy_mode & UINET_IP_COPY_MODE_MAYBE))
 				ev_uinet_start(loop, &peerconn->connected_watcher);
 
 			passive->num_sockets += 2;

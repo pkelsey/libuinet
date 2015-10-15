@@ -587,7 +587,7 @@ if_pcap_destroy_dumper(struct if_pcap_host_context *ctx, struct if_pcap_dumper *
  * Dump files are closed, and the hash entry replaced, on collision.
  */
 static pcap_dumper_t *
-if_pcap_get_dumper(struct if_pcap_host_context *ctx, uint64_t flowid)
+if_pcap_get_dumper(struct if_pcap_host_context *ctx, uint64_t flowid, unsigned int create)
 {
 	struct if_pcap_dumper *d;
 	struct if_pcap_dumper new_d;
@@ -596,6 +596,8 @@ if_pcap_get_dumper(struct if_pcap_host_context *ctx, uint64_t flowid)
 		d = &ctx->tx_dumper_hash[flowid & ctx->tx_dumper_hash_mask];
 		if (d->d != NULL) {
 			if (d->flowid != flowid) {
+				if (!create)
+					return (NULL);
 				new_d.d = NULL;
 				if_pcap_create_dumper(ctx, &new_d, flowid);
 				if (new_d.d == NULL)
@@ -603,8 +605,10 @@ if_pcap_get_dumper(struct if_pcap_host_context *ctx, uint64_t flowid)
 				if_pcap_destroy_dumper(ctx, d);
 				*d = new_d;
 			} /* else d is the dumper we want */
-		} else
+		} else if (create)
 			if_pcap_create_dumper(ctx, d, flowid);
+		else
+			return (NULL);
 		return (d->d);
 	} else {
 		if (ctx->tx_single_dumper.d == NULL)
@@ -622,7 +626,7 @@ if_pcap_sendpacket(struct if_pcap_host_context *ctx, const uint8_t *buf, unsigne
 	struct pcap_pkthdr h;
 	
 	if (ctx->tx_isfile) {
-		d = if_pcap_get_dumper(ctx, flowid);
+		d = if_pcap_get_dumper(ctx, flowid, 1);
 		if (d == NULL)
 			return (-1);
 
@@ -637,11 +641,26 @@ if_pcap_sendpacket(struct if_pcap_host_context *ctx, const uint8_t *buf, unsigne
 }
 
 
+void
+if_pcap_flushflow(struct if_pcap_host_context *ctx, uint64_t flowid)
+{
+	pcap_dumper_t *d;
+
+	printf("flush request for flow %llu\n", (unsigned long long)flowid);
+	d = if_pcap_get_dumper(ctx, flowid, 1);
+	if (d != NULL) {
+		printf("flushing\n");
+		pcap_dump_flush(d);
+	}
+}
+
+
 int
 if_pcap_getpacket(struct if_pcap_host_context *ctx, uint64_t now,
-		  uint32_t *buffer, uint16_t max_length, uint16_t *length, uint64_t *wait_ns)
+		  uint32_t *buffer, uint16_t max_length, uint16_t *length,
+		  uint64_t *timestamp, uint64_t *wait_ns)
 {
-	uint64_t timestamp;
+	uint64_t hdr_timestamp;
 	uint64_t time_since_last_delivery;
 	uint64_t time_since_last_capture;		
 	struct pcap_pkthdr *hdr;
@@ -655,13 +674,13 @@ if_pcap_getpacket(struct if_pcap_host_context *ctx, uint64_t now,
 	case 0: /* timeout or non-blocking and none available */
 		return (0);
 	case 1: /* success */
+		hdr_timestamp = (uint64_t)hdr->ts.tv_sec * 1000000000 + (uint64_t)hdr->ts.tv_usec * 1000;
 		if (ctx->rx_isfile) {
 			*length = (hdr->caplen <= max_length) ? hdr->caplen : max_length;
 			memcpy(buffer, data, *length);
 			
-			timestamp = (uint64_t)hdr->ts.tv_sec * 1000000000 + (uint64_t)hdr->ts.tv_usec * 1000;
 			time_since_last_delivery = now - ctx->last_packet_delivery;
-			time_since_last_capture = timestamp - ctx->last_packet_timestamp;
+			time_since_last_capture = hdr_timestamp - ctx->last_packet_timestamp;
 
 			if ((ctx->last_packet_delivery == 0) ||
 			    (time_since_last_delivery >= time_since_last_capture))
@@ -670,10 +689,11 @@ if_pcap_getpacket(struct if_pcap_host_context *ctx, uint64_t now,
 				*wait_ns = time_since_last_capture - time_since_last_delivery;
 		
 			ctx->last_packet_delivery = now;
-			ctx->last_packet_timestamp = timestamp;
+			ctx->last_packet_timestamp = hdr_timestamp;
 		} else {
 			*wait_ns = 0;
 		}
+		*timestamp = hdr_timestamp;
 		return (1);	
 	}
 }

@@ -544,6 +544,8 @@ typedef enum {
 #define UINET_PD_TO_STACK	0x0020	/* Packet will be sent to the stack.  Implies UINET_PD_MBUF_USED */
 #define UINET_PD_DROP		0x0040	/* Dispose of packet upon return from first-look handler */
 #define UINET_PD_EXTRA_REFS	0x0080	/* Apply extra refs during call to uinet_pd_add_refs() */
+#define UINET_PD_FLUSH_FLOW	0x0100	/* If packets are being written to a medium through a caching layer, flush the given flow */
+#define UINET_PD_MGMT_ONLY	0x0200	/* Indicates that there is no data or context associated with the descriptor */
 
 struct uinet_pd_ctx;
 
@@ -560,6 +562,15 @@ struct uinet_pd {
 struct uinet_pd_list {
 	uint32_t num_descs;
 	struct uinet_pd descs[0];
+};
+
+/*
+ * Mainly useful for avoiding the allocator when injecting a single
+ * descriptor.  Can be passed anywhere a pd_list is passed.
+ */
+struct uinet_pd_list_single {
+	uint32_t num_descs;
+	struct uinet_pd descs[1];
 };
 
 
@@ -598,13 +609,6 @@ struct uinet_if_pcap_cfg {
 	 */
 	unsigned int use_file_io_thread;
 	
-	/*
-	 * CPU number to bind the I/O thread to when offloading TX file
-	 * capture to a dedicated thread.  A value of -1 leaves the thread
-	 * floating.
-	 */
-	int file_io_cpu;
-
 	/*
 	 * Packet length limit for TX file capture.
 	 */

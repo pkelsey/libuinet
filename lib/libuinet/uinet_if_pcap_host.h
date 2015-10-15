@@ -37,7 +37,9 @@ struct if_pcap_host_context * if_pcap_create_handle(const char *rx_ifname, unsig
 void if_pcap_destroy_handle(struct if_pcap_host_context *ctx);
 int if_pcap_sendpacket(struct if_pcap_host_context *ctx, const uint8_t *buf, unsigned int size,
 		       uint64_t flowid, uint64_t ts_nsec);
+void if_pcap_flushflow(struct if_pcap_host_context *ctx, uint64_t flowid);
 int if_pcap_getpacket(struct if_pcap_host_context *ctx, uint64_t now,
-		      uint32_t *buffer, uint16_t max_length, uint16_t *length, uint64_t *wait_ns);
+		      uint32_t *buffer, uint16_t max_length, uint16_t *length,
+		      uint64_t *timestamp, uint64_t *wait_ns);
 
 #endif /* _UINET_IF_PCAP_HOST_H_ */

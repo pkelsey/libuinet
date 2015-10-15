@@ -517,6 +517,21 @@ print_cpu(const char *label, int cpu)
 
 
 static void
+print_timestamp_mode(const char *label, uinet_if_timestamp_mode_t mode)
+{
+	unsigned int i;
+
+	for (i = 0; i < sizeof(timestamp_mode_table) / sizeof(timestamp_mode_table[0]); i++) {
+		if (timestamp_mode_table[i].mode == mode) {
+			printf("%s=%s", label, timestamp_mode_table[i].name);
+			return;
+		}
+	}
+	printf("%s=<unknown>", label);
+}
+
+
+static void
 print_cfg(struct event_loop_config *elcfgs, unsigned int num_event_loops)
 {
 	unsigned int i, j;
@@ -573,6 +588,25 @@ print_cfg(struct event_loop_config *elcfgs, unsigned int num_event_loops)
 
 				print_cpu(" rxcpu", txcpu);
 				print_cpu(" txcpu", txcpu);
+
+				print_timestamp_mode(" tstamp", curifcfg->ucfg.timestamp_mode);
+
+				switch (curifcfg->ucfg.type) {
+				case UINET_IFTYPE_NETMAP:
+					printf(" trace=0x%08x", curifcfg->ucfg.type_cfg.netmap.trace_mask);
+					printf(" valebufs=%u", curifcfg->ucfg.type_cfg.netmap.vale_num_extra_bufs);
+					break;
+				case UINET_IFTYPE_PCAP:
+					printf(" txio=%s", curifcfg->ucfg.type_cfg.pcap.use_file_io_thread ? "remote" : "local");
+					printf(" txsnaplen=%u", curifcfg->ucfg.type_cfg.pcap.file_snapshot_length);
+					printf(" txfiles=%s", curifcfg->ucfg.type_cfg.pcap.file_per_flow ? "per-flow" : "single");
+					printf(" txmaxfds=%u", curifcfg->ucfg.type_cfg.pcap.max_concurrent_files);
+					printf(" txdirbits=%u", curifcfg->ucfg.type_cfg.pcap.dir_bits);
+					break;
+				default:
+					break;
+				}
+
 				printf("\n");
 			}
 			if (if_index == 0)

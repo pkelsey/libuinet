@@ -2060,6 +2060,9 @@ uinet_pd_ref_acquire(struct uinet_pd_list *pkts, unsigned int num_extra)
 	for (i = 0; i < pkts->num_descs; i++) {
 		pd = &pkts->descs[i];
 
+		if (pd->flags & UINET_PD_MGMT_ONLY)
+			continue;
+
 		/*
 		 * If the packet is to be both injected into the transmit
 		 * path of another interface and sent to the stack, one

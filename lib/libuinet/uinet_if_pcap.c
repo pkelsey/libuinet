@@ -109,7 +109,6 @@ if_pcap_default_config(union uinet_if_type_cfg *cfg)
 	pcfg = &cfg->pcap;
 
 	pcfg->use_file_io_thread = 0;
-	pcfg->file_io_cpu = -1;
 	pcfg->file_snapshot_length = 65535;
 	pcfg->file_per_flow = 0;
 	pcfg->max_concurrent_files = 1000;
@@ -420,12 +419,13 @@ if_pcap_process_tx_inject_ring(struct if_pcap_softc *sc, uint32_t *cur_inject_ta
 	struct uinet_pd_ring *txr;
 	struct uinet_pd *cur_pd;
 	struct uinet_pd_ctx **pdctx_to_free;
-	uint32_t num_pd;
+	uint32_t num_pd_ctx;
 	uint32_t local_cur_inject_take, cur_inject_put;
 	uint32_t inject_drops;
 	uint32_t n_zero_copy;
 	uint32_t n_copy;
 	uint32_t total_bytes;
+	int do_single_flush;
 	int done;
 	
 	txr = sc->tx_inject_ring;
@@ -443,7 +443,6 @@ if_pcap_process_tx_inject_ring(struct if_pcap_softc *sc, uint32_t *cur_inject_ta
 	}
 
 	local_cur_inject_take = txr->take;
-	num_pd = uinet_pd_ring_avail(txr);
 	cur_inject_put = txr->put;
 	inject_drops = txr->drops;
 	txr->drops = 0;
@@ -460,22 +459,40 @@ if_pcap_process_tx_inject_ring(struct if_pcap_softc *sc, uint32_t *cur_inject_ta
 	total_bytes = 0;
 
 	pdctx_to_free = &sc->tx_pdctx_to_free[0];
+	num_pd_ctx = 0;
+	do_single_flush = 0;
 	while (local_cur_inject_take != cur_inject_put) {
 		cur_pd = &txr->descs[local_cur_inject_take];
 
-		if (if_pcap_sendpacket(sc->pcap_host_ctx,
-				       (uint8_t *)cur_pd->data,
-				       cur_pd->length, cur_pd->serialno,
-				       cur_pd->ctx->timestamp))
-			inject_drops++;
-		else {
-			n_copy++;
-			total_bytes += cur_pd->length;
+		if (!(cur_pd->flags & UINET_PD_MGMT_ONLY)) {
+			if (if_pcap_sendpacket(sc->pcap_host_ctx,
+					       (uint8_t *)cur_pd->data,
+					       cur_pd->length, cur_pd->serialno,
+					       cur_pd->ctx->timestamp))
+				inject_drops++;
+			else {
+				n_copy++;
+				total_bytes += cur_pd->length;
+			}
+			*pdctx_to_free++ = cur_pd->ctx;
+			num_pd_ctx++;
 		}
-
-		*pdctx_to_free++ = cur_pd->ctx;
+		if (cur_pd->flags & UINET_PD_FLUSH_FLOW) {
+			if (sc->uif->type_cfg.pcap.file_per_flow)
+				if_pcap_flushflow(sc->pcap_host_ctx, cur_pd->serialno);
+			else
+				do_single_flush = 1;
+		}
 		local_cur_inject_take = uinet_pd_ring_next(txr, local_cur_inject_take);
 	}
+
+	/*
+	 * If all flows go to a single dump file, then we just do a single
+	 * flush here if there was at least one flush request in the
+	 * queue
+	 */
+	if (do_single_flush)
+		if_pcap_flushflow(sc->pcap_host_ctx, 0);
 
 	ifp->if_oerrors += inject_drops;
 	if (n_zero_copy + n_copy > 0) {
@@ -485,7 +502,7 @@ if_pcap_process_tx_inject_ring(struct if_pcap_softc *sc, uint32_t *cur_inject_ta
 		ifp->if_obytes += total_bytes;
 	}
 
-	uinet_pd_ref_release(sc->tx_pdctx_to_free, num_pd);
+	uinet_pd_ref_release(sc->tx_pdctx_to_free, num_pd_ctx);
 
 	if (!sc->tx_use_thread)
 		txr->take = local_cur_inject_take;
@@ -647,6 +664,7 @@ if_pcap_batch_receive(struct uinet_if *uif, int *fd, uint64_t *wait_ns)
 	struct if_pcap_softc *sc;
 	struct uinet_pd *rx_pd;
 	uint64_t now;
+	uint64_t timestamp;
 	unsigned int had_packet_waiting;
 	unsigned int max_rx;
 	unsigned int i;
@@ -671,7 +689,10 @@ if_pcap_batch_receive(struct uinet_if *uif, int *fd, uint64_t *wait_ns)
 	rx_pd = &sc->rx_pds->descs[had_packet_waiting];
 	max_rx = sc->rx_pds->num_descs - had_packet_waiting;
 	for (i = 0; i < max_rx; i++, rx_pd++) {
-		rv = if_pcap_getpacket(sc->pcap_host_ctx, now, rx_pd->data, MCLBYTES, &rx_pd->length, wait_ns);
+		rv = if_pcap_getpacket(sc->pcap_host_ctx, now, rx_pd->data, MCLBYTES,
+				       &rx_pd->length, &timestamp, wait_ns);
+		if (uif->timestamp_mode == UINET_IF_TIMESTAMP_HW)
+			rx_pd->ctx->timestamp = timestamp;
 		if (rv < 1)
 			break;
 		rx_pd->flags |= UINET_PD_TO_STACK;

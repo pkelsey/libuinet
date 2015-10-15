@@ -1065,45 +1065,48 @@ if_netmap_process_tx_inject_ring(struct if_netmap_softc *sc, uint32_t avail, uin
 	local_pdctx_to_free = *pdctx_to_free;
 	while (avail && (local_cur_inject_take != cur_inject_put)) {
 		cur_pd = &txr->descs[local_cur_inject_take];
-		pktlen = cur_pd->length;
-		local_total_bytes += pktlen;
 
-		TRACE(TRACE_TX_PKT, " tx: pktlen=%u [", pktlen);
-		for (i = 0; i < PKT_TRACE_DEPTH; i++)
-			TRACE_PLAIN(TRACE_TX_PKT, " %02x", cur_pd->data[i]);
-		TRACE_PLAIN(TRACE_TX_PKT, " ]\n");
+		if (!(cur_pd->flags & UINET_PD_MGMT_ONLY)) {
+			pktlen = cur_pd->length;
+			local_total_bytes += pktlen;
 
-		slotbuf = if_netmap_txslot(sc->nm_host_ctx, local_curslot, &bufindex, (void **)&slot_pdctx);
-		TRACE(TRACE_TX_RING_STATE, " tx: slot %u: bufindex=%u ptr=%p\n", local_curslot, bufindex, slot_pdctx);
-		desc_type = uinet_pd_type(cur_pd);
-		if ((desc_type == UINET_PD_TYPE_NETMAP) && (cur_pd->pool_id == this_pd_pool_id)) {
-			TRACE(TRACE_TX_RING_OPS, " tx: slot %u: writing bufindex %u, freeing bufindex %u\n",
-			      local_curslot, (unsigned int)cur_pd->ref, bufindex);
+			TRACE(TRACE_TX_PKT, " tx: pktlen=%u [", pktlen);
+			for (i = 0; i < PKT_TRACE_DEPTH; i++)
+				TRACE_PLAIN(TRACE_TX_PKT, " %02x", cur_pd->data[i]);
+			TRACE_PLAIN(TRACE_TX_PKT, " ]\n");
 
-			local_n_zero_copy++;
+			slotbuf = if_netmap_txslot(sc->nm_host_ctx, local_curslot, &bufindex, (void **)&slot_pdctx);
+			TRACE(TRACE_TX_RING_STATE, " tx: slot %u: bufindex=%u ptr=%p\n", local_curslot, bufindex, slot_pdctx);
+			desc_type = uinet_pd_type(cur_pd);
+			if ((desc_type == UINET_PD_TYPE_NETMAP) && (cur_pd->pool_id == this_pd_pool_id)) {
+				TRACE(TRACE_TX_RING_OPS, " tx: slot %u: writing bufindex %u, freeing bufindex %u\n",
+				      local_curslot, (unsigned int)cur_pd->ref, bufindex);
 
-			/*
-			 * Swap the outbound packet descriptor with the one in the slot.
-			 */
-			*local_pdctx_to_free++ = slot_pdctx;
-			slot_pdctx = cur_pd->ctx;
-			bufindex = cur_pd->ref;
-		} else {
-			TRACE(TRACE_TX_RING_OPS, " tx: slot %u: copying %s data to bufindex %u\n",
-			      local_curslot, 
-			      (desc_type == UINET_PD_TYPE_MBUF) ? "mbuf" : 
-			      (desc_type == UINET_PD_TYPE_NETMAP) ? "netmap-from-other-pool" :
-			      (desc_type == UINET_PD_TYPE_PTR) ? "ptr" : "<unknown>", bufindex);
+				local_n_zero_copy++;
 
-			local_n_copy++;
-			memcpy(slotbuf, cur_pd->data, pktlen);
-			*local_pdctx_to_free++ = cur_pd->ctx;
+				/*
+				 * Swap the outbound packet descriptor with the one in the slot.
+				 */
+				*local_pdctx_to_free++ = slot_pdctx;
+				slot_pdctx = cur_pd->ctx;
+				bufindex = cur_pd->ref;
+			} else {
+				TRACE(TRACE_TX_RING_OPS, " tx: slot %u: copying %s data to bufindex %u\n",
+				      local_curslot,
+				      (desc_type == UINET_PD_TYPE_MBUF) ? "mbuf" :
+				      (desc_type == UINET_PD_TYPE_NETMAP) ? "netmap-from-other-pool" :
+				      (desc_type == UINET_PD_TYPE_PTR) ? "ptr" : "<unknown>", bufindex);
+
+				local_n_copy++;
+				memcpy(slotbuf, cur_pd->data, pktlen);
+				*local_pdctx_to_free++ = cur_pd->ctx;
+			}
+
+			avail--;
+			TRACE(TRACE_TX_RING_OPS, " tx: slot %u: setting bufindex=%u ptr=%p len=%u\n",
+			      local_curslot, bufindex, slot_pdctx, pktlen);
+			if_netmap_txsetslot(sc->nm_host_ctx, &local_curslot, bufindex, slot_pdctx, pktlen, 0);
 		}
-
-		avail--;
-		TRACE(TRACE_TX_RING_OPS, " tx: slot %u: setting bufindex=%u ptr=%p len=%u\n",
-		      local_curslot, bufindex, slot_pdctx, pktlen);
-		if_netmap_txsetslot(sc->nm_host_ctx, &local_curslot, bufindex, slot_pdctx, pktlen, 0);
 
 		local_cur_inject_take = uinet_pd_ring_next(txr, local_cur_inject_take);
 	}
@@ -1300,7 +1303,6 @@ if_netmap_send(void *arg)
 			if (EWOULDBLOCK == cv_timedwait(&sc->tx_cv, &sc->tx_lock, curthread->td_stop_check_ticks))
 				done = kthread_stop_check();
 		sc->tx_pkts_to_send = 0;
-		num_pd = uinet_pd_ring_avail(txr);
 		cur_inject_put = txr->put;
 		inject_drops = txr->drops;
 		txr->drops = 0;
@@ -1331,6 +1333,7 @@ if_netmap_send(void *arg)
 			/* update the ring state for the benefit of subsequent calls to if_netmap_wait_for_avail() */
 			if_netmap_txupdate(sc->nm_host_ctx, &avail, &curslot);
 		}
+		num_pd = n_zero_copy + n_copy;
 
 		TRACE(TRACE_TX_BATCH, " tx: Processing driver queue\n");
 		IFQ_DRV_DEQUEUE(&ifp->if_snd, m);

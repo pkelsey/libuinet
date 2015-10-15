@@ -84,18 +84,49 @@ in_copy_flush(struct inpcb *inp, unsigned int finished)
 {
 	struct uinet_pd_xlist *cur;
 	struct uinet_if *uif;
+	unsigned int injected;
+	struct uinet_pd_list_single flush_list;
 	
 	uif = inp->inp_copyif ? uinet_iftouif(inp->inp_copyif) : NULL;
 	cur = inp->inp_copyq;
+	injected = 0;
 	while (cur &&
 	       ((cur->list.num_descs == UINET_PD_XLIST_MAX_DESCS) ||
 		finished)) {
-		if (uif)
-			UIF_INJECT_TX(uif, &cur->list);
-		else
-			uinet_pd_xlist_release(cur);	
+		if (cur->list.num_descs > 0) {
+			if (uif) {
+				/*
+				 * Mark the last descriptor with the flush
+				 * flag.  Because the xlists are allocated
+				 * on demand and only one empty xlist is
+				 * retained when doing a non-finish flush,
+				 * either there's a single empty xlist or
+				 * the last xlist in the chain contains the
+				 * last descriptor.
+				 */
+				if (finished && (cur->next == NULL))
+					cur->list.descs[cur->list.num_descs - 1].flags |= UINET_PD_FLUSH_FLOW;
+				UIF_INJECT_TX(uif, &cur->list);
+				injected = 1;
+			} else
+				uinet_pd_xlist_release(cur);
+		}
 		cur = cur->next;
 	}
 	inp->inp_copyq = inp->inp_copyq_tail =
 	    uinet_pd_xlist_free(inp->inp_copyq, cur);
+
+	/*
+	 * If we are doing a finish flush, we haven't injected anything
+	 * above (which means we didn't have the opportunity to mark the
+	 * last descriptor with the flush flag), there's an interface to
+	 * inject to and we've replicated at least one packet, inject a
+	 * flush pd.
+	 */
+	if (finished && !injected && uif && (inp->inp_copy_total > 0)) {
+		flush_list.num_descs = 1;
+		flush_list.descs[0].flags = UINET_PD_INJECT | UINET_PD_FLUSH_FLOW | UINET_PD_MGMT_ONLY;
+		flush_list.descs[0].serialno = inp->inp_serialno;
+		UIF_INJECT_TX(uif, (struct uinet_pd_list *)&flush_list);
+	}
 }
