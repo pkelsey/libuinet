@@ -214,7 +214,7 @@ if_pcap_create_handle(const char *rx_ifname, unsigned int rx_isfile, int *rx_fd,
 			if (hashsize == 0)
 				hashsize = 1;
 		
-			ctx->tx_dumper_hash = calloc(1, hashsize);
+			ctx->tx_dumper_hash = calloc(hashsize, sizeof(*(ctx->tx_dumper_hash)));
 			if (ctx->tx_dumper_hash == NULL)
 				goto fail;
 			ctx->tx_dumper_hash_mask = hashsize - 1;
@@ -646,12 +646,9 @@ if_pcap_flushflow(struct if_pcap_host_context *ctx, uint64_t flowid)
 {
 	pcap_dumper_t *d;
 
-	printf("flush request for flow %llu\n", (unsigned long long)flowid);
 	d = if_pcap_get_dumper(ctx, flowid, 1);
-	if (d != NULL) {
-		printf("flushing\n");
+	if (d != NULL)
 		pcap_dump_flush(d);
-	}
 }
 
 
