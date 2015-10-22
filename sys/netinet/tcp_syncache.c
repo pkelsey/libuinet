@@ -1621,7 +1621,7 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m, struct 
 	if (VNET_IS_STS(curvnet))
 		inp->inp_serialno = V_ip_flow_serial_next++;
 	else
-		inp->inp_serialno = atomic_fetchadd_64(&V_ip_flow_serial_next, 1);
+		inp->inp_serialno = atomic_fetchadd_64(&V_ip_flow_serial_next, 1); /* XXX for 32-bit platforms this will likely have to be 32 bits */
 #ifdef PASSIVE_INET
 	if (client_inp)
 		client_inp->inp_serialno = inp->inp_serialno;
