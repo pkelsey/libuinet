@@ -46,16 +46,20 @@
 void
 in_copy(struct inpcb *inp, struct mbuf *m)
 {
-	if ((inp->inp_copy_mode & IP_COPY_MODE_RX) &&
-	    (!inp->inp_copy_limit ||
-	     (inp->inp_copy_total < inp->inp_copy_limit))) {
-		inp->inp_copy_total +=
-		    uinet_pd_xlist_add_mbuf(&inp->inp_copyq, &inp->inp_copyq_tail,
-					    m, UINET_PD_INJECT, inp->inp_serialno);
-		if ((inp->inp_copy_mode & IP_COPY_MODE_ON) &&
-		    inp->inp_copyq &&
-		    (inp->inp_copyq->list.num_descs == UINET_PD_XLIST_MAX_DESCS)) {
-			in_copy_flush(inp, 0);
+	if (inp->inp_copy_mode & IP_COPY_MODE_RX) {
+		while (m && (!inp->inp_copy_limit ||
+			     (inp->inp_copy_total < inp->inp_copy_limit))) {
+			inp->inp_copy_total +=
+			    uinet_pd_xlist_add_mbuf(&inp->inp_copyq, &inp->inp_copyq_tail,
+						    m, UINET_PD_INJECT, inp->inp_serialno);
+
+			/* If mode is ON, flush whenever the vector fills. */
+			if ((inp->inp_copy_mode & IP_COPY_MODE_ON) &&
+			    inp->inp_copyq &&
+			    (inp->inp_copyq->list.num_descs == UINET_PD_XLIST_MAX_DESCS)) {
+				in_copy_flush(inp, 0);
+			}
+			m = m->m_next;
 		}
 	}
 }
