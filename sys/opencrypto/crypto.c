@@ -72,7 +72,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/opencrypto/crypto.c 208834 2010-06-05 16:0
 #include <sys/sdt.h>
 #include <sys/sysctl.h>
 
+#ifdef DDB
 #include <ddb/ddb.h>
+#endif
 
 #include <vm/uma.h>
 #include <opencrypto/cryptodev.h>
