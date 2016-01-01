@@ -38,6 +38,8 @@ SYSCTL_NODE(, CTL_NET,	  net,    CTLFLAG_RW, 0,
 	"Network, (see socket.h)");
 SYSCTL_NODE(, CTL_DEBUG,  debug,  CTLFLAG_RW, 0,
 	"Debugging");
+SYSCTL_NODE(, CTL_HW,	  hw,     CTLFLAG_RW, 0,
+	"hardware");
 SYSCTL_NODE(, CTL_MACHDEP, machdep, CTLFLAG_RW, 0,
 	"machine dependent");
 
