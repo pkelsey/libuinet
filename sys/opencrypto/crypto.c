@@ -172,9 +172,17 @@ SYSCTL_INT(_kern, OID_AUTO, cryptodevallowsoft, CTLFLAG_RW,
 MALLOC_DEFINE(M_CRYPTO_DATA, "crypto", "crypto session records");
 
 static	void crypto_proc(void);
+#ifdef UINET
+static	struct thread *cryptoproc;
+#else
 static	struct proc *cryptoproc;
+#endif
 static	void crypto_ret_proc(void);
+#ifdef UINET
+static	struct thread *cryptoretproc;
+#else
 static	struct proc *cryptoretproc;
+#endif
 static	void crypto_destroy(void);
 static	int crypto_invoke(struct cryptocap *cap, struct cryptop *crp, int hint);
 static	int crypto_kinvoke(struct cryptkop *krp, int flags);
@@ -226,16 +234,26 @@ crypto_init(void)
 		goto bad;
 	}
 
+#ifdef UINET
+	error = kthread_add((void (*)(void *)) crypto_proc, NULL, NULL,
+		    &cryptoproc, 0, 0, "crypto");
+#else
 	error = kproc_create((void (*)(void *)) crypto_proc, NULL,
 		    &cryptoproc, 0, 0, "crypto");
+#endif
 	if (error) {
 		printf("crypto_init: cannot start crypto thread; error %d",
 			error);
 		goto bad;
 	}
 
+#ifdef UINET
+	error = kthread_add((void (*)(void *)) crypto_ret_proc, NULL, NULL,
+		    &cryptoretproc, 0, 0, "crypto returns");
+#else
 	error = kproc_create((void (*)(void *)) crypto_ret_proc, NULL,
 		    &cryptoretproc, 0, 0, "crypto returns");
+#endif
 	if (error) {
 		printf("crypto_init: cannot start cryptoret thread; error %d",
 			error);
@@ -254,6 +272,25 @@ bad:
  * the data structures they use.  See crypto_finis below
  * for the other half of this song-and-dance.
  */
+#ifdef UINET
+static void
+crypto_terminate(struct thread **pt, void *q)
+{
+	struct thread *t;
+
+	mtx_assert(&crypto_drivers_mtx, MA_OWNED);
+	t = *pt;
+	*pt = NULL;
+	if (t) {
+		wakeup_one(q);
+		mtx_lock(t->td_lock);	/* NB: insure we don't miss wakeup */
+		CRYPTO_DRIVER_UNLOCK();	/* let crypto_finis progress */
+		msleep(t, t->td_lock, PWAIT, "crypto_destroy", 0);
+		mtx_unlock(t->td_lock);
+		CRYPTO_DRIVER_LOCK();
+	}
+}
+#else
 static void
 crypto_terminate(struct proc **pp, void *q)
 {
@@ -271,6 +308,7 @@ crypto_terminate(struct proc **pp, void *q)
 		CRYPTO_DRIVER_LOCK();
 	}
 }
+#endif
 
 static void
 crypto_destroy(void)
@@ -1232,7 +1270,11 @@ crypto_finis(void *chan)
 	CRYPTO_DRIVER_LOCK();
 	wakeup_one(chan);
 	CRYPTO_DRIVER_UNLOCK();
+#ifdef UINET
+	kthread_exit();
+#else
 	kproc_exit(0);
+#endif
 }
 
 /*
