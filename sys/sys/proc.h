@@ -824,7 +824,9 @@ extern struct sx allproc_lock;
 extern struct sx proctree_lock;
 extern struct mtx ppeers_lock;
 extern struct proc proc0;		/* Process slot for swapper. */
+#ifndef UINET
 extern struct thread thread0;		/* Primary thread in proc0. */
+#endif
 extern struct vmspace vmspace0;		/* VM space for proc0. */
 extern int hogticks;			/* Limit on kernel cpu hogs. */
 extern int lastpid;

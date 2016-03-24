@@ -447,11 +447,11 @@ rip_output(struct mbuf *m, struct socket *so, u_long dst)
 		ip = mtod(m, struct ip *);
 		ip->ip_tos = inp->inp_ip_tos;
 		if (inp->inp_flags & INP_DONTFRAG)
-			ip->ip_off = IP_DF;
+			ip->ip_off = htons(IP_DF);
 		else
-			ip->ip_off = 0;
+			ip->ip_off = htons(0);
 		ip->ip_p = inp->inp_ip_p;
-		ip->ip_len = m->m_pkthdr.len;
+		ip->ip_len = htons(m->m_pkthdr.len);
 		ip->ip_src = inp->inp_laddr;
 		if (jailed(inp->inp_cred)) {
 			/*
@@ -493,8 +493,8 @@ rip_output(struct mbuf *m, struct socket *so, u_long dst)
 		 * and don't allow packet length sizes that will crash.
 		 */
 		if (((ip->ip_hl != (sizeof (*ip) >> 2)) && inp->inp_options)
-		    || (ip->ip_len > m->m_pkthdr.len)
-		    || (ip->ip_len < (ip->ip_hl << 2))) {
+		    || (ntohs(ip->ip_len) > m->m_pkthdr.len)
+		    || (ntohs(ip->ip_len) < (ip->ip_hl << 2))) {
 			INP_RUNLOCK(inp);
 			m_freem(m);
 			return (EINVAL);
@@ -1030,7 +1030,7 @@ rip_pcblist(SYSCTL_HANDLER_ARGS)
 	xig.xig_len = sizeof xig;
 	xig.xig_count = n;
 	xig.xig_gen = gencnt;
-	xig.xig_sogen = so_gencnt;
+	xig.xig_sogen = V_so_gencnt;
 	error = SYSCTL_OUT(req, &xig, sizeof xig);
 	if (error)
 		return (error);
@@ -1089,7 +1089,7 @@ rip_pcblist(SYSCTL_HANDLER_ARGS)
 		 */
 		INP_INFO_RLOCK(&V_ripcbinfo);
 		xig.xig_gen = V_ripcbinfo.ipi_gencnt;
-		xig.xig_sogen = so_gencnt;
+		xig.xig_sogen = V_so_gencnt;
 		xig.xig_count = V_ripcbinfo.ipi_count;
 		INP_INFO_RUNLOCK(&V_ripcbinfo);
 		error = SYSCTL_OUT(req, &xig, sizeof xig);
@@ -1098,7 +1098,7 @@ rip_pcblist(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_net_inet_raw, OID_AUTO/*XXX*/, pcblist,
+SYSCTL_VNET_PROC(_net_inet_raw, OID_AUTO/*XXX*/, pcblist,
     CTLTYPE_OPAQUE | CTLFLAG_RD, NULL, 0,
     rip_pcblist, "S,xinpcb", "List of active raw IP sockets");
 

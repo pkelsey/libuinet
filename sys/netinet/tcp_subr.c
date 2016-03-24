@@ -65,6 +65,10 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_subr.c 238247 2012-07-08 14:21
 #include <net/route.h>
 #include <net/if.h>
 #include <net/vnet.h>
+#ifdef PROMISCUOUS_INET
+/* XXX for maxmtu kludge */
+#include <net/ethernet.h>
+#endif
 
 #include <netinet/cc.h>
 #include <netinet/in.h>
@@ -561,7 +565,41 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 		 */
 		m_freem(m->m_next);
 		m->m_next = NULL;
+#ifdef NO_MBUF_TURNAROUND
+		{
+			struct mbuf *m0;
+			int data_offset;
+
+			/*
+			 * Make a writable duplicate of the packet, landing
+			 * the data sourced from m->m_data at the same
+			 * offset into m0's storage.
+			 */
+			data_offset = (caddr_t)ipgen - 
+			    ((m->m_flags & M_EXT) ?
+			     (caddr_t)m->m_ext.ext_buf : (caddr_t)m->m_pktdat);
+			m->m_data -= data_offset;
+			m->m_pkthdr.len += data_offset;
+			m->m_len += data_offset;
+			m0 = m_dup(m, M_NOWAIT);
+			m_free(m);
+			if (m0 == NULL)
+				return;
+			m = m0;
+			m_adj(m, data_offset);
+#ifdef INET6
+			ip6 = mtod(m, struct ip6_hdr *);
+#endif /* INET6 */
+			ip = mtod(m, struct ip *);
+			/*
+			 * th doesn't need to be recomputed here as it will
+			 * be fixed up below when it is found to not lie
+			 * within m.
+			 */
+		}
+#else
 		m->m_data = (caddr_t)ipgen;
+#endif
 		m_addr_changed(m);
 		/* m_len is set later */
 		tlen = 0;
@@ -603,10 +641,10 @@ tcp_respond(struct tcpcb *tp, void *ipgen, struct tcphdr *th, struct mbuf *m,
 #ifdef INET
 	{
 		tlen += sizeof (struct tcpiphdr);
-		ip->ip_len = tlen;
+		ip->ip_len = htons(tlen);
 		ip->ip_ttl = V_ip_defttl;
 		if (V_path_mtu_discovery)
-			ip->ip_off |= IP_DF;
+			ip->ip_off |= htons(IP_DF);
 	}
 #endif
 	m->m_len = tlen;
@@ -702,12 +740,19 @@ tcp_newtcpcb(struct inpcb *inp)
 
 	/*
 	 * Use the current system default CC algorithm.
+	 *
+	 * If unloading CC algorithms is not allowed, there is no need to
+	 * obtain the list lock to read a pointer to a CC that will never
+	 * disapppear.
 	 */
+#ifndef INET_NO_CC_UNLOAD
 	CC_LIST_RLOCK();
+#endif
 	KASSERT(!STAILQ_EMPTY(&cc_list), ("cc_list is empty!"));
 	CC_ALGO(tp) = CC_DEFAULT();
+#ifndef INET_NO_CC_UNLOAD
 	CC_LIST_RUNLOCK();
-
+#endif
 	if (CC_ALGO(tp)->cb_init != NULL)
 		if (CC_ALGO(tp)->cb_init(tp->ccv) > 0) {
 			uma_zfree(V_tcpcb_zone, tm);
@@ -715,11 +760,12 @@ tcp_newtcpcb(struct inpcb *inp)
 		}
 
 	tp->osd = &tm->osd;
+#ifndef INET_NO_TCP_KHELP
 	if (khelp_init_osd(HELPER_CLASS_TCP, tp->osd)) {
 		uma_zfree(V_tcpcb_zone, tm);
 		return (NULL);
 	}
-
+#endif
 #ifdef VIMAGE
 	tp->t_vnet = inp->inp_vnet;
 #endif
@@ -735,13 +781,13 @@ tcp_newtcpcb(struct inpcb *inp)
 		V_tcp_mssdflt;
 
 	/* Set up our timeouts. */
-	callout_init(&tp->t_timers->tt_rexmt, CALLOUT_MPSAFE);
-	callout_init(&tp->t_timers->tt_persist, CALLOUT_MPSAFE);
-	callout_init(&tp->t_timers->tt_keep, CALLOUT_MPSAFE);
-	callout_init(&tp->t_timers->tt_2msl, CALLOUT_MPSAFE);
-	callout_init(&tp->t_timers->tt_delack, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_rexmt, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_persist, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_keep, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_2msl, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_delack, CALLOUT_MPSAFE);
 #ifdef PASSIVE_INET
-	callout_init(&tp->t_timers->tt_reassdl, CALLOUT_MPSAFE);
+	vnet_callout_init(&tp->t_timers->tt_reassdl, CALLOUT_MPSAFE);
 #endif
 
 	if (V_tcp_do_rfc1323)
@@ -788,6 +834,7 @@ tcp_ccalgounload(struct cc_algo *unload_algo)
 	struct inpcb *inp;
 	struct tcpcb *tp;
 	VNET_ITERATOR_DECL(vnet_iter);
+	int sts_count = 0;
 
 	/*
 	 * Check all active control blocks across all network stacks and change
@@ -797,6 +844,10 @@ tcp_ccalgounload(struct cc_algo *unload_algo)
 	VNET_LIST_RLOCK();
 	VNET_FOREACH(vnet_iter) {
 		CURVNET_SET(vnet_iter);
+		if (CURVNET_IS_STS()) {
+			sts_count++;
+			continue;
+		}
 		INP_INFO_RLOCK(&V_tcbinfo);
 		/*
 		 * New connections already part way through being initialised
@@ -832,7 +883,7 @@ tcp_ccalgounload(struct cc_algo *unload_algo)
 	}
 	VNET_LIST_RUNLOCK();
 
-	return (0);
+	return (sts_count ? EBUSY : 0);
 }
 
 /*
@@ -886,13 +937,13 @@ tcp_discardcb(struct tcpcb *tp)
 	 * will be required to ensure that no further processing takes place
 	 * on the tcpcb, even though it hasn't been freed (a flag?).
 	 */
-	callout_stop(&tp->t_timers->tt_rexmt);
-	callout_stop(&tp->t_timers->tt_persist);
-	callout_stop(&tp->t_timers->tt_keep);
-	callout_stop(&tp->t_timers->tt_2msl);
-	callout_stop(&tp->t_timers->tt_delack);
+	vnet_callout_stop(&tp->t_timers->tt_rexmt);
+	vnet_callout_stop(&tp->t_timers->tt_persist);
+	vnet_callout_stop(&tp->t_timers->tt_keep);
+	vnet_callout_stop(&tp->t_timers->tt_2msl);
+	vnet_callout_stop(&tp->t_timers->tt_delack);
 #ifdef PASSIVE_INET
-	callout_stop(&tp->t_timers->tt_reassdl);
+	vnet_callout_stop(&tp->t_timers->tt_reassdl);
 #endif
 
 	/*
@@ -962,7 +1013,9 @@ tcp_discardcb(struct tcpcb *tp)
 	if (CC_ALGO(tp)->cb_destroy != NULL)
 		CC_ALGO(tp)->cb_destroy(tp->ccv);
 
+#ifndef INET_NO_TCP_KHELP
 	khelp_destroy_osd(tp->osd);
+#endif
 
 	CC_ALGO(tp) = NULL;
 	inp->inp_ppcb = NULL;
@@ -1013,16 +1066,11 @@ tcp_close(struct tcpcb *tp)
 void
 tcp_drain(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
-
 	if (!do_tcpdrain)
 		return;
 
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		struct inpcb *inpb;
-		struct tcpcb *tcpb;
+	struct inpcb *inpb;
+	struct tcpcb *tcpb;
 
 	/*
 	 * Walk the tcpbs, if existing, and flush the reassembly queue,
@@ -1032,21 +1080,18 @@ tcp_drain(void)
 	 *	where we're really low on mbufs, this is potentially
 	 *	usefull.
 	 */
-		INP_INFO_RLOCK(&V_tcbinfo);
-		LIST_FOREACH(inpb, V_tcbinfo.ipi_listhead, inp_list) {
-			if (inpb->inp_flags & INP_TIMEWAIT)
-				continue;
-			INP_WLOCK(inpb);
-			if ((tcpb = intotcpcb(inpb)) != NULL) {
-				tcp_reass_flush(tcpb);
-				tcp_clean_sackreport(tcpb);
-			}
-			INP_WUNLOCK(inpb);
+	INP_INFO_RLOCK(&V_tcbinfo);
+	LIST_FOREACH(inpb, V_tcbinfo.ipi_listhead, inp_list) {
+		if (inpb->inp_flags & INP_TIMEWAIT)
+			continue;
+		INP_WLOCK(inpb);
+		if ((tcpb = intotcpcb(inpb)) != NULL) {
+			tcp_reass_flush(tcpb);
+			tcp_clean_sackreport(tcpb);
 		}
-		INP_INFO_RUNLOCK(&V_tcbinfo);
-		CURVNET_RESTORE();
+		INP_WUNLOCK(inpb);
 	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
+	INP_INFO_RUNLOCK(&V_tcbinfo);
 }
 
 /*
@@ -1141,7 +1186,7 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 	xig.xig_len = sizeof xig;
 	xig.xig_count = n + m;
 	xig.xig_gen = gencnt;
-	xig.xig_sogen = so_gencnt;
+	xig.xig_sogen = V_so_gencnt;
 	error = SYSCTL_OUT(req, &xig, sizeof xig);
 	if (error)
 		return (error);
@@ -1236,7 +1281,7 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 		 */
 		INP_INFO_RLOCK(&V_tcbinfo);
 		xig.xig_gen = V_tcbinfo.ipi_gencnt;
-		xig.xig_sogen = so_gencnt;
+		xig.xig_sogen = V_so_gencnt;
 		xig.xig_count = V_tcbinfo.ipi_count + pcb_count;
 		INP_INFO_RUNLOCK(&V_tcbinfo);
 		error = SYSCTL_OUT(req, &xig, sizeof xig);
@@ -1245,7 +1290,7 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_net_inet_tcp, TCPCTL_PCBLIST, pcblist,
+SYSCTL_VNET_PROC(_net_inet_tcp, TCPCTL_PCBLIST, pcblist,
     CTLTYPE_OPAQUE | CTLFLAG_RD, NULL, 0,
     tcp_pcblist, "S,xtcpcb", "List of active TCP connections");
 
@@ -1426,12 +1471,11 @@ tcp_ctlinput(int cmd, struct sockaddr *sa, void *vip)
 					    /*
 					     * If no alternative MTU was
 					     * proposed, try the next smaller
-					     * one.  ip->ip_len has already
-					     * been swapped in icmp_input().
+					     * one.
 					     */
 					    if (!mtu)
-						mtu = ip_next_mtu(ip->ip_len,
-						 1);
+						    mtu = ip_next_mtu(
+						     ntohs(ip->ip_len), 1);
 					    if (mtu < V_tcp_minmss
 						 + sizeof(struct tcpiphdr))
 						mtu = V_tcp_minmss
@@ -1620,8 +1664,16 @@ tcp_new_isn(struct tcpcb *tp)
 	u_int32_t md5_buffer[4];
 	tcp_seq new_isn;
 	u_int32_t projected_offset;
+#ifdef PROMISCUOUS_INET
+	static tcp_seq counter = 0;
+#endif
 
 	INP_WLOCK_ASSERT(tp->t_inpcb);
+
+#ifdef PROMISCUOUS_INET
+	if (tp->t_flags & TF_TRIVIAL_ISN)
+		return (counter++); /* do not care about non-atomic increment effects */
+#endif
 
 	ISN_LOCK();
 	/* Seed if this is the first use, reseed if requested. */
@@ -1782,9 +1834,8 @@ tcp_maxmtu(struct in_conninfo *inc, int *flags)
 	}
 #ifdef PROMISCUOUS_INET
 	} else {
-		ifp = ifnet_byfib_ref(inc->inc_fibnum);
-		if (ifp)
-			maxmtu = ifp->if_mtu;
+		/* XXX post-cdom, need a new scheme for this */
+		maxmtu = ETHERMTU;
 	}
 #endif
 
@@ -1922,7 +1973,7 @@ tcp_signature_apply(void *fstate, void *data, u_int len)
  * specify per-application flows but it is unstable.
  */
 int
-tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
+tcp_signature_compute(struct mbuf *m, int off0, int len, int optlen,
     u_char *buf, u_int direction)
 {
 	union sockaddr_union dst;
@@ -2014,8 +2065,8 @@ tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
 		    optlen);
 		MD5Update(&ctx, (char *)&ippseudo, sizeof(struct ippseudo));
 
-		th = (struct tcphdr *)((u_char *)ip + sizeof(struct ip));
-		doff = sizeof(struct ip) + sizeof(struct tcphdr) + optlen;
+		th = (struct tcphdr *)((u_char *)ip + off0);
+		doff = off0 + sizeof(struct tcphdr) + optlen;
 		break;
 #endif
 #ifdef INET6
@@ -2043,8 +2094,8 @@ tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
 		nhdr = IPPROTO_TCP;
 		MD5Update(&ctx, (char *)&nhdr, sizeof(uint8_t));
 
-		th = (struct tcphdr *)((u_char *)ip6 + sizeof(struct ip6_hdr));
-		doff = sizeof(struct ip6_hdr) + sizeof(struct tcphdr) + optlen;
+		th = (struct tcphdr *)((u_char *)ip6 + off0);
+		doff = off0 + sizeof(struct tcphdr) + optlen;
 		break;
 #endif
 	default:
@@ -2058,6 +2109,13 @@ tcp_signature_compute(struct mbuf *m, int _unused, int len, int optlen,
 	 * Step 2: Update MD5 hash with TCP header, excluding options.
 	 * The TCP checksum must be set to zero.
 	 */
+	/* 
+	 * In the tcp_input() path, it's OK to alter th->th_sum because th
+	 * points to an on-stack copy of the header (it's also pointless, as
+	 * in that case th->th_sum is always zero here).  In the
+	 * tcp_output() path, it's OK to alter th->th_sum because there are
+	 * never any other simultaneous consumers of the packet at that
+	 * point. */
 	savecsum = th->th_sum;
 	th->th_sum = 0;
 	MD5Update(&ctx, (char *)th, sizeof(struct tcphdr));

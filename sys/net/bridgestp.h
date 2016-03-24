@@ -77,6 +77,8 @@
 #include <sys/callout.h>
 #include <sys/queue.h>
 
+#include <net/vnet.h>
+
 /* STP port states */
 #define	BSTP_IFSTATE_DISABLED	0
 #define	BSTP_IFSTATE_LISTENING	1
@@ -353,7 +355,7 @@ struct bstp_state {
 	uint16_t		bs_bridge_priority;
 	uint8_t			bs_txholdcount;
 	uint8_t			bs_allsynced;
-	struct callout		bs_bstpcallout;	/* STP callout */
+	struct vnet_callout	bs_bstpcallout;	/* STP callout */
 	struct bstp_timer	bs_link_timer;
 	struct timeval		bs_last_tc_time;
 	LIST_HEAD(, bstp_port)	bs_bplist;

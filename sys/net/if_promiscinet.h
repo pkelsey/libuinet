@@ -46,6 +46,7 @@
 
 struct ifl2info {
 	struct m_tag ifl2i_mtag;	/* must be first in the struct */
+	struct ifnet *rcvif;
 	struct in_l2info ifl2i_info;
 };
 

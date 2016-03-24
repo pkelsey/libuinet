@@ -238,7 +238,7 @@ struct rw_args_flags {
 #ifdef INVARIANTS
 #define	rw_assert(rw, what)	_rw_assert((rw), (what), LOCK_FILE, LOCK_LINE)
 #else
-#define	rw_assert(rw, what)
+#define	rw_assert(rw, what)	(void)0
 #endif
 
 #endif /* _KERNEL */

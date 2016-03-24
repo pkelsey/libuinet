@@ -41,10 +41,18 @@ OBJS+= $(patsubst %.cc,%.o,$(patsubst %.c,%.o,${SRCS}))
 #
 UINET_LIB_PATHS:= $(foreach lib,${UINET_LIBS},${TOPDIR}/lib/lib$(lib))
 UINET_LIB_INCS:= $(foreach libpath,${UINET_LIB_PATHS},$(libpath)/Makefile.inc)
-UINET_CFLAGS:= $(foreach lib,${UINET_LIBS}, -I${TOPDIR}/lib/lib$(lib)/api_include)
-UINET_LDADD:= $(foreach lib,${UINET_LIBS}, -L${TOPDIR}/lib/lib$(lib) -l$(lib))
+UINET_CFLAGS:= $(foreach lib,${UINET_LIBS}, -I${TOPDIR}/lib/lib$(lib)$(if $(wildcard ${TOPDIR}/lib/lib$(lib)/api_include),/api_include))
 
 -include ${UINET_LIB_INCS}
+
+#
+# Including UINET_LIB_INCS may have added to UINET_LIBS in order to
+# pick up additional link flags, so rebuild UINET_LIB_PATHS before
+# building UINET_LDADD.
+#
+UINET_LIB_PATHS:= $(foreach lib,${UINET_LIBS},${TOPDIR}/lib/lib$(lib))
+UINET_LDADD:= $(foreach lib,${UINET_LIBS}, ${TOPDIR}/lib/lib$(lib)$(if $(wildcard ${TOPDIR}/lib/lib$(lib)/.libs),/.libs)/lib$(lib).a)
+
 
 CFLAGS+= ${UINET_CFLAGS}
 CXXFLAGS+= ${UINET_CFLAGS}

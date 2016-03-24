@@ -286,16 +286,16 @@ typedef struct uma_zone *sctp_zone_t;
  * timers
  */
 #include <sys/callout.h>
-typedef struct callout sctp_os_timer_t;
+typedef struct vnet_callout sctp_os_timer_t;
 
 
-#define SCTP_OS_TIMER_INIT(tmr)	callout_init(tmr, 1)
-#define SCTP_OS_TIMER_START	callout_reset
-#define SCTP_OS_TIMER_STOP	callout_stop
-#define SCTP_OS_TIMER_STOP_DRAIN callout_drain
-#define SCTP_OS_TIMER_PENDING	callout_pending
-#define SCTP_OS_TIMER_ACTIVE	callout_active
-#define SCTP_OS_TIMER_DEACTIVATE callout_deactivate
+#define SCTP_OS_TIMER_INIT(tmr)	vnet_callout_init(tmr, 1)
+#define SCTP_OS_TIMER_START	vnet_callout_reset
+#define SCTP_OS_TIMER_STOP	vnet_callout_stop
+#define SCTP_OS_TIMER_STOP_DRAIN vnet_callout_drain
+#define SCTP_OS_TIMER_PENDING	vnet_callout_pending
+#define SCTP_OS_TIMER_ACTIVE	vnet_callout_active
+#define SCTP_OS_TIMER_DEACTIVATE vnet_callout_deactivate
 
 #define sctp_get_tick_count() (ticks)
 

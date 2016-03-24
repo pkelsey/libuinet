@@ -44,6 +44,8 @@
 #include <sys/_rwlock.h>
 
 #ifdef _KERNEL
+#include "opt_inet.h"
+#include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 
 #include <sys/lock.h>
@@ -110,7 +112,6 @@ struct in_conninfo {
 	u_int8_t	inc_flags;
 	u_int8_t	inc_len;
 	u_int16_t	inc_fibnum;	/* XXX was pad, 16 bits is plenty */
-	u_int16_t	inc_altfibnum;
 	/* protocol dependent part */
 	struct	in_endpoints inc_ie;
 };
@@ -122,8 +123,7 @@ struct in_conninfo {
 #define	INC_PASSIVE	0x02		/* connection is being passively reassembled */
 #define	INC_PROMISC	0x04		/* connection is promiscuous */
 #define	INC_SYNFILTERED	0x08		/* a SYN filter has been applied */
-#define	INC_ALTFIB	0x10		/* alternate FIB is set */
-#define	INC_CONVONTMO	0x20		/* convert from passive to active on syncache timeout */
+#define	INC_CONVONTMO	0x10		/* convert from passive to active on syncache timeout */
 
 #define	inc_fport	inc_ie.ie_fport
 #define	inc_lport	inc_ie.ie_lport
@@ -179,19 +179,29 @@ struct inpcb {
 	struct	ucred	*inp_cred;	/* (c) cache of socket cred */
 	u_int32_t inp_flow;		/* (i) IPv6 flow information */
 	int	inp_flags;		/* (i) generic IP/datagram flags */
-	int	inp_flags2;		/* (i) generic IP/datagram flags #2*/
+	int	inp_flags2;		/* (i) ingeneric IP/datagram flags #2*/
 	u_char	inp_vflag;		/* (i) IP version flag (v4/v6) */
 	u_char	inp_ip_ttl;		/* (i) time to live proto */
 	u_char	inp_ip_p;		/* (c) protocol proto */
 	u_char	inp_ip_minttl;		/* (i) minimum TTL or drop */
 	uint32_t inp_flowid;		/* (x) flow id / queue id */
 	u_int	inp_refcount;		/* (i) refcount */
+	void	*inp_pspare[5];		/* (x) route caching / general use */
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+	uint64_t inp_serialno;		/* (c) flow serial number */
+#endif
 #ifdef PROMISCUOUS_INET
-	void	*inp_pspare[3];		/* (x) route caching / general use */
+	struct	ifnet *inp_txif;	/* (i) transmit interface */
 	void	*inp_synf;		/* (i) SYN filter instance cookie */
 	struct	in_l2info *inp_l2info;	/* (i/p) L2 details */
-#else
-	void	*inp_pspare[5];		/* (x) route caching / general use */
+#endif
+#ifdef INET_COPY
+	struct	uinet_pd_xlist *inp_copyq; /* (i) head of copy queue */
+	struct	uinet_pd_xlist *inp_copyq_tail; /* (i) tail of copy queue */
+	struct	ifnet *inp_copyif;	/* (i) interface to copy to */
+	uint64_t inp_copy_limit;	/* (i) max bytes to copy */
+	uint64_t inp_copy_total;	/* (i) bytes copied so far */
+	uint32_t inp_copy_mode;		/* (i) copy mode control */
 #endif
 	u_int	inp_ispare[6];		/* (x) route caching / user cookie /
 					 *     general use */
@@ -231,7 +241,6 @@ struct inpcb {
 	struct rwlock	inp_lock;
 };
 #define	inp_fibnum	inp_inc.inc_fibnum
-#define	inp_altfibnum	inp_inc.inc_altfibnum
 #define	inp_fport	inp_inc.inc_fport
 #define	inp_lport	inp_inc.inc_lport
 #define	inp_faddr	inp_inc.inc_faddr
@@ -407,21 +416,21 @@ struct inpcbgroup {
 } __aligned(CACHE_LINE_SIZE);
 
 #define INP_LOCK_INIT(inp, d, t) \
-	rw_init_flags(&(inp)->inp_lock, (t), RW_RECURSE |  RW_DUPOK)
-#define INP_LOCK_DESTROY(inp)	rw_destroy(&(inp)->inp_lock)
-#define INP_RLOCK(inp)		rw_rlock(&(inp)->inp_lock)
-#define INP_WLOCK(inp)		rw_wlock(&(inp)->inp_lock)
-#define INP_TRY_RLOCK(inp)	rw_try_rlock(&(inp)->inp_lock)
-#define INP_TRY_WLOCK(inp)	rw_try_wlock(&(inp)->inp_lock)
-#define INP_RUNLOCK(inp)	rw_runlock(&(inp)->inp_lock)
-#define INP_WUNLOCK(inp)	rw_wunlock(&(inp)->inp_lock)
-#define	INP_TRY_UPGRADE(inp)	rw_try_upgrade(&(inp)->inp_lock)
-#define	INP_DOWNGRADE(inp)	rw_downgrade(&(inp)->inp_lock)
-#define	INP_WLOCKED(inp)	rw_wowned(&(inp)->inp_lock)
-#define	INP_LOCK_ASSERT(inp)	rw_assert(&(inp)->inp_lock, RA_LOCKED)
-#define	INP_RLOCK_ASSERT(inp)	rw_assert(&(inp)->inp_lock, RA_RLOCKED)
-#define	INP_WLOCK_ASSERT(inp)	rw_assert(&(inp)->inp_lock, RA_WLOCKED)
-#define	INP_UNLOCK_ASSERT(inp)	rw_assert(&(inp)->inp_lock, RA_UNLOCKED)
+	VNET_RWLOCK_INIT(&(inp)->inp_lock, (t), RW_RECURSE |  RW_DUPOK) 
+#define INP_LOCK_DESTROY(inp)	VNET_RWLOCK_DESTROY(&(inp)->inp_lock)
+#define INP_RLOCK(inp)		VNET_RWLOCK_RLOCK(&(inp)->inp_lock)
+#define INP_WLOCK(inp)		VNET_RWLOCK_WLOCK(&(inp)->inp_lock)
+#define INP_TRY_RLOCK(inp)	VNET_RWLOCK_TRY_RLOCK(&(inp)->inp_lock)
+#define INP_TRY_WLOCK(inp)	VNET_RWLOCK_TRY_WLOCK(&(inp)->inp_lock)
+#define INP_RUNLOCK(inp)	VNET_RWLOCK_RUNLOCK(&(inp)->inp_lock)
+#define INP_WUNLOCK(inp)	VNET_RWLOCK_WUNLOCK(&(inp)->inp_lock)
+#define	INP_TRY_UPGRADE(inp)	VNET_RWLOCK_TRY_UPGRADE(&(inp)->inp_lock)
+#define	INP_DOWNGRADE(inp)	VNET_RWLOCK_DOWNGRADE(&(inp)->inp_lock)
+#define	INP_WLOCKED(inp)	VNET_RWLOCK_WOWNED(&(inp)->inp_lock)
+#define	INP_LOCK_ASSERT(inp)	VNET_RWLOCK_ASSERT(&(inp)->inp_lock, RA_LOCKED)
+#define	INP_RLOCK_ASSERT(inp)	VNET_RWLOCK_ASSERT(&(inp)->inp_lock, RA_RLOCKED)
+#define	INP_WLOCK_ASSERT(inp)	VNET_RWLOCK_ASSERT(&(inp)->inp_lock, RA_WLOCKED)
+#define	INP_UNLOCK_ASSERT(inp)	VNET_RWLOCK_ASSERT(&(inp)->inp_lock, RA_UNLOCKED)
 
 /*
  * These locking functions are for inpcb consumers outside of sys/netinet,
@@ -462,39 +471,39 @@ void 	inp_4tuple_get(struct inpcb *inp, uint32_t *laddr, uint16_t *lp,
 #endif /* _KERNEL */
 
 #define INP_INFO_LOCK_INIT(ipi, d) \
-	rw_init_flags(&(ipi)->ipi_lock, (d), RW_RECURSE)
-#define INP_INFO_LOCK_DESTROY(ipi)  rw_destroy(&(ipi)->ipi_lock)
-#define INP_INFO_RLOCK(ipi)	rw_rlock(&(ipi)->ipi_lock)
-#define INP_INFO_WLOCK(ipi)	rw_wlock(&(ipi)->ipi_lock)
-#define INP_INFO_TRY_RLOCK(ipi)	rw_try_rlock(&(ipi)->ipi_lock)
-#define INP_INFO_TRY_WLOCK(ipi)	rw_try_wlock(&(ipi)->ipi_lock)
-#define INP_INFO_TRY_UPGRADE(ipi)	rw_try_upgrade(&(ipi)->ipi_lock)
-#define INP_INFO_RUNLOCK(ipi)	rw_runlock(&(ipi)->ipi_lock)
-#define INP_INFO_WUNLOCK(ipi)	rw_wunlock(&(ipi)->ipi_lock)
-#define	INP_INFO_LOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_lock, RA_LOCKED)
-#define INP_INFO_RLOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_lock, RA_RLOCKED)
-#define INP_INFO_WLOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_lock, RA_WLOCKED)
-#define INP_INFO_UNLOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_lock, RA_UNLOCKED)
+	VNET_RWLOCK_INIT(&(ipi)->ipi_lock, (d), RW_RECURSE)
+#define INP_INFO_LOCK_DESTROY(ipi)  VNET_RWLOCK_DESTROY(&(ipi)->ipi_lock)
+#define INP_INFO_RLOCK(ipi)	VNET_RWLOCK_RLOCK(&(ipi)->ipi_lock)
+#define INP_INFO_WLOCK(ipi)	VNET_RWLOCK_WLOCK(&(ipi)->ipi_lock)
+#define INP_INFO_TRY_RLOCK(ipi)	VNET_RWLOCK_TRY_RLOCK(&(ipi)->ipi_lock)
+#define INP_INFO_TRY_WLOCK(ipi)	VNET_RWLOCK_TRY_WLOCK(&(ipi)->ipi_lock)
+#define INP_INFO_TRY_UPGRADE(ipi)	VNET_RWLOCK_TRY_UPGRADE(&(ipi)->ipi_lock)
+#define INP_INFO_RUNLOCK(ipi)	VNET_RWLOCK_RUNLOCK(&(ipi)->ipi_lock)
+#define INP_INFO_WUNLOCK(ipi)	VNET_RWLOCK_WUNLOCK(&(ipi)->ipi_lock)
+#define	INP_INFO_LOCK_ASSERT(ipi)	VNET_RWLOCK_ASSERT(&(ipi)->ipi_lock, RA_LOCKED)
+#define INP_INFO_RLOCK_ASSERT(ipi)	VNET_RWLOCK_ASSERT(&(ipi)->ipi_lock, RA_RLOCKED)
+#define INP_INFO_WLOCK_ASSERT(ipi)	VNET_RWLOCK_ASSERT(&(ipi)->ipi_lock, RA_WLOCKED)
+#define INP_INFO_UNLOCK_ASSERT(ipi)	VNET_RWLOCK_ASSERT(&(ipi)->ipi_lock, RA_UNLOCKED)
 
 #define	INP_HASH_LOCK_INIT(ipi, d) \
-	rw_init_flags(&(ipi)->ipi_hash_lock, (d), 0)
-#define	INP_HASH_LOCK_DESTROY(ipi)	rw_destroy(&(ipi)->ipi_hash_lock)
-#define	INP_HASH_RLOCK(ipi)		rw_rlock(&(ipi)->ipi_hash_lock)
-#define	INP_HASH_WLOCK(ipi)		rw_wlock(&(ipi)->ipi_hash_lock)
-#define	INP_HASH_RUNLOCK(ipi)		rw_runlock(&(ipi)->ipi_hash_lock)
-#define	INP_HASH_WUNLOCK(ipi)		rw_wunlock(&(ipi)->ipi_hash_lock)
-#define	INP_HASH_LOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_hash_lock, \
+	VNET_RWLOCK_INIT(&(ipi)->ipi_hash_lock, (d), 0)
+#define	INP_HASH_LOCK_DESTROY(ipi)	VNET_RWLOCK_DESTROY(&(ipi)->ipi_hash_lock)
+#define	INP_HASH_RLOCK(ipi)		VNET_RWLOCK_RLOCK(&(ipi)->ipi_hash_lock)
+#define	INP_HASH_WLOCK(ipi)		VNET_RWLOCK_WLOCK(&(ipi)->ipi_hash_lock)
+#define	INP_HASH_RUNLOCK(ipi)		VNET_RWLOCK_RUNLOCK(&(ipi)->ipi_hash_lock)
+#define	INP_HASH_WUNLOCK(ipi)		VNET_RWLOCK_WUNLOCK(&(ipi)->ipi_hash_lock)
+#define	INP_HASH_LOCK_ASSERT(ipi)	VNET_RWLOCK_ASSERT(&(ipi)->ipi_hash_lock, \
 					    RA_LOCKED)
-#define	INP_HASH_WLOCK_ASSERT(ipi)	rw_assert(&(ipi)->ipi_hash_lock, \
+#define	INP_HASH_WLOCK_ASSERT(ipi)	VNET_RWLOCK_ASSERT(&(ipi)->ipi_hash_lock, \
 					    RA_WLOCKED)
 
-#define	INP_GROUP_LOCK_INIT(ipg, d)	mtx_init(&(ipg)->ipg_lock, (d), NULL, \
+#define	INP_GROUP_LOCK_INIT(ipg, d)	VNET_MTX_INIT(&(ipg)->ipg_lock, (d), NULL, \
 					    MTX_DEF | MTX_DUPOK)
-#define	INP_GROUP_LOCK_DESTROY(ipg)	mtx_destroy(&(ipg)->ipg_lock)
+#define	INP_GROUP_LOCK_DESTROY(ipg)	VNET_MTX_DESTROY(&(ipg)->ipg_lock)
 
-#define	INP_GROUP_LOCK(ipg)		mtx_lock(&(ipg)->ipg_lock)
-#define	INP_GROUP_LOCK_ASSERT(ipg)	mtx_assert(&(ipg)->ipg_lock, MA_OWNED)
-#define	INP_GROUP_UNLOCK(ipg)		mtx_unlock(&(ipg)->ipg_lock)
+#define	INP_GROUP_LOCK(ipg)		VNET_MTX_LOCK(&(ipg)->ipg_lock)
+#define	INP_GROUP_LOCK_ASSERT(ipg)	VNET_MTX_ASSERT(&(ipg)->ipg_lock, MA_OWNED)
+#define	INP_GROUP_UNLOCK(ipg)		VNET_MTX_UNLOCK(&(ipg)->ipg_lock)
 
 #define INP_PCBHASH(faddr, lport, fport, mask) \
 	(((faddr) ^ ((faddr) >> 16) ^ ntohs((lport) ^ (fport))) & (mask))
@@ -614,6 +623,12 @@ VNET_DECLARE(int, ipport_tcpallocs);
 #define	V_ipport_randomtime	VNET(ipport_randomtime)
 #define	V_ipport_stoprandom	VNET(ipport_stoprandom)
 #define	V_ipport_tcpallocs	VNET(ipport_tcpallocs)
+
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+VNET_DECLARE(uint64_t, ip_flow_serial_next);
+
+#define V_ip_flow_serial_next	VNET(ip_flow_serial_next)
+#endif
 
 void	in_pcbinfo_destroy(struct inpcbinfo *);
 void	in_pcbinfo_init(struct inpcbinfo *, const char *, struct inpcbhead *,

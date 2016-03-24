@@ -214,14 +214,18 @@ tcp_reass_deliver_holes(struct tcpcb *tp)
 	if (p) {
 		contiguous = 0;
 		LIST_FOREACH_SAFE(q, &tp->t_segq, tqe_q, qtmp) {
-			if (contiguous && q->tqe_th->th_seq != tp->rcv_nxt)
+			if (contiguous && q->tqe_seq != tp->rcv_nxt)
 				break;
 
 			SOCKBUF_LOCK(&so->so_rcv);
 
 			if (!(so->so_rcv.sb_state & SBS_CANTRCVMORE)) {
-				hole_size = q->tqe_th->th_seq - tp->rcv_nxt;
+				hole_size = q->tqe_seq - tp->rcv_nxt;
 				if (hole_size) {
+					if (hole_size < 0) {
+						panic("%s: hole_size=%d, should be >= 0\n", __func__, hole_size);
+					}
+
 					m_hole = m_gethole(M_NOWAIT, MT_DATA);
 					m_hole->m_len = hole_size;
 					
@@ -232,7 +236,7 @@ tcp_reass_deliver_holes(struct tcpcb *tp)
 				}
 			}
 
-			tp->rcv_nxt = q->tqe_th->th_seq + q->tqe_len;
+			tp->rcv_nxt = q->tqe_seq + q->tqe_len;
 
 			LIST_REMOVE(q, tqe_q);
 			TAILQ_REMOVE(&tp->t_segageq, q, tqe_ageq);
@@ -244,7 +248,7 @@ tcp_reass_deliver_holes(struct tcpcb *tp)
 
 			SOCKBUF_UNLOCK(&so->so_rcv);
 
-			if (q->tqe_th->th_flags & TH_FIN) {
+			if (q->tqe_flags & TH_FIN) {
 				socantrcvmore(so);
 				tp->rcv_nxt++;
 
@@ -431,7 +435,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	 * Find a segment which begins after this one does.
 	 */
 	LIST_FOREACH(q, &tp->t_segq, tqe_q) {
-		if (SEQ_GT(q->tqe_th->th_seq, th->th_seq))
+		if (SEQ_GT(q->tqe_seq, th->th_seq))
 			break;
 		p = q;
 	}
@@ -444,7 +448,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	if (p != NULL) {
 		int i;
 		/* conversion to int (in i) handles seq wraparound */
-		i = p->tqe_th->th_seq + p->tqe_len - th->th_seq;
+		i = p->tqe_seq + p->tqe_len - th->th_seq;
 		if (i > 0) {
 			if (i >= *tlenp) {
 				TCPSTAT_INC(tcps_rcvduppack);
@@ -475,11 +479,11 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	 * if they are completely covered, dequeue them.
 	 */
 	while (q) {
-		int i = (th->th_seq + *tlenp) - q->tqe_th->th_seq;
+		int i = (th->th_seq + *tlenp) - q->tqe_seq;
 		if (i <= 0)
 			break;
 		if (i < q->tqe_len) {
-			q->tqe_th->th_seq += i;
+			q->tqe_seq += i;
 			q->tqe_len -= i;
 			m_adj(q->tqe_m, i);
 			break;
@@ -495,7 +499,8 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 
 	/* Insert the new segment queue entry into place. */
 	te->tqe_m = m;
-	te->tqe_th = th;
+	te->tqe_seq = th->th_seq;
+	te->tqe_flags = th->th_flags;
 	te->tqe_len = *tlenp;
 #ifdef PASSIVE_INET
 	te->tqe_ticks = ticks;
@@ -528,21 +533,21 @@ present:
 		return (0);
 	q = LIST_FIRST(&tp->t_segq);
 #ifdef PASSIVE_INET
-	if (!q || (q->tqe_th->th_seq != tp->rcv_nxt && !deliver_leading_hole)) {
-		if (passive && q && q->tqe_th->th_seq != tp->rcv_nxt) {
+	if (!q || (q->tqe_seq != tp->rcv_nxt && !deliver_leading_hole)) {
+		if (passive && q && q->tqe_seq != tp->rcv_nxt) {
 			tcp_timer_activate(tp, TT_REASSDL, tcp_reass_next_hole_deadline(tp));
 		}
 		return (0);
 	}
 #else
-	if (!q || q->tqe_th->th_seq != tp->rcv_nxt)
+	if (!q || q->tqe_seq != tp->rcv_nxt)
 		return (0);
 #endif
 	SOCKBUF_LOCK(&so->so_rcv);
 #ifdef PASSIVE_INET
 	if (deliver_leading_hole) {
 		if (!(so->so_rcv.sb_state & SBS_CANTRCVMORE)) {
-			hole_size = q->tqe_th->th_seq - tp->rcv_nxt;
+			hole_size = q->tqe_seq - tp->rcv_nxt;
 
 			m_hole = m_gethole(M_NOWAIT, MT_DATA);
 			m_hole->m_len = hole_size;
@@ -552,12 +557,12 @@ present:
 
 			sbappendstream_locked(&so->so_rcv, m_hole);
 		}
-		tp->rcv_nxt = q->tqe_th->th_seq;
+		tp->rcv_nxt = q->tqe_seq;
 	}	
 #endif
 	do {
 		tp->rcv_nxt += q->tqe_len;
-		flags = q->tqe_th->th_flags & TH_FIN;
+		flags = q->tqe_flags & TH_FIN;
 		nq = LIST_NEXT(q, tqe_q);
 		LIST_REMOVE(q, tqe_q);
 #ifdef PASSIVE_INET
@@ -581,7 +586,7 @@ present:
 #endif
 		tp->t_segqlen--;
 		q = nq;
-	} while (q && q->tqe_th->th_seq == tp->rcv_nxt);
+	} while (q && q->tqe_seq == tp->rcv_nxt);
 #ifdef PASSIVE_INET
 	if (replace_tqs_in_list) {
 		*reclaimed_tqe = tqs;

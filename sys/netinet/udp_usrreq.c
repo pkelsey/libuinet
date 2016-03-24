@@ -340,7 +340,7 @@ udp_input(struct mbuf *m, int off)
 	struct udphdr *uh;
 	struct ifnet *ifp;
 	struct inpcb *inp;
-	int len;
+	uint16_t len, ip_len;
 	struct ip save_ip;
 	struct sockaddr_in udp_in;
 #ifdef IPFIREWALL_FORWARD
@@ -351,17 +351,27 @@ udp_input(struct mbuf *m, int off)
 	UDPSTAT_INC(udps_ipackets);
 
 	/*
-	 * Strip IP options, if any; should skip this, make available to
-	 * user, and use on returned packets, but we don't yet have a way to
-	 * check the checksum with options still present.
+	 * Ensure that the contents of mbufs using external buffers
+	 * are not modified.  This permits configurations where
+	 * inbound packets can be sent up the stack while
+	 * simultaneously be used for another purpose (such as
+	 * forwarding) without copying.  Such configurations must
+	 * use mbufs with external buffers, as that is the only way
+	 * to ensure that m_cat() (used in reassembly queue
+	 * processing) and m_pullup() don't move data into an mbuf.
+	 *
+	 * Using ip_stripoptions() modifies mbuf contents, and is
+	 * not necessary.  Without ip_stripoptions(), a maximally
+	 * sized ip + udp header combination (with maximum options,
+	 * 68 bytes) fits within MHLEN with room to spare for
+	 * preserving the link header (for example, MHLEN is
+	 * currently 168 bytes on amd64, leaving 100 bytes for the
+	 * link header).
 	 */
-	if (iphlen > sizeof (struct ip)) {
-		ip_stripoptions(m, (struct mbuf *)0);
-		iphlen = sizeof(struct ip);
-	}
 
 	/*
-	 * Get IP and UDP header together in first mbuf.
+	 * Get IP header (with options) and UDP header together in first
+	 * mbuf.
 	 */
 	ip = mtod(m, struct ip *);
 	if (m->m_len < iphlen + sizeof(struct udphdr)) {
@@ -394,13 +404,13 @@ udp_input(struct mbuf *m, int off)
 	 * reflect UDP length, drop.
 	 */
 	len = ntohs((u_short)uh->uh_ulen);
-	if (ip->ip_len != len) {
-		if (len > ip->ip_len || len < sizeof(struct udphdr)) {
+	ip_len = ntohs(ip->ip_len) - iphlen;
+	if (ip_len != len) {
+		if (len > ip_len || len < sizeof(struct udphdr)) {
 			UDPSTAT_INC(udps_badlen);
 			goto badunlocked;
 		}
-		m_adj(m, len - ip->ip_len);
-		/* ip->ip_len = len; */
+		m_adj(m, len - ip_len);
 	}
 
 	/*
@@ -427,13 +437,9 @@ udp_input(struct mbuf *m, int off)
 				    m->m_pkthdr.csum_data + IPPROTO_UDP));
 			uh_sum ^= 0xffff;
 		} else {
-			char b[9];
-
-			bcopy(((struct ipovly *)ip)->ih_x1, b, 9);
-			bzero(((struct ipovly *)ip)->ih_x1, 9);
-			((struct ipovly *)ip)->ih_len = uh->uh_ulen;
-			uh_sum = in_cksum(m, len + sizeof (struct ip));
-			bcopy(b, ((struct ipovly *)ip)->ih_x1, 9);
+			uh_sum = in_cksum_pseudo_header(m, len, iphlen,
+				      ip->ip_src.s_addr, ip->ip_dst.s_addr,
+				      IPPROTO_UDP);
 		}
 		if (uh_sum) {
 			UDPSTAT_INC(udps_badsum);
@@ -603,7 +609,6 @@ udp_input(struct mbuf *m, int off)
 		if (badport_bandlim(BANDLIM_ICMP_UNREACH) < 0)
 			goto badunlocked;
 		*ip = save_ip;
-		ip->ip_len += iphlen;
 		icmp_error(m, ICMP_UNREACH, ICMP_UNREACH_PORT, 0, 0);
 		return;
 	}
@@ -732,7 +737,7 @@ udp_pcblist(SYSCTL_HANDLER_ARGS)
 	xig.xig_len = sizeof xig;
 	xig.xig_count = n;
 	xig.xig_gen = gencnt;
-	xig.xig_sogen = so_gencnt;
+	xig.xig_sogen = V_so_gencnt;
 	error = SYSCTL_OUT(req, &xig, sizeof xig);
 	if (error)
 		return (error);
@@ -792,7 +797,7 @@ udp_pcblist(SYSCTL_HANDLER_ARGS)
 		 */
 		INP_INFO_RLOCK(&V_udbinfo);
 		xig.xig_gen = V_udbinfo.ipi_gencnt;
-		xig.xig_sogen = so_gencnt;
+		xig.xig_sogen = V_so_gencnt;
 		xig.xig_count = V_udbinfo.ipi_count;
 		INP_INFO_RUNLOCK(&V_udbinfo);
 		error = SYSCTL_OUT(req, &xig, sizeof xig);
@@ -801,7 +806,7 @@ udp_pcblist(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_net_inet_udp, UDPCTL_PCBLIST, pcblist,
+SYSCTL_VNET_PROC(_net_inet_udp, UDPCTL_PCBLIST, pcblist,
     CTLTYPE_OPAQUE | CTLFLAG_RD, NULL, 0,
     udp_pcblist, "S,xinpcb", "List of active UDP sockets");
 
@@ -1208,7 +1213,7 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 		struct ip *ip;
 
 		ip = (struct ip *)&ui->ui_i;
-		ip->ip_off |= IP_DF;
+		ip->ip_off |= htons(IP_DF);
 	}
 
 	ipflags = 0;
@@ -1235,7 +1240,7 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *addr,
 		m->m_pkthdr.csum_data = offsetof(struct udphdr, uh_sum);
 	} else
 		ui->ui_sum = 0;
-	((struct ip *)ui)->ip_len = sizeof (struct udpiphdr) + len;
+	((struct ip *)ui)->ip_len = htons(sizeof (struct udpiphdr) + len);
 	((struct ip *)ui)->ip_ttl = inp->inp_ip_ttl;	/* XXX */
 	((struct ip *)ui)->ip_tos = tos;		/* XXX */
 	UDPSTAT_INC(udps_opackets);
@@ -1385,7 +1390,7 @@ udp4_espdecap(struct inpcb *inp, struct mbuf *m, int off)
 	m_adj(m, skip);
 
 	ip = mtod(m, struct ip *);
-	ip->ip_len -= skip;
+	ip->ip_len = htons(ntohs(ip->ip_len) - skip);
 	ip->ip_p = IPPROTO_ESP;
 
 	/*

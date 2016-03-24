@@ -27,15 +27,35 @@
 #ifndef	_UINET_API_TYPES_H_
 #define	_UINET_API_TYPES_H_
 
+#include "uinet_queue.h"
+
+
 #define UINET_IF_NAMESIZE	16
+
+#define UINET_NAME_BUF_LEN	32
 
 struct uinet_socket;
 struct uinet_mbuf;
 struct uinet_in_l2info;
+struct uinet_if;
 
 typedef void * uinet_api_synfilter_cookie_t;
 
+/* XXX to be removed */
 typedef void (*uinet_pfil_cb_t)(const struct uinet_mbuf *m, struct uinet_in_l2info *l2i);
+
+#define UINET_PFIL_IN	0x00000001
+#define UINET_PFIL_OUT	0x00000002
+#define UINET_PFIL_ALL	(UINET_PFIL_IN|UINET_PFIL_OUT)
+
+typedef int (*uinet_pfil_callback_t)(void *arg, struct uinet_mbuf **m, struct uinet_if *uif, int dir, struct uinet_in_l2info *l2i);
+
+struct uinet_pfil_cb {
+	uinet_pfil_callback_t f;
+	void *arg;
+	int flags;
+};
+
 
 typedef int (*uinet_api_synfilter_callback_t)(struct uinet_socket *, void *, uinet_api_synfilter_cookie_t);
 
@@ -111,7 +131,6 @@ struct uinet_in_conninfo {
 	uint8_t	inc_flags;
 	uint8_t	inc_len;
 	uint16_t	inc_fibnum;	/* XXX was pad, 16 bits is plenty */
-	uint16_t	inc_altfibnum;
 	/* protocol dependent part */
 	struct	uinet_in_endpoints inc_ie;
 };
@@ -170,8 +189,6 @@ struct uinet_uio {
 #define	UINET_SO_NO_DDP		0x00008000	/* disable direct data placement */
 #define	UINET_SO_PROMISC	0x00010000	/* socket will be used for promiscuous listen */
 #define	UINET_SO_PASSIVE	0x00020000	/* socket will be used for passive reassembly */
-#define	UINET_SO_ALTFIB		0x00080000	/* alternate FIB is set */
-
 
 
 #define	UINET_SO_SNDBUF		0x1001		/* send buffer size */
@@ -193,6 +210,13 @@ struct uinet_uio {
 #define	UINET_SO_PROTOTYPE	UINET_SO_PROTOCOL	/* alias for UINET_SO_PROTOCOL (SunOS name) */
 #define UINET_SO_L2INFO		0x1017		/* PROMISCUOUS_INET MAC addrs and tags */
 
+/*
+ * Structure used for manipulating linger option.
+ */
+struct uinet_linger {
+	int	l_onoff;		/* option on/off */
+	int	l_linger;		/* linger time */
+};
 
 #define	UINET_SOL_SOCKET	0xffff	/* options for socket level */
 
@@ -228,6 +252,12 @@ struct uinet_uio {
  */
 #define	UINET_IP_BINDANY	24   /* bool: allow bind to any address */
 
+#define UINET_IP_COPY_MODE_OFF		0x00
+#define UINET_IP_COPY_MODE_MAYBE	0x01
+#define UINET_IP_COPY_MODE_ON		0x02
+#define UINET_IP_COPY_MODE_RX		0x04
+#define UINET_IP_COPY_MODE_TX		0x08
+#define UINET_IP_COPY_MODE_TXRX		(UINET_IP_COPY_MODE_TX|UINET_IP_COPY_MODE_RX)
 
 
 #define	UINET_TCP_NODELAY	0x01	/* don't delay send to coalesce packets */
@@ -242,6 +272,8 @@ struct uinet_uio {
 #define	UINET_TCP_KEEPINTVL	0x200	/* L,N interval between keepalives */
 #define	UINET_TCP_KEEPCNT	0x400	/* L,N number of keepalives before close */
 #define UINET_TCP_REASSDL	0x800	/* wait this long for missing segments */
+#define UINET_TCP_TRIVIAL_ISN	0x1000	/* use cheap, insecure ISN */
+#define	UINET_TCP_NOTIMEWAIT	0x2000	/* skip TIMEWAIT state */
 
 struct uinet_tcp_info {
 	uint8_t		tcpi_state;		/* TCP FSM state. */
@@ -507,12 +539,47 @@ typedef enum {
 } uinet_blackhole_t;
 
 
+
+#define UINET_PD_INJECT		0x0010	/* Packet will be processed via an interfaces inject method */
+#define UINET_PD_TO_STACK	0x0020	/* Packet will be sent to the stack.  Implies UINET_PD_MBUF_USED */
+#define UINET_PD_DROP		0x0040	/* Dispose of packet upon return from first-look handler */
+#define UINET_PD_EXTRA_REFS	0x0080	/* Apply extra refs during call to uinet_pd_add_refs() */
+#define UINET_PD_FLUSH_FLOW	0x0100	/* If packets are being written to a medium through a caching layer, flush the given flow */
+#define UINET_PD_MGMT_ONLY	0x0200	/* Indicates that there is no data or context associated with the descriptor */
+
+struct uinet_pd_ctx;
+
+struct uinet_pd {
+	uint16_t flags;
+	uint16_t length;
+	uint16_t pool_id;
+	uintptr_t ref;
+	uint32_t *data;
+	struct uinet_pd_ctx *ctx;
+	uint64_t serialno;
+};
+
+struct uinet_pd_list {
+	uint32_t num_descs;
+	struct uinet_pd descs[0];
+};
+
+/*
+ * Mainly useful for avoiding the allocator when injecting a single
+ * descriptor.  Can be passed anywhere a pd_list is passed.
+ */
+struct uinet_pd_list_single {
+	uint32_t num_descs;
+	struct uinet_pd descs[1];
+};
+
+
 typedef enum {
-	UINET_IFTYPE_LOOPBACK,
 	UINET_IFTYPE_NETMAP,
 	UINET_IFTYPE_PCAP,
-	UINET_IFTYPE_BRIDGE,
-	UINET_IFTYPE_SPAN
+
+	/* always last */
+	UINET_IFTYPE_COUNT
 } uinet_iftype_t;
 
 
@@ -520,9 +587,179 @@ struct uinet_if;
 typedef struct uinet_if * uinet_if_t;
 
 
+struct uinet_if_netmap_cfg {
+	/*
+	 * Bitmask of categories to trace.  Only effective if tracing is
+	 * enabled at compile-time.  See uinet_if_netmap.c.
+	 */
+	uint32_t trace_mask;
+
+	/* 
+	 * The number of extra netmap buffers to allocate.  This must be
+	 * greater than zero for zero-copy receive to function with vale
+	 * ports.
+	 */
+	uint32_t vale_num_extra_bufs;
+};
+
+struct uinet_if_pcap_cfg {
+	/*
+	 * If non-zero, TX file capture will be offloaded to a dedicated
+	 * thread, separating file I/O from the network datapath.
+	 */
+	unsigned int use_file_io_thread;
+	
+	/*
+	 * Packet length limit for TX file capture.
+	 */
+	unsigned int file_snapshot_length;
+
+	/*
+	 * When transmitting to file, create separate files based on flow
+	 * ID.
+	 */
+	unsigned int file_per_flow;
+
+	/*
+	 * When creating separate files per flow, the maximum number of
+	 * concurrently open files.
+	 */
+	unsigned int max_concurrent_files;
+
+	/*
+	 * When creating separate files per flow, the number of LSBs of the
+	 * flow serial number to use to select the capture file
+	 * subdirectory.
+	 */
+	unsigned int dir_bits;
+};
+
+union uinet_if_type_cfg {
+	struct uinet_if_netmap_cfg netmap;
+	struct uinet_if_pcap_cfg pcap;
+};
+
+
+typedef enum {
+	UINET_IF_TIMESTAMP_NONE,
+	UINET_IF_TIMESTAMP_HW,		   /* supplied by interface */
+	UINET_IF_TIMESTAMP_COUNTER,	   /* per-interface counter */
+	UINET_IF_TIMESTAMP_GLOBAL_COUNTER, /* application-wide counter */
+	UINET_IF_TIMESTAMP_MONOTONIC,	   /* use CLOCK_MONOTONIC */
+	UINET_IF_TIMESTAMP_MONOTONIC_FAST, /* use CLOCK_MONOTONIC_FAST (may be the same as CLOCK_MONOTONIC) */
+} uinet_if_timestamp_mode_t;
+
+
+struct uinet_if_cfg {
+	uinet_iftype_t type;	/* interface driver type to attach */
+
+	/*
+	 *  Driver-specific configuration string.
+	 *
+	 *  UINET_IFTYPE_NETMAP - vale<n>:<m> or <hostifname> or
+	 *  		          <hostifname>:<qno>, where queue 0 is
+	 *                        implied by a configstr of <hostifname>
+	 *
+	 *  UINET_IFTYPE_PCAP - <hostifname> or file://<filename>
+	 *
+	 */
+	const char *configstr;
+
+	/*
+	 * Any user-supplied string, or NULL.  If a string is supplied, it
+	 * must be unique among all the other aliases and driver-assigned
+	 * names.  Passing an empty string is the same as passing NULL.
+	 */
+	const char *alias;
+	
+	/*
+	 * CPU numbers to bind the driver rx and tx threads to.  Not all
+	 * drivers have both of these threads.  A value of -1 leaves the
+	 * thread floating.
+	 */
+	int rx_cpu;
+	int tx_cpu;
+
+	/*
+	 * The maximum number of received packets to process in each receive
+	 * pass.
+	 */
+	uint32_t rx_batch_size;
+
+	uint32_t tx_inject_queue_len;
+
+	void (*first_look_handler)(void *arg, struct uinet_pd_list *pkts);
+	void *first_look_handler_arg;
+
+	uinet_if_timestamp_mode_t timestamp_mode;
+	
+	union uinet_if_type_cfg type_cfg;	/* type-specific config */
+};
+
+
+enum uinet_global_cfg_type {
+	UINET_GLOBAL_CFG_SMALL,
+	UINET_GLOBAL_CFG_MEDIUM,
+	UINET_GLOBAL_CFG_LARGE
+};
+
+
+struct uinet_global_cfg {
+	unsigned int ncpus;
+	uint32_t epoch_number; /* used to distinguish one run of the application from another when persisting data */
+	uint32_t netmap_extra_bufs;
+	struct {
+		struct {
+			struct {
+				struct {
+					unsigned int hashsize;    /* number of buckets */
+					unsigned int bucketlimit; /* per-bucket limit */
+					unsigned int cachelimit;  /* overall entry limit */
+				} syncache;
+				unsigned int tcbhashsize; /* number of buckets in connection cache */
+			} tcp;
+		} inet;
+	} net;
+	struct {
+		struct {
+			unsigned int maxsockets; /* will be set to max(maxsockets, nmbclusters) */
+			unsigned int nmbclusters; /* maximum number of cluster mbufs */ 
+			unsigned int somaxconn;  /* maximum accept queue depth */
+		} ipc;
+	} kern;
+};
+
+
+#define UINET_STS_EVENT_PR_DRAIN		0x00000001
+
+struct uinet_sts_cfg {
+	int sts_enabled;
+
+	/* global/per-loop event system context pointer passed to callbacks */
+	void *sts_evctx;
+	/* returns pointer to event system instance context */
+	void *(*sts_instance_created_cb)(void *evctx, uinet_instance_t uinst);
+	void (*sts_instance_destroyed_cb)(void *evinstctx);
+	void (*sts_instance_event_notify_cb)(void *evinstctx);
+	/* returns pointer to event system if context */
+	void *(*sts_if_created_cb)(void *evinstctx, uinet_if_t uif);
+	void (*sts_if_destroyed_cb)(void *evifctx);
+
+	void (*sts_callout_init)(void *ctx, void *c);
+	int (*sts_callout_reset)(void *ctx, void *c, int ticks, void (*func)(void *), void *arg);
+	int (*sts_callout_schedule)(void *ctx, void *c, int ticks);
+	int (*sts_callout_pending)(void *ctx, void *c);
+	int (*sts_callout_active)(void *ctx, void *c);
+	void (*sts_callout_deactivate)(void *ctx, void *c);
+	int (*sts_callout_msecs_remaining)(void *ctx, void *c);
+	int (*sts_callout_stop)(void *ctx, void *c);
+};
+
+
 struct uinet_instance_cfg {
-	unsigned int loopback;
-	void *userdata;
+	unsigned int loopback;      /* create loopback interface */
+	struct uinet_sts_cfg sts;  /* if used, set by external event system */
+	void *userdata;            /* application context pointer */
 };
 
 #endif /* _UINET_API_TYPES_H_ */

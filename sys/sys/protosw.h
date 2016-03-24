@@ -330,6 +330,8 @@ char	*prcorequests[] = {
 #ifdef _KERNEL
 void	pfctlinput(int, struct sockaddr *);
 void	pfctlinput2(int, struct sockaddr *, void *);
+void	pfdrain(void);
+void	_pfdrain_vnet(void);
 struct protosw *pffindproto(int family, int protocol, int type);
 struct protosw *pffindtype(int family, int type);
 int	pf_proto_register(int family, struct protosw *npr);

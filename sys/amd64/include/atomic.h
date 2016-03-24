@@ -457,6 +457,7 @@ u_long	atomic_readandclear_long(volatile u_long *addr);
 #define	atomic_cmpset_acq_64	atomic_cmpset_acq_long
 #define	atomic_cmpset_rel_64	atomic_cmpset_rel_long
 #define	atomic_readandclear_64	atomic_readandclear_long
+#define	atomic_fetchadd_64	atomic_fetchadd_long
 
 /* Operations on pointers. */
 #define	atomic_set_ptr		atomic_set_long

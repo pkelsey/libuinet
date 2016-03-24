@@ -1531,7 +1531,7 @@ unp_pcblist(SYSCTL_HANDLER_ARGS)
 	xug->xug_len = sizeof *xug;
 	xug->xug_count = n;
 	xug->xug_gen = gencnt;
-	xug->xug_sogen = so_gencnt;
+	xug->xug_sogen = V_so_gencnt;
 	error = SYSCTL_OUT(req, xug, sizeof *xug);
 	if (error) {
 		free(xug, M_TEMP);
@@ -1601,7 +1601,7 @@ unp_pcblist(SYSCTL_HANDLER_ARGS)
 		 * request, and it might be necessary to retry.
 		 */
 		xug->xug_gen = unp_gencnt;
-		xug->xug_sogen = so_gencnt;
+		xug->xug_sogen = V_so_gencnt;
 		xug->xug_count = unp_count;
 		error = SYSCTL_OUT(req, xug, sizeof *xug);
 	}
@@ -1610,13 +1610,13 @@ unp_pcblist(SYSCTL_HANDLER_ARGS)
 	return (error);
 }
 
-SYSCTL_PROC(_net_local_dgram, OID_AUTO, pcblist, CTLTYPE_OPAQUE | CTLFLAG_RD,
+SYSCTL_VNET_PROC(_net_local_dgram, OID_AUTO, pcblist, CTLTYPE_OPAQUE | CTLFLAG_RD,
     (void *)(intptr_t)SOCK_DGRAM, 0, unp_pcblist, "S,xunpcb",
     "List of active local datagram sockets");
-SYSCTL_PROC(_net_local_stream, OID_AUTO, pcblist, CTLTYPE_OPAQUE | CTLFLAG_RD,
+SYSCTL_VNET_PROC(_net_local_stream, OID_AUTO, pcblist, CTLTYPE_OPAQUE | CTLFLAG_RD,
     (void *)(intptr_t)SOCK_STREAM, 0, unp_pcblist, "S,xunpcb",
     "List of active local stream sockets");
-SYSCTL_PROC(_net_local_seqpacket, OID_AUTO, pcblist,
+SYSCTL_VNET_PROC(_net_local_seqpacket, OID_AUTO, pcblist,
     CTLTYPE_OPAQUE | CTLFLAG_RD,
     (void *)(intptr_t)SOCK_SEQPACKET, 0, unp_pcblist, "S,xunpcb",
     "List of active local seqpacket sockets");

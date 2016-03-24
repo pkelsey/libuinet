@@ -418,8 +418,6 @@ if_bridge_attach(struct uinet_if *uif)
 	sc->sc_ifp->if_transmit = if_bridge_transmit;
 	sc->sc_ifp->if_qflush = if_bridge_qflush;
 
-	sc->sc_ifp->if_fib = sc->uif->cdom;
-
 	/* Mutex protecting the bridge list */
 	mtx_init(&sc->sc_mtx, "if_bridge", NULL, MTX_DEF);
 

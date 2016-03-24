@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -65,10 +65,9 @@ uinet_inet6_enabled(void)
 
 
 int
-uinet_initialize_thread(void)
+uinet_initialize_thread(const char *name)
 {
 	struct uinet_thread *utd;
-	struct thread *td;
 	int cpuid;
 
 	/*
@@ -84,26 +83,27 @@ uinet_initialize_thread(void)
 	 */
 	uhi_mask_all_signals();
 
+	uhi_thread_set_name(name);
+
 	utd = uhi_tls_get(kthread_tls_key);
 	if (NULL == utd) {
+		/* This thread has not been initialized */
 		utd = uinet_thread_alloc(NULL);
 		if (NULL == utd)
 			return (ENOMEM);
-		
-		td = utd->td;
-
-		KASSERT(sizeof(td->td_wchan) >= sizeof(uhi_thread_t), ("uinet_initialize_thread: can't safely store host thread id"));
-		td->td_wchan = (void *)uhi_thread_self();
 
 		uhi_tls_set(kthread_tls_key, utd);
-
 		uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
 	} else {
-		td = utd->td;
+		/*
+		 * If already initialized, update current cpu so
+		 * uinet_initialize_thread() can be called on an already
+		 * initialized thread after changing the cpu pin state to
+		 * update the cached current cpu.
+		 */
+		cpuid = uhi_thread_bound_cpu();
+		utd->td.td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
 	}
-
-	cpuid = uhi_thread_bound_cpu();
-	td->td_oncpu = (cpuid == -1) ? 0 : cpuid % mp_ncpus;
 
 	return (0);
 }
@@ -124,24 +124,16 @@ uinet_finalize_thread(void)
 
 
 int
-uinet_getifstat(uinet_instance_t uinst, const char *name, struct uinet_ifstat *stat)
+uinet_getifstat(uinet_if_t uif, struct uinet_ifstat *stat)
 {
-	struct uinet_if *uif;
 	struct ifnet *ifp;
 	int error = 0;
 
-	CURVNET_SET(uinst->ui_vnet);
-
-	uif = uinet_iffind_byname(name);
-	if (NULL == uif) {
-		printf("could not find interface %s\n", name);
-		error = EINVAL;
-		goto out;
-	}
+	CURVNET_SET(uif->uinst->ui_vnet);
 
 	ifp = ifnet_byindex_ref(uif->ifindex);
 	if (NULL == ifp) {
-		printf("could not find interface %s by index\n", name);
+		printf("could not find interface %s by index\n", uif->name);
 		error = EINVAL;
 		goto out;
 	}
@@ -149,7 +141,7 @@ uinet_getifstat(uinet_instance_t uinst, const char *name, struct uinet_ifstat *s
 	stat->ifi_ipackets   = ifp->if_data.ifi_ipackets;
 	stat->ifi_ierrors    = ifp->if_data.ifi_ierrors;
 	stat->ifi_opackets   = ifp->if_data.ifi_opackets;
-	stat->ifi_oerrors    = ifp->if_data.ifi_oerrors;
+	stat->ifi_oerrors    = ifp->if_data.ifi_oerrors + ifp->if_snd.ifq_drops;
 	stat->ifi_collisions = ifp->if_data.ifi_collisions;
 	stat->ifi_ibytes     = ifp->if_data.ifi_ibytes;
 	stat->ifi_obytes     = ifp->if_data.ifi_obytes;
@@ -213,9 +205,7 @@ uinet_ifconfig_begin(uinet_instance_t uinst, struct socket **so,
 	struct uinet_if *uif;
 	int error;
 
-	CURVNET_SET(uinst->ui_vnet);
-	uif = uinet_iffind_byname(name);
-	CURVNET_RESTORE();
+	uif = uinet_iffind_byname(uinst, name);
 	if (NULL == uif) {
 		printf("could not find interface %s\n", name);
 		return (EINVAL);
@@ -416,7 +406,7 @@ out:
 
 
 int
-uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib)
+uinet_make_socket_promiscuous(struct uinet_socket *so, uinet_if_t txif)
 {
 	struct socket *so_internal = (struct socket *)so;
 	unsigned int optval, optlen;
@@ -428,16 +418,15 @@ uinet_make_socket_promiscuous(struct uinet_socket *so, unsigned int fib)
 	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_PROMISC, &optval, optlen)))
 		goto out;
 	
-	optval = fib;
-	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_SETFIB, &optval, optlen)))
-		goto out;
-
 	optval = 1;
 	if ((error = so_setsockopt(so_internal, SOL_SOCKET, SO_REUSEPORT, &optval, optlen)))
 		goto out;
 	
 	optval = 1;
 	if ((error = so_setsockopt(so_internal, IPPROTO_IP, IP_BINDANY, &optval, optlen)))
+		goto out;
+
+	if (txif != NULL && (error = uinet_sosettxif(so, txif)))
 		goto out;
 
 out:
@@ -548,7 +537,7 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 		*nam = NULL;
 
 	*aso = NULL;
-
+	CURVNET_SET(head->so_vnet);
 	ACCEPT_LOCK();
 	if ((head->so_state & SS_NBIO) && TAILQ_EMPTY(&head->so_comp)) {
 		if (head->so_upcallprep.soup_accept != NULL) {
@@ -565,7 +554,7 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 			head->so_error = ECONNABORTED;
 			break;
 		}
-		error = msleep(&head->so_timeo, &accept_mtx, PSOCK | PCATCH,
+		error = msleep(&head->so_timeo, &V_accept_mtx, PSOCK | PCATCH,
 		    "accept", 0);
 		if (error) {
 			ACCEPT_UNLOCK();
@@ -619,7 +608,7 @@ uinet_soaccept(struct uinet_socket *listener, struct uinet_sockaddr **nam, struc
 			soclose(peer_so);
 #endif
 		soclose(so);
-		return (error);
+		goto noconnection;
 	}
 
 	if (nam) {
@@ -633,6 +622,7 @@ noconnection:
 	if (sa)
 		free(sa, M_SONAME);
 
+	CURVNET_RESTORE();
 	return (error);
 }
 
@@ -676,6 +666,7 @@ uinet_soconnect(struct uinet_socket *uso, struct uinet_sockaddr *nam)
 		error = EINPROGRESS;
 		goto done1;
 	}
+	CURVNET_SET(so->so_vnet);
 	SOCK_LOCK(so);
 	while ((so->so_state & SS_ISCONNECTING) && so->so_error == 0) {
 		error = msleep(&so->so_timeo, SOCK_MTX(so), PSOCK | PCATCH,
@@ -691,6 +682,7 @@ uinet_soconnect(struct uinet_socket *uso, struct uinet_sockaddr *nam)
 		so->so_error = 0;
 	}
 	SOCK_UNLOCK(so);
+	CURVNET_RESTORE();
 bad:
 	if (!interrupted)
 		so->so_state &= ~SS_ISCONNECTING;
@@ -716,12 +708,14 @@ uinet_sogetconninfo(struct uinet_socket *so, struct uinet_in_conninfo *inc)
 	struct socket *so_internal = (struct socket *)so;
 	struct inpcb *inp = sotoinpcb(so_internal);
 
+	CURVNET_SET(so_internal->so_vnet);
 	/* XXX do we really need the INFO lock here? */
 	INP_INFO_RLOCK(inp->inp_pcbinfo);
 	INP_RLOCK(inp);
 	memcpy(inc, &sotoinpcb(so_internal)->inp_inc, sizeof(struct uinet_in_conninfo));
 	INP_RUNLOCK(inp);
 	INP_INFO_RUNLOCK(inp->inp_pcbinfo);
+	CURVNET_RESTORE();
 }
 
 
@@ -749,6 +743,16 @@ uinet_sogetpassivepeer(struct uinet_socket *so)
 	struct socket *so_internal = (struct socket *)so;
 
 	return ((struct uinet_socket *)(so_internal->so_passive_peer));
+}
+
+
+uint64_t
+uinet_sogetserialno(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+	struct inpcb *inp = sotoinpcb(so_internal);
+
+	return (inp->inp_serialno);
 }
 
 
@@ -790,6 +794,7 @@ uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall)
 	unsigned int avail; 
 	int canread;
 
+	CURVNET_SET(so_internal->so_vnet);
 	if (so_internal->so_options & SO_ACCEPTCONN) {
 		if (so_internal->so_error)
 			canread = -1;
@@ -814,6 +819,7 @@ uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall)
 		if (!in_upcall)
 			SOCKBUF_UNLOCK(&so_internal->so_rcv);
 	}
+	CURVNET_RESTORE();
 
 	return canread;
 }
@@ -826,6 +832,7 @@ uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall)
 	long space;
 	int canwrite;
 
+	CURVNET_SET(so_internal->so_vnet);
 	if (so_internal->so_options & SO_ACCEPTCONN) {
 		canwrite = 0;
 	} else {
@@ -851,6 +858,7 @@ uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall)
 		if (!in_upcall)
 			SOCKBUF_UNLOCK(&so_internal->so_snd);
 	}
+	CURVNET_RESTORE();
 
 	return canwrite;
 }
@@ -860,8 +868,13 @@ int
 uinet_soallocuserctx(struct uinet_socket *so)
 {
 	struct socket *so_internal = (struct socket *)so;
+	int error;
 
-	return souserctx_alloc(so_internal);
+	CURVNET_SET(so_internal->so_vnet);
+	error = souserctx_alloc(so_internal);
+	CURVNET_RESTORE();
+
+	return (error);
 }
 
 
@@ -916,6 +929,39 @@ uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uin
 }
 
 
+int
+uinet_sosetcopymode(struct uinet_socket *so, unsigned int mode, uint64_t limit, uinet_if_t uif)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int optval, optlen;
+	uint64_t optval64;
+	int error;
+
+	optlen = sizeof(optval);
+	optval = mode;
+	error = so_setsockopt(so_internal, IPPROTO_IP, IP_COPY_MODE, &optval, optlen);
+	if (error)
+		goto out;
+	
+	if (uif != NULL) {
+		optlen = sizeof(optval);
+		optval = uif->ifp->if_index;
+		error = so_setsockopt(so_internal, IPPROTO_IP, IP_COPY_IF, &optval, optlen);
+		if (error)
+			goto out;
+	}
+
+	optlen = sizeof(optval64);
+	optval64 = limit;
+	error = so_setsockopt(so_internal, IPPROTO_IP, IP_COPY_LIMIT, &optval64, optlen);
+	if (error)
+		goto out;
+
+out:
+	return (error);
+}
+
+
 void
 uinet_sosetnonblocking(struct uinet_socket *so, unsigned int nonblocking)
 {
@@ -935,6 +981,18 @@ uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval
 		   unsigned int optlen)
 {
 	return so_setsockopt((struct socket *)so, level, optname, optval, optlen);
+}
+
+
+int
+uinet_sosettxif(struct uinet_socket *so, uinet_if_t uif)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int optval, optlen;
+
+	optlen = sizeof(optval);
+	optval = uif->ifp->if_index;
+	return (so_setsockopt(so_internal, IPPROTO_IP, IP_TXIF, &optval, optlen));
 }
 
 
@@ -995,9 +1053,15 @@ int
 uinet_sogetpeeraddr(struct uinet_socket *so, struct uinet_sockaddr **sa)
 {
 	struct socket *so_internal = (struct socket *)so;
+	int rv;
 
 	*sa = NULL;
-	return (*so_internal->so_proto->pr_usrreqs->pru_peeraddr)(so_internal, (struct sockaddr **)sa);
+
+	CURVNET_SET(so_internal->so_vnet);
+	rv = (*so_internal->so_proto->pr_usrreqs->pru_peeraddr)(so_internal, (struct sockaddr **)sa);
+	CURVNET_RESTORE();
+
+	return (rv);
 }
 
 
@@ -1005,9 +1069,15 @@ int
 uinet_sogetsockaddr(struct uinet_socket *so, struct uinet_sockaddr **sa)
 {
 	struct socket *so_internal = (struct socket *)so;
+	int rv;
 
 	*sa = NULL;
-	return (*so_internal->so_proto->pr_usrreqs->pru_sockaddr)(so_internal, (struct sockaddr **)sa);
+	
+	CURVNET_SET(so_internal->so_vnet);
+	rv = (*so_internal->so_proto->pr_usrreqs->pru_sockaddr)(so_internal, (struct sockaddr **)sa);
+	CURVNET_RESTORE();
+
+	return (rv);
 }
 
 
@@ -1035,7 +1105,9 @@ uinet_soupcall_lock(struct uinet_socket *so, int which)
 		return;
 	}
 	
+	CURVNET_SET(so_internal->so_vnet);
 	SOCKBUF_LOCK(sb);
+	CURVNET_RESTORE();
 }
 
 
@@ -1056,7 +1128,9 @@ uinet_soupcall_unlock(struct uinet_socket *so, int which)
 		return;
 	}
 	
+	CURVNET_SET(so_internal->so_vnet);
 	SOCKBUF_UNLOCK(sb);
+	CURVNET_RESTORE();
 }
 
 
@@ -1078,9 +1152,11 @@ uinet_soupcall_set(struct uinet_socket *so, int which,
 		return;
 	}
 
+	CURVNET_SET(so_internal->so_vnet);
 	SOCKBUF_LOCK(sb);
 	uinet_soupcall_set_locked(so, which, func, arg);
 	SOCKBUF_UNLOCK(sb);
+	CURVNET_RESTORE();
 }
 
 
@@ -1110,10 +1186,11 @@ uinet_soupcall_clear(struct uinet_socket *so, int which)
 		return;
 	}
 
+	CURVNET_SET(so_internal->so_vnet);
 	SOCKBUF_LOCK(sb);
 	uinet_soupcall_clear_locked(so, which);
 	SOCKBUF_UNLOCK(sb);
-
+	CURVNET_RESTORE();
 }
 
 
@@ -1236,11 +1313,11 @@ uinet_synfilter_setl2info(uinet_api_synfilter_cookie_t cookie, struct uinet_in_l
 
 
 void
-uinet_synfilter_setaltfib(uinet_api_synfilter_cookie_t cookie, unsigned int altfib)
+uinet_synfilter_set_txif(uinet_api_synfilter_cookie_t cookie, uinet_if_t uif)
 {
 	struct syn_filter_cbarg *cbarg = cookie;
 	
-	cbarg->altfib = altfib;
+	cbarg->txif = uif->ifp;
 }
 
 
@@ -1304,6 +1381,81 @@ uinet_sysctl(uinet_instance_t uinst, const int *name, u_int namelen, void *oldp,
 	CURVNET_RESTORE();
 	return (error);
 }
+
+
+static int
+uinet_pfil_hook_wrapper(void *arg, struct mbuf **mp, struct ifnet *ifp, int dir,
+			struct inpcb *inp)
+{
+	struct uinet_pfil_cb *cb = arg;
+	struct ifl2info *l2i_tag;
+	int result;
+
+	l2i_tag = (struct ifl2info *)m_tag_locate(*mp,
+						  MTAG_PROMISCINET,
+						  MTAG_PROMISCINET_L2INFO,
+						  NULL);
+
+	result = cb->f(cb->arg, (struct uinet_mbuf **)mp, ifp ? uinet_iftouif(ifp)  : NULL, dir,
+		       l2i_tag ? (struct uinet_in_l2info *)&l2i_tag->ifl2i_info : NULL);
+	if (*mp == NULL)
+		result = ENOBUFS;
+
+	return (result);
+}
+
+
+int
+uinet_pfil_add_hook(uinet_instance_t uinst, struct uinet_pfil_cb *cb, int af)
+{
+	int error;
+	struct pfil_head *pfh;
+
+	CURVNET_SET(uinst->ui_vnet);
+	if (cb == NULL || cb->f == NULL) {
+		CURVNET_RESTORE();
+		return (EINVAL);
+	}
+
+	pfh = pfil_head_get(PFIL_TYPE_AF, af);
+	if (pfh == NULL) {
+		CURVNET_RESTORE();
+		return (EINVAL);
+	}
+
+	error = pfil_add_hook(uinet_pfil_hook_wrapper, cb,
+	    cb->flags | PFIL_WAITOK, pfh);
+
+	CURVNET_RESTORE();
+	return (error);
+}
+
+
+int
+uinet_pfil_remove_hook(uinet_instance_t uinst, struct uinet_pfil_cb *cb, int af)
+{
+	int error;
+	struct pfil_head *pfh;
+
+	CURVNET_SET(uinst->ui_vnet);
+	if (cb == NULL || cb->f == NULL) {
+		CURVNET_RESTORE();
+		return (EINVAL);
+	}
+
+	pfh = pfil_head_get(PFIL_TYPE_AF, af);
+	if (pfh == NULL) {
+		CURVNET_RESTORE();
+		return (EINVAL);
+	}
+
+	error = pfil_remove_hook(uinet_pfil_hook_wrapper, cb,
+	    cb->flags, pfh);
+
+	CURVNET_RESTORE();
+	return (error);
+}
+
 
 static VNET_DEFINE(uinet_pfil_cb_t, uinet_pfil_cb) = NULL;
 #define V_uinet_pfil_cb VNET(uinet_pfil_cb)
@@ -1485,6 +1637,7 @@ uinet_lock_log_enable(void)
 	return (0);
 }
 
+
 int
 uinet_lock_log_disable(void)
 {
@@ -1495,10 +1648,112 @@ uinet_lock_log_disable(void)
 
 
 void
+uinet_default_cfg(struct uinet_global_cfg *cfg, enum uinet_global_cfg_type which)
+{
+	switch (which) {
+	case UINET_GLOBAL_CFG_SMALL:
+		*cfg = (struct uinet_global_cfg) {
+			.ncpus = 1,
+			.netmap_extra_bufs = 1000,
+			.epoch_number = 0,
+			.kern = {
+				.ipc = {
+					.maxsockets = 1024,
+					.nmbclusters = 4*1024,
+					.somaxconn = 128,
+				},
+			},
+			.net = {
+				.inet = {
+					.tcp = {
+						.syncache = {
+							.hashsize = 512,
+							.bucketlimit = 30,
+							.cachelimit = 15360, /* (512 * 30) */
+						},
+						.tcbhashsize = 512,
+					},
+				},
+			},
+		};
+		break;
+	default:
+	case UINET_GLOBAL_CFG_MEDIUM:
+		*cfg = (struct uinet_global_cfg) {
+			.ncpus = 1,
+			.netmap_extra_bufs = 10000,
+			.kern = {
+				.ipc = {
+					.maxsockets = 128*1024,
+					.nmbclusters = 128*1024,
+					.somaxconn = 1024,
+				},
+			},
+			.net = {
+				.inet = {
+					.tcp = {
+						.syncache = {
+							.hashsize = 2048,
+							.bucketlimit = 30,
+							.cachelimit = 61440, /* (2048 * 30) */
+						},
+						.tcbhashsize = 8192,
+					},
+				},
+			},
+		};
+		break;
+	case UINET_GLOBAL_CFG_LARGE:
+		*cfg = (struct uinet_global_cfg) {
+			.ncpus = 1,
+			.netmap_extra_bufs = 40000,
+			.kern = {
+				.ipc = {
+					.maxsockets = 256*1024,
+					.nmbclusters = 512*1024,
+					.somaxconn = 2048,
+				},
+			},
+			.net = {
+				.inet = {
+					.tcp = {
+						.syncache = {
+							.hashsize = 4096,
+							.bucketlimit = 30,
+							.cachelimit = 122880, /* (4096 * 30) */
+						},
+						.tcbhashsize = 32768,
+					},
+				},
+			},
+		};
+		break;
+	}
+}
+
+
+void
+uinet_print_cfg(struct uinet_global_cfg *cfg)
+{
+#define PRINT_TUNABLE(t) printf("%s=%u\n", #t, cfg->t)
+
+	printf("ncpus=%u netmap_extra_bufs=%u\n", cfg->ncpus, cfg->netmap_extra_bufs);
+	PRINT_TUNABLE(net.inet.tcp.syncache.hashsize);
+	PRINT_TUNABLE(net.inet.tcp.syncache.bucketlimit);
+	PRINT_TUNABLE(net.inet.tcp.syncache.cachelimit);
+	PRINT_TUNABLE(net.inet.tcp.tcbhashsize);
+	PRINT_TUNABLE(kern.ipc.maxsockets);
+	PRINT_TUNABLE(kern.ipc.nmbclusters);
+	PRINT_TUNABLE(kern.ipc.somaxconn);
+
+#undef PRINT_TUNABLE	
+}
+
+
+void
 uinet_instance_default_cfg(struct uinet_instance_cfg *cfg)
 {
-	cfg->loopback = 0;
-	cfg->userdata = NULL;
+	memset(cfg, 0, sizeof(struct uinet_instance_cfg));
 }
 
 int
@@ -1515,8 +1770,10 @@ uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
 
 	uinst->ui_vnet = vnet;
 	uinst->ui_vnet->vnet_uinet = uinst;
+	uinst->ui_sts = cfg->sts;
 	uinst->ui_userdata = cfg->userdata;
-
+	uinst->ui_index = instance_count++;
+	
 	/*
 	 * Don't respond with a reset to TCP segments that the stack will
 	 * not claim nor with an ICMP port unreachable message to UDP
@@ -1535,7 +1792,63 @@ uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
 		}
 	}
 
+	if (uinst->ui_sts.sts_enabled) {
+		uinst->ui_sts_evinstctx =
+		    uinst->ui_sts.sts_instance_created_cb(uinst->ui_sts.sts_evctx, uinst);
+		if (uinst->ui_sts_evinstctx == NULL)
+			return (-1);
+		
+		vnet->vnet_sts.sts_event_notify     = cfg->sts.sts_instance_event_notify_cb;
+		vnet->vnet_sts.sts_event_notify_arg = uinst->ui_sts_evinstctx;
+	}
+
 	return (error);
+}
+
+
+/*
+ * This routine exists because for sts-mode vnets, the sts enable and
+ * callout routines must be initialized before the VNET_SYSINITs are run
+ * when the vnet is allocated because some VNET_SYSINITs configure callouts.
+ * This routine is used to partially initialize a struct vnet_sts, which is
+ * then passed to vnet_alloc().  The rest of the struct vnet_sts
+ * initialization happens in uinet_instance_init() after the rest of the
+ * uinet_instance_t construction has occurred, in part because the rest of
+ * the struct vnet_sts initialization depends on information obtained from
+ * the external event system at that point.
+ *
+ * Note that as vnet0 is allocated in a SYSINIT, the vnet0_sts structure
+ * must be initialized by calling this routine in uinet_init() before the
+ * SYSINITs are run.
+ *
+ */
+void
+uinet_instance_init_vnet_sts(struct vnet_sts *sts, struct uinet_instance_cfg *cfg)
+{
+	memset(sts, 0, sizeof(*sts));
+
+	if (cfg == NULL)
+		return;
+
+	sts->sts_enabled            = cfg->sts.sts_enabled;
+	sts->sts_callout_ctx        = cfg->sts.sts_evctx;
+	sts->sts_callout_init       = cfg->sts.sts_callout_init;
+	sts->sts_callout_reset      = cfg->sts.sts_callout_reset;
+	sts->sts_callout_schedule   = cfg->sts.sts_callout_schedule;
+	sts->sts_callout_pending    = cfg->sts.sts_callout_pending;
+	sts->sts_callout_active     = cfg->sts.sts_callout_active;
+	sts->sts_callout_deactivate = cfg->sts.sts_callout_deactivate;
+	sts->sts_callout_msecs_remaining = cfg->sts.sts_callout_msecs_remaining;
+	sts->sts_callout_stop       = cfg->sts.sts_callout_stop;
+	sts->sts_event_notify       = cfg->sts.sts_instance_event_notify_cb;
+
+	/*
+	 * The rest of the struct vnet_sts is initialized in
+	 * uinet_instance_init().
+	 *
+	 * sts->sts_event_notify     = ...
+	 * sts->sts_event_notify_arg = ...
+	 */
 }
 
 
@@ -1545,21 +1858,27 @@ uinet_instance_create(struct uinet_instance_cfg *cfg)
 #ifdef VIMAGE
 	struct uinet_instance *uinst;
 	struct vnet *vnet;
+	struct vnet_sts sts;
 
 	uinst = malloc(sizeof(struct uinet_instance), M_DEVBUF, M_WAITOK);
 	if (uinst != NULL) {
-		vnet = vnet_alloc();
+		uinet_instance_init_vnet_sts(&sts, cfg);
+		vnet = vnet_alloc(&sts);
 		if (vnet == NULL) {
 			free(uinst, M_DEVBUF);
 			return (NULL);
 		}
 
-		uinet_instance_init(uinst, vnet, cfg);
+		if (-1 == uinet_instance_init(uinst, vnet, cfg)) {
+			vnet_destroy(vnet);
+			free(uinst, M_DEVBUF);
+			return (NULL);
+		}
 	}
 
 	return (uinst);
 #else
-	return (NULL);
+	return (NULL);  /* XXX use uinst0 instead of NULL? */
 #endif
 }
 
@@ -1570,6 +1889,30 @@ uinet_instance_default(void)
 	return (&uinst0);
 }
 
+
+unsigned int
+uinet_instance_sts_enabled(uinet_instance_t uinst)
+{
+	return uinst->ui_sts.sts_enabled;
+}
+
+void
+uinet_instance_sts_events_process(uinet_instance_t uinst)
+{
+	vnet_sts_events_process(uinst->ui_vnet);
+}
+
+uint32_t
+uinet_instance_index(uinet_instance_t uinst)
+{
+	return (uinst ? uinst->ui_index : 0);
+}
+
+unsigned int
+uinet_sts_callout_max_size(void)
+{
+	return (VNET_CALLOUT_SIZE);
+}
 
 void
 uinet_instance_shutdown(uinet_instance_t uinst)
@@ -1583,6 +1926,9 @@ uinet_instance_destroy(uinet_instance_t uinst)
 {
 	KASSERT(uinst != uinet_instance_default(), ("uinet_instance_destroy: cannot destroy default instance"));
 #ifdef VIMAGE
+	if (uinst->ui_sts.sts_enabled)
+		uinst->ui_sts.sts_instance_destroyed_cb(uinst->ui_sts_evinstctx);
+
 	uinet_instance_shutdown(uinst);
 	vnet_destroy(uinst->ui_vnet);
 	free(uinst, M_DEVBUF);
@@ -1590,3 +1936,276 @@ uinet_instance_destroy(uinet_instance_t uinst)
 }
 
 
+void
+uinet_if_default_config(uinet_iftype_t type, struct uinet_if_cfg *cfg)
+{
+	const struct uinet_if_type_info *ti;
+
+	ti = uinet_if_get_type_info(type);
+	if (ti && cfg) {
+		cfg->type = type;
+		cfg->configstr = NULL;
+		cfg->alias = NULL;
+		cfg->rx_cpu = -1;
+		cfg->tx_cpu = -1;
+		cfg->rx_batch_size = 512;
+		cfg->tx_inject_queue_len = 2048;
+		cfg->first_look_handler = NULL;
+		cfg->first_look_handler_arg = NULL;
+		cfg->timestamp_mode = UINET_IF_TIMESTAMP_NONE;
+
+		if (ti->default_cfg)
+			ti->default_cfg(&cfg->type_cfg);
+	}
+}
+
+
+int
+uinet_if_set_batch_event_handler(uinet_if_t uif,
+				 void (*handler)(void *arg, int event),
+				 void *arg)
+{
+	int error = EINVAL;
+
+	if (NULL != uif) {
+		uif->batch_event_handler = handler;
+		uif->batch_event_handler_arg = arg;
+		error = 0;
+	}
+
+	return (error);
+}
+
+
+struct uinet_pd_list *
+uinet_pd_list_alloc(uint32_t num_descs)
+{
+	struct uinet_pd_list *list;
+
+	list = malloc(sizeof(*list) + num_descs * sizeof(struct uinet_pd),
+		      M_DEVBUF, M_WAITOK);
+	if (list == NULL)
+		return (NULL);
+
+	list->num_descs = num_descs;
+	return (list);
+}
+
+
+void
+uinet_pd_list_free(struct uinet_pd_list *list)
+{
+	free(list, M_DEVBUF);
+}
+
+
+void
+uinet_if_pd_alloc(uinet_if_t uif, struct uinet_pd_list *pkts)
+{
+	UIF_PD_ALLOC(uif, pkts);
+}
+
+
+void
+uinet_if_inject_tx_packets(uinet_if_t uif, struct uinet_pd_list *pkts)
+{
+	UIF_INJECT_TX(uif, pkts);
+}
+
+
+unsigned int
+uinet_if_batch_rx(uinet_if_t uif, int *fd, uint64_t *wait_ns)
+{
+	return (UIF_BATCH_RX(uif, fd, wait_ns));
+}
+
+
+unsigned int
+uinet_if_batch_tx(uinet_if_t uif, int *fd, uint64_t *wait_ns)
+{
+	return (UIF_BATCH_TX(uif, fd, wait_ns));
+}
+
+
+/*
+ * Increment the refcount of each packet descriptor as required based on the
+ * descriptor flags.  This routine does not atomically increment the
+ * refcounts as it is meant to be used in first-look handler implementations
+ * - it is only safe to use to adjust the refcounts of packet descriptors
+ * that have a refcount of one (meaning the caller is the owner of the sole
+ * reference to the descriptor).
+ *
+ * num_extra is the number of extra refs needed beyond what would be
+ * required for passage to the stack and/or injection to a single interface.
+ * This routine correctly adds any needed refs for passage to the stack
+ * and/or injection to a single interface, based on the UINET_PD_INJECT and
+ * UINET_PD_TO_STACK flags and only needs to be informed about refs required
+ * above and beyond those.
+ *
+ * The idea is that you mark the packet descriptors as required for
+ * injection and passage to the stack, you set UINET_PD_EXTRA_REFS if you
+ * want to tx-inject the packet into more that one interface or need
+ * additional refs for application use, then you call this routine with
+ * num_extra set to the number additional tx-injection interfaces above 1
+ * plus the number of application refs, and voila, the refs are correctly
+ * set.
+ */
+void
+uinet_pd_ref_acquire(struct uinet_pd_list *pkts, unsigned int num_extra)
+{
+	struct uinet_pd *pd;
+	unsigned int refs;
+	uint32_t i;
+
+	for (i = 0; i < pkts->num_descs; i++) {
+		pd = &pkts->descs[i];
+
+		if (pd->flags & UINET_PD_MGMT_ONLY)
+			continue;
+
+		/*
+		 * If the packet is to be both injected into the transmit
+		 * path of another interface and sent to the stack, one
+		 * extra ref is needed.  If neither or only one of those
+		 * actions is to be taken, no extra refs are needed.
+		 */
+		refs = ((pd->flags & (UINET_PD_INJECT|UINET_PD_TO_STACK)) ==
+			(UINET_PD_INJECT|UINET_PD_TO_STACK));
+
+		if (pd->flags & UINET_PD_EXTRA_REFS)
+			refs += num_extra;
+
+		/*
+		 * Only perform the increment if refs is non-zero to avoid
+		 * pulling packet descriptor context, and possibly external
+		 * refcount storage, into the cache unnecessarily.
+		 */
+		if (refs) {
+			pd->ctx->flags &= ~UINET_PD_CTX_SINGLE_REF;
+			*(pd->ctx->refcnt) += refs;
+		}
+	}
+}
+
+
+void
+uinet_pd_ref_release(struct uinet_pd_ctx *pdctx[], uint32_t n)
+{
+	uint32_t i;
+	struct uinet_pd_ctx *cur_pdctx;
+	struct uinet_pd_ctx *free_group[UINET_PD_FREE_BATCH_SIZE];
+	struct uinet_pd_pool_info *pool;
+	unsigned int cur_pool_id;
+	uint32_t free_group_count;
+
+	/*
+	 * The list of packet descriptor contexts to free will in general
+	 * contain packet descriptor contexts originating from different
+	 * pools and having different reference counts.  This implementation
+	 * will batch up sequential (not necessarily consecutive) packet
+	 * descriptor contexts in the list that are from the same pool and
+	 * are ready to be freed and will free them in a single operation.
+	 */
+
+	cur_pool_id = 0xffffffff;
+	free_group_count = 0;
+	for (i = 0; i < n; i++) {
+		cur_pdctx = pdctx[i];
+
+		/*
+		 * The test for UINET_PD_CTX_SINGLE_REF is first so that
+		 * when it is set, the potentially costly refcnt derefence
+		 * (cache miss) and atomic_fetchadd() (inter-cpu coherency
+		 * op) are avoided.
+		 */
+		if ((cur_pdctx->flags & UINET_PD_CTX_SINGLE_REF) ||
+		    (*(cur_pdctx->refcnt) == 1) ||
+		    (atomic_fetchadd_int(cur_pdctx->refcnt, -1) == 1)) {
+			if ((cur_pdctx->pool_id != cur_pool_id) ||
+			    (free_group_count == UINET_PD_FREE_BATCH_SIZE)) {
+				if (free_group_count) {
+					pool = uinet_pd_pool_get(cur_pool_id);
+					pool->free(free_group, free_group_count);
+					free_group_count = 0;
+				}
+				cur_pool_id = cur_pdctx->pool_id;
+			}
+			free_group[free_group_count++] = cur_pdctx;
+		}
+	}
+	if (free_group_count) {
+		pool = uinet_pd_pool_get(cur_pool_id);
+		pool->free(free_group, free_group_count);
+	}
+}
+
+
+void
+uinet_pd_deliver_to_stack(struct uinet_if *uif, struct uinet_pd_list *pkts)
+{
+	struct ifnet *ifp;
+	struct uinet_pd *pd;
+	struct uinet_pd_ctx *pdctx;
+	struct mbuf *m;
+	uint32_t i;
+
+	ifp = uif->ifp;
+	for (i = 0; i < pkts->num_descs; i++) {
+		pd = &pkts->descs[i];
+
+		if (pd->flags & UINET_PD_TO_STACK) {
+			pdctx = pd->ctx;
+			pdctx->flags &= ~UINET_PD_CTX_SINGLE_REF;  /* no telling how many refs the stack will add */
+			pdctx->flags |= UINET_PD_CTX_MBUF_USED;
+			pdctx->m_orig_len = pd->length;
+			m = pdctx->m;
+			m->m_pkthdr.len = m->m_len = pd->length;
+			m->m_pkthdr.rcvif = ifp;
+			ifp->if_input(ifp, m);
+		}
+	}
+}
+
+
+void
+uinet_pd_drop(struct uinet_pd_list *pkts)
+{
+	uint32_t i;
+	struct uinet_pd *pd;
+	struct uinet_pd_ctx *pdctx;
+	struct uinet_pd_ctx *free_group[UINET_PD_FREE_BATCH_SIZE];
+	struct uinet_pd_pool_info *pool;
+	unsigned int cur_pool_id;
+	uint32_t free_group_count;
+
+	/*
+	 * The list of packet descriptor contexts to free will in general
+	 * contain packet descriptor contexts originating from different
+	 * pools.  This implementation will batch up sequential (not
+	 * necessarily consecutive) packet descriptor contexts in the list
+	 * that are from the same pool and are marked for drop and will free
+	 * them in a single operation.
+	 */
+	pd = &pkts->descs[0];
+	cur_pool_id = 0xffffffff;
+	free_group_count = 0;
+	for (i = 0; i < pkts->num_descs; i++, pd++) {
+		if (pd->flags & UINET_PD_DROP) {
+			pdctx = pd->ctx;
+			if ((pdctx->pool_id != cur_pool_id) ||
+			    (free_group_count == UINET_PD_FREE_BATCH_SIZE)) {
+				if (free_group_count) {
+					pool = uinet_pd_pool_get(cur_pool_id);
+					pool->free(free_group, free_group_count);
+					free_group_count = 0;
+				}
+				cur_pool_id = pdctx->pool_id;
+			}
+			free_group[free_group_count++] = pdctx;
+		}
+	}
+	if (free_group_count) {
+		pool = uinet_pd_pool_get(cur_pool_id);
+		pool->free(free_group, free_group_count);
+	}
+}

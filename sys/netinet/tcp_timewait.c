@@ -212,38 +212,67 @@ tcp_twstart(struct tcpcb *tp)
 #ifdef PASSIVE_INET
 	int ispassive = inp->inp_flags2 & INP_PASSIVE;
 #endif
+#ifdef PROMISCUOUS_INET
+	int notimewait = tp->t_flags & TF_NO_TIMEWAIT;
+#else
+	int notimewait = 0;
+#endif
+	struct tcptw local_tw;
 
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);	/* tcp_tw_2msl_reset(). */
 	INP_WLOCK_ASSERT(inp);
 
-	if (V_nolocaltimewait) {
-		int error = 0;
+#ifdef PASSIVE_INET
+	notimewait = (notimewait || ispassive);
+#endif
+
+	if (V_nolocaltimewait && !notimewait) {
 #ifdef INET6
 		if (isipv6)
-			error = in6_localaddr(&inp->in6p_faddr);
+			notimewait = in6_localaddr(&inp->in6p_faddr);
 #endif
 #if defined(INET6) && defined(INET)
 		else
 #endif
 #ifdef INET
-			error = in_localip(inp->inp_faddr);
+			notimewait = in_localip(inp->inp_faddr);
 #endif
-		if (error) {
+	}
+
+	if (notimewait) {
+		/* XXX Under what circumstances would we enter timewait and
+		 * want to delay an ack? In this case, we are not going to
+		 * hang around in timewait, so if any ack was to be sent,
+		 * send it now.
+		 */
+#ifdef PASSIVE_INET
+		acknow = (tp->t_flags & (TF_ACKNOW|TF_DELACK)) && !ispassive;
+#else
+		acknow = tp->t_flags & (TF_ACKNOW|TF_DELACK);
+#endif
+		if (!acknow) {
 			tp = tcp_close(tp);
 			if (tp != NULL)
 				INP_WUNLOCK(inp);
 			return;
 		}
-	}
+		tw = &local_tw;
+	} else {
+		/*
+		 * XXX if TF_DELACK is set, should the timer be stopped and
+		 * the ack sent now?
+		 */
+		acknow = tp->t_flags & TF_ACKNOW;
 
-	tw = uma_zalloc(V_tcptw_zone, M_NOWAIT);
-	if (tw == NULL) {
-		tw = tcp_tw_2msl_scan(1);
+		tw = uma_zalloc(V_tcptw_zone, M_NOWAIT);
 		if (tw == NULL) {
-			tp = tcp_close(tp);
-			if (tp != NULL)
-				INP_WUNLOCK(inp);
-			return;
+			tw = tcp_tw_2msl_scan(1);
+			if (tw == NULL) {
+				tp = tcp_close(tp);
+				if (tp != NULL)
+					INP_WUNLOCK(inp);
+				return;
+			}
 		}
 	}
 	tw->tw_inpcb = inp;
@@ -280,7 +309,6 @@ tcp_twstart(struct tcpcb *tp)
  * be used for fin-wait-2 state also, then we may need
  * a ts_recent from the last segment.
  */
-	acknow = tp->t_flags & TF_ACKNOW;
 
 	/*
 	 * First, discard tcpcb state, which includes stopping its timers and
@@ -297,22 +325,17 @@ tcp_twstart(struct tcpcb *tp)
 	SOCK_LOCK(so);
 	tw->tw_so_options = so->so_options;
 	SOCK_UNLOCK(so);
-#ifdef PASSIVE_INET
-	if (!ispassive)
-#endif
 	if (acknow)
 		tcp_twrespond(tw, TH_ACK);
-	inp->inp_ppcb = tw;
-	inp->inp_flags |= INP_TIMEWAIT;
-	tcp_tw_2msl_reset(tw, 0);
-#ifdef PASSIVE_INET
-	/* XXX can we avoid entering timewait altogether for passive sockets? */
-	if (ispassive) {
+	if (notimewait) {
+		inp->inp_ppcb = NULL;
 		tcp_twclose(tw, 0);
-		/* inp is no longer */
 		return;
+	} else {
+		inp->inp_ppcb = tw;
+		inp->inp_flags |= INP_TIMEWAIT;
+		tcp_tw_2msl_reset(tw, 0);
 	}
-#endif
 
 	/*
 	 * If the inpcb owns the sole reference to the socket, then we can
@@ -320,7 +343,7 @@ tcp_twstart(struct tcpcb *tp)
 	 */
 	if (inp->inp_flags & INP_SOCKREF) {
 		KASSERT(so->so_state & SS_PROTOREF,
-		    ("tcp_twstart: !SS_PROTOREF"));
+			("tcp_twstart: !SS_PROTOREF"));
 		inp->inp_flags &= ~INP_SOCKREF;
 		INP_WUNLOCK(inp);
 		ACCEPT_LOCK();
@@ -470,6 +493,7 @@ tcp_twclose(struct tcptw *tw, int reuse)
 {
 	struct socket *so;
 	struct inpcb *inp;
+	int timewait_skipped;
 
 	/*
 	 * At this point, we are in one of two situations:
@@ -481,13 +505,16 @@ tcp_twclose(struct tcptw *tw, int reuse)
 	 *     notify the socket layer.
 	 */
 	inp = tw->tw_inpcb;
-	KASSERT((inp->inp_flags & INP_TIMEWAIT), ("tcp_twclose: !timewait"));
-	KASSERT(intotw(inp) == tw, ("tcp_twclose: inp_ppcb != tw"));
+	timewait_skipped = (intotw(inp) == NULL) && !(inp->inp_flags & INP_TIMEWAIT);
+	KASSERT(timewait_skipped ||
+		(inp->inp_flags & INP_TIMEWAIT), ("tcp_twclose: !timewait"));
+	KASSERT(timewait_skipped || (intotw(inp) == tw), ("tcp_twclose: inp_ppcb != tw"));
 	INP_INFO_WLOCK_ASSERT(&V_tcbinfo);	/* tcp_tw_2msl_stop(). */
 	INP_WLOCK_ASSERT(inp);
 
 	tw->tw_inpcb = NULL;
-	tcp_tw_2msl_stop(tw);
+	if (!timewait_skipped)
+		tcp_tw_2msl_stop(tw);
 	inp->inp_ppcb = NULL;
 	in_pcbdrop(inp);
 
@@ -526,7 +553,7 @@ tcp_twclose(struct tcptw *tw, int reuse)
 	TCPSTAT_INC(tcps_closed);
 	crfree(tw->tw_cred);
 	tw->tw_cred = NULL;
-	if (reuse)
+	if (reuse || timewait_skipped)
 		return;
 	uma_zfree(V_tcptw_zone, tw);
 }
@@ -623,9 +650,9 @@ tcp_twrespond(struct tcptw *tw, int flags)
 		m->m_pkthdr.csum_flags = CSUM_TCP;
 		th->th_sum = in_pseudo(ip->ip_src.s_addr, ip->ip_dst.s_addr,
 		    htons(sizeof(struct tcphdr) + optlen + IPPROTO_TCP));
-		ip->ip_len = m->m_pkthdr.len;
+		ip->ip_len = htons(m->m_pkthdr.len);
 		if (V_path_mtu_discovery)
-			ip->ip_off |= IP_DF;
+			ip->ip_off |= htons(IP_DF);
 		error = ip_output(m, inp->inp_options, NULL,
 		    ((tw->tw_so_options & SO_DONTROUTE) ? IP_ROUTETOIF : 0),
 		    NULL, inp);

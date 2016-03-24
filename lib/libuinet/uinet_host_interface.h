@@ -48,6 +48,20 @@
 #define UHI_O_TRUNC	0x0400
 #define UHI_O_EXCL	0x0800
 
+#define	UHI_S_IRWXU	0000700
+#define	UHI_S_IRUSR	0000400
+#define	UHI_S_IWUSR	0000200
+#define	UHI_S_IXUSR	0000100
+
+#define	UHI_S_IRWXG	0000070
+#define	UHI_S_IRGRP	0000040
+#define	UHI_S_IWGRP	0000020
+#define	UHI_S_IXGRP	0000010
+
+#define	UHI_S_IRWXO	0000007
+#define	UHI_S_IROTH	0000004
+#define	UHI_S_IWOTH	0000002
+#define	UHI_S_IXOTH	0000001
 
 struct uhi_pollfd {
 	int	fd;
@@ -84,10 +98,11 @@ struct uhi_thread_start_args {
 	void (*start_routine)(void *);
 	void *start_routine_arg;
 	void (*end_routine)(struct uhi_thread_start_args *);
+	void (*start_notify_routine)(void *);
+	void *start_notify_routine_arg;
+	int set_tls;
 	uhi_tls_key_t tls_key;
 	void *tls_data;
-	uhi_thread_t *host_thread_id;
-	unsigned char *oncpu;
 };
 
 typedef void (*uhi_thread_hook_t)(void *);
@@ -148,6 +163,7 @@ int   uhi_nanosleep(uint64_t nsecs);
 
 int   uhi_open(const char *path, int flags);
 int   uhi_close(int d);
+int   uhi_mkdir(const char *path, unsigned int mode);
 void *uhi_mmap(void *addr, uint64_t len, int prot, int flags, int fd, uint64_t offset);
 int   uhi_munmap(void *addr, uint64_t len);
 int   uhi_poll(struct uhi_pollfd *fds, unsigned int nfds, int timeout);
@@ -159,6 +175,7 @@ void  uhi_thread_exit(void) __attribute__((__noreturn__));
 int   uhi_thread_hook_add(int which, uhi_thread_hook_t hook, void *arg);
 void  uhi_thread_hook_remove(int which, int id);
 void  uhi_thread_run_hooks(int which);
+void  uhi_thread_set_name(const char *name);
 int   uhi_tls_key_create(uhi_tls_key_t *key, void (*destructor)(void *));
 int   uhi_tls_key_delete(uhi_tls_key_t key);
 void *uhi_tls_get(uhi_tls_key_t key);

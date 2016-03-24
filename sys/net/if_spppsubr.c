@@ -772,9 +772,9 @@ sppp_ifstart(struct ifnet *ifp)
 	struct sppp *sp = IFP2SP(ifp);
 
 	if (SPPP_LOCK_OWNED(sp)) {
-		if (callout_pending(&sp->ifstart_callout))
+		if (vnet_callout_pending(&sp->ifstart_callout))
 			return;
-		callout_reset(&sp->ifstart_callout, 1, sppp_ifstart_sched,
+		vnet_callout_reset(&sp->ifstart_callout, 1, sppp_ifstart_sched,
 		    (void *)sp); 
 	} else {
 		sp->if_start(ifp);
@@ -1040,8 +1040,8 @@ sppp_attach(struct ifnet *ifp)
 	mtx_init(&sp->mtx, "sppp", MTX_NETWORK_LOCK, MTX_DEF | MTX_RECURSE);
 	
 	/* Initialize keepalive handler. */
- 	callout_init(&sp->keepalive_callout, CALLOUT_MPSAFE);
-	callout_reset(&sp->keepalive_callout, hz * 10, sppp_keepalive,
+ 	vnet_callout_init(&sp->keepalive_callout, CALLOUT_MPSAFE);
+	vnet_callout_reset(&sp->keepalive_callout, hz * 10, sppp_keepalive,
  		    (void *)sp); 
 
 	ifp->if_mtu = PP_MTU;
@@ -1072,7 +1072,7 @@ sppp_attach(struct ifnet *ifp)
 #ifdef INET6
 	sp->confflags |= CONF_ENABLE_IPV6;
 #endif
- 	callout_init(&sp->ifstart_callout, CALLOUT_MPSAFE);
+ 	vnet_callout_init(&sp->ifstart_callout, CALLOUT_MPSAFE);
 	sp->if_start = ifp->if_start;
 	ifp->if_start = sppp_ifstart;
 	sp->pp_comp = malloc(sizeof(struct slcompress), M_TEMP, M_WAITOK);
@@ -1093,15 +1093,15 @@ sppp_detach(struct ifnet *ifp)
 	KASSERT(mtx_initialized(&sp->mtx), ("sppp mutex is not initialized"));
 
 	/* Stop keepalive handler. */
- 	if (!callout_drain(&sp->keepalive_callout))
-		callout_stop(&sp->keepalive_callout);
+ 	if (!vnet_callout_drain(&sp->keepalive_callout))
+		vnet_callout_stop(&sp->keepalive_callout);
 
 	for (i = 0; i < IDX_COUNT; i++) {
-		if (!callout_drain(&sp->ch[i]))
-			callout_stop(&sp->ch[i]);
+		if (!vnet_callout_drain(&sp->ch[i]))
+			vnet_callout_stop(&sp->ch[i]);
 	}
-	if (!callout_drain(&sp->pap_my_to_ch))
-		callout_stop(&sp->pap_my_to_ch);
+	if (!vnet_callout_drain(&sp->pap_my_to_ch))
+		vnet_callout_stop(&sp->pap_my_to_ch);
 	mtx_destroy(&sp->pp_cpq.ifq_mtx);
 	mtx_destroy(&sp->pp_fastq.ifq_mtx);
 	mtx_destroy(&sp->mtx);
@@ -2105,7 +2105,7 @@ sppp_to_event(const struct cp *cp, struct sppp *sp)
 		case STATE_STOPPING:
 			sppp_cp_send(sp, cp->proto, TERM_REQ,
 				     ++sp->pp_seq[cp->protoidx], 0, 0);
-			callout_reset(&sp->ch[cp->protoidx], sp->lcp.timeout,
+			vnet_callout_reset(&sp->ch[cp->protoidx], sp->lcp.timeout,
 				      cp->TO, (void *)sp);
 			break;
 		case STATE_REQ_SENT:
@@ -2116,7 +2116,7 @@ sppp_to_event(const struct cp *cp, struct sppp *sp)
 			break;
 		case STATE_ACK_SENT:
 			(cp->scr)(sp);
-			callout_reset(&sp->ch[cp->protoidx], sp->lcp.timeout,
+			vnet_callout_reset(&sp->ch[cp->protoidx], sp->lcp.timeout,
 				      cp->TO, (void *)sp);
 			break;
 		}
@@ -2134,7 +2134,7 @@ sppp_cp_change_state(const struct cp *cp, struct sppp *sp, int newstate)
 {
 	sp->state[cp->protoidx] = newstate;
 
-	callout_stop (&sp->ch[cp->protoidx]);
+	vnet_callout_stop (&sp->ch[cp->protoidx]);
 
 	switch (newstate) {
 	case STATE_INITIAL:
@@ -2148,7 +2148,7 @@ sppp_cp_change_state(const struct cp *cp, struct sppp *sp, int newstate)
 	case STATE_REQ_SENT:
 	case STATE_ACK_RCVD:
 	case STATE_ACK_SENT:
-		callout_reset(&sp->ch[cp->protoidx], sp->lcp.timeout,
+		vnet_callout_reset(&sp->ch[cp->protoidx], sp->lcp.timeout,
 			      cp->TO, (void *)sp);
 		break;
 	}
@@ -2194,7 +2194,7 @@ sppp_lcp_init(struct sppp *sp)
 	sp->lcp.max_terminate = 2;
 	sp->lcp.max_configure = 10;
 	sp->lcp.max_failure = 10;
- 	callout_init(&sp->ch[IDX_LCP], CALLOUT_MPSAFE);
+ 	vnet_callout_init(&sp->ch[IDX_LCP], CALLOUT_MPSAFE);
 }
 
 static void
@@ -2885,7 +2885,7 @@ sppp_ipcp_init(struct sppp *sp)
 	sp->fail_counter[IDX_IPCP] = 0;
 	sp->pp_seq[IDX_IPCP] = 0;
 	sp->pp_rseq[IDX_IPCP] = 0;
- 	callout_init(&sp->ch[IDX_IPCP], CALLOUT_MPSAFE);
+ 	vnet_callout_init(&sp->ch[IDX_IPCP], CALLOUT_MPSAFE);
 }
 
 static void
@@ -3444,7 +3444,7 @@ sppp_ipv6cp_init(struct sppp *sp)
 	sp->fail_counter[IDX_IPV6CP] = 0;
 	sp->pp_seq[IDX_IPV6CP] = 0;
 	sp->pp_rseq[IDX_IPV6CP] = 0;
- 	callout_init(&sp->ch[IDX_IPV6CP], CALLOUT_MPSAFE);
+ 	vnet_callout_init(&sp->ch[IDX_IPV6CP], CALLOUT_MPSAFE);
 }
 
 static void
@@ -4252,7 +4252,7 @@ sppp_chap_init(struct sppp *sp)
 	sp->fail_counter[IDX_CHAP] = 0;
 	sp->pp_seq[IDX_CHAP] = 0;
 	sp->pp_rseq[IDX_CHAP] = 0;
- 	callout_init(&sp->ch[IDX_CHAP], CALLOUT_MPSAFE);
+ 	vnet_callout_init(&sp->ch[IDX_CHAP], CALLOUT_MPSAFE);
 }
 
 static void
@@ -4337,7 +4337,7 @@ sppp_chap_tlu(struct sppp *sp)
 		 * a number between 300 and 810 seconds.
 		 */
 		i = 300 + ((unsigned)(random() & 0xff00) >> 7);
-		callout_reset(&sp->ch[IDX_CHAP], i * hz, chap.TO, (void *)sp);
+		vnet_callout_reset(&sp->ch[IDX_CHAP], i * hz, chap.TO, (void *)sp);
 	}
 
 	if (debug) {
@@ -4384,7 +4384,7 @@ sppp_chap_tld(struct sppp *sp)
 
 	if (debug)
 		log(LOG_DEBUG, SPP_FMT "chap tld\n", SPP_ARGS(ifp));
-	callout_stop(&sp->ch[IDX_CHAP]);
+	vnet_callout_stop(&sp->ch[IDX_CHAP]);
 	sp->lcp.protos &= ~(1 << IDX_CHAP);
 
 	lcp.Close(sp);
@@ -4512,7 +4512,7 @@ sppp_pap_input(struct sppp *sp, struct mbuf *m)
 
 	/* ack and nak are his authproto */
 	case PAP_ACK:
-		callout_stop(&sp->pap_my_to_ch);
+		vnet_callout_stop(&sp->pap_my_to_ch);
 		if (debug) {
 			log(LOG_DEBUG, SPP_FMT "pap success",
 			    SPP_ARGS(ifp));
@@ -4544,7 +4544,7 @@ sppp_pap_input(struct sppp *sp, struct mbuf *m)
 		break;
 
 	case PAP_NAK:
-		callout_stop (&sp->pap_my_to_ch);
+		vnet_callout_stop (&sp->pap_my_to_ch);
 		if (debug) {
 			log(LOG_INFO, SPP_FMT "pap failure",
 			    SPP_ARGS(ifp));
@@ -4583,8 +4583,8 @@ sppp_pap_init(struct sppp *sp)
 	sp->fail_counter[IDX_PAP] = 0;
 	sp->pp_seq[IDX_PAP] = 0;
 	sp->pp_rseq[IDX_PAP] = 0;
- 	callout_init(&sp->ch[IDX_PAP], CALLOUT_MPSAFE);
- 	callout_init(&sp->pap_my_to_ch, CALLOUT_MPSAFE);
+ 	vnet_callout_init(&sp->ch[IDX_PAP], CALLOUT_MPSAFE);
+ 	vnet_callout_init(&sp->pap_my_to_ch, CALLOUT_MPSAFE);
 }
 
 static void
@@ -4599,7 +4599,7 @@ sppp_pap_open(struct sppp *sp)
 	if (sp->myauth.proto == PPP_PAP) {
 		/* we are peer, send a request, and start a timer */
 		pap.scr(sp);
-		callout_reset(&sp->pap_my_to_ch, sp->lcp.timeout,
+		vnet_callout_reset(&sp->pap_my_to_ch, sp->lcp.timeout,
 			      sppp_pap_my_TO, (void *)sp);
 	}
 }
@@ -4710,8 +4710,8 @@ sppp_pap_tld(struct sppp *sp)
 
 	if (debug)
 		log(LOG_DEBUG, SPP_FMT "pap tld\n", SPP_ARGS(ifp));
-	callout_stop (&sp->ch[IDX_PAP]);
-	callout_stop (&sp->pap_my_to_ch);
+	vnet_callout_stop (&sp->ch[IDX_PAP]);
+	vnet_callout_stop (&sp->pap_my_to_ch);
 	sp->lcp.protos &= ~(1 << IDX_PAP);
 
 	lcp.Close(sp);
@@ -4883,7 +4883,7 @@ sppp_keepalive(void *dummy)
 out:
 	SPPP_UNLOCK(sp);
 	splx(s);
- 	callout_reset(&sp->keepalive_callout, hz * 10, sppp_keepalive,
+ 	vnet_callout_reset(&sp->keepalive_callout, hz * 10, sppp_keepalive,
 		      (void *)sp);
 }
 

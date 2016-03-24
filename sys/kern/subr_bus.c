@@ -329,6 +329,8 @@ device_sysctl_fini(device_t dev)
 	dev->sysctl_tree = NULL;
 }
 
+#ifndef UINET
+
 /*
  * /dev/devctl implementation
  */
@@ -637,6 +639,8 @@ devctl_notify(const char *system, const char *subsystem, const char *type,
 	devctl_notify_f(system, subsystem, type, data, M_NOWAIT);
 }
 
+#endif /* !UINET */
+
 /*
  * Common routine that tries to make sending messages as easy as possible.
  * We allocate memory for the data, copy strings into that, but do not
@@ -654,6 +658,9 @@ devctl_notify(const char *system, const char *subsystem, const char *type,
 static void
 devaddq(const char *type, const char *what, device_t dev)
 {
+#ifdef UINET
+	return;
+#else
 	char *data = NULL;
 	char *loc = NULL;
 	char *pnp = NULL;
@@ -696,6 +703,7 @@ bad:
 	free(loc, M_BUS);
 	free(data, M_BUS);
 	return;
+#endif
 }
 
 /*
@@ -733,6 +741,8 @@ devnomatch(device_t dev)
 {
 	devaddq("?", "", dev);
 }
+
+#ifndef UINET
 
 static int
 sysctl_devctl_disable(SYSCTL_HANDLER_ARGS)
@@ -787,6 +797,8 @@ sysctl_devctl_queue(SYSCTL_HANDLER_ARGS)
 }
 
 /* End of /dev/devctl code */
+
+#endif /* !UINET */
 
 static TAILQ_HEAD(,device)	bus_data_devices;
 static int bus_data_generation = 1;
@@ -4401,7 +4413,9 @@ root_bus_module_handler(module_t mod, int what, void* arg)
 		root_bus->driver = &root_driver;
 		root_bus->state = DS_ATTACHED;
 		root_devclass = devclass_find_internal("root", NULL, FALSE);
+#ifndef UINET
 		devinit();
+#endif
 		return (0);
 
 	case MOD_SHUTDOWN:

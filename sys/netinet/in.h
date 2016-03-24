@@ -484,6 +484,24 @@ __END_DECLS
 #define IP_SYNFILTER			90   /* syn_filter_optarg; attach/detach/query SYN filter */
 #define IP_SYNFILTER_RESULT		91   /* syn_filter_cbarg; deliver deferred filter result */
 
+/* Promiscuous INET outpu interface control */
+#define IP_TXIF				92   /* set index of interface to use for transmit */
+
+/* Packet copy control */
+#define IP_COPY_MODE			93   /* set copy mode for socket */
+#define IP_COPY_LIMIT			94   /* set max copy size */
+#define IP_COPY_IF			95   /* interface to copy to */
+
+#define IP_SERIALNO			96   /* flow serial number */
+
+/* Flags for IP_COPY_MODE */
+#define IP_COPY_MODE_OFF	0x00
+#define IP_COPY_MODE_MAYBE	0x01
+#define IP_COPY_MODE_ON		0x02
+#define IP_COPY_MODE_RX		0x04
+#define IP_COPY_MODE_TX		0x08
+#define IP_COPY_MODE_TXRX	(IP_COPY_MODE_TX|IP_COPY_MODE_RX)
+
 /*
  * Defaults and limits for options
  */
@@ -744,32 +762,6 @@ void	 in_ifdetach(struct ifnet *);
 #define	satosin(sa)	((struct sockaddr_in *)(sa))
 #define	sintosa(sin)	((struct sockaddr *)(sin))
 #define	ifatoia(ifa)	((struct in_ifaddr *)(ifa))
-
-/*
- * Historically, BSD keeps ip_len and ip_off in host format
- * when doing layer 3 processing, and this often requires
- * to translate the format back and forth.
- * To make the process explicit, we define a couple of macros
- * that also take into account the fact that at some point
- * we may want to keep those fields always in net format.
- */
-
-#if (BYTE_ORDER == BIG_ENDIAN) || defined(HAVE_NET_IPLEN)
-#define SET_NET_IPLEN(p)	do {} while (0)
-#define SET_HOST_IPLEN(p)	do {} while (0)
-#else
-#define SET_NET_IPLEN(p)	do {		\
-	struct ip *h_ip = (p);			\
-	h_ip->ip_len = htons(h_ip->ip_len);	\
-	h_ip->ip_off = htons(h_ip->ip_off);	\
-	} while (0)
-
-#define SET_HOST_IPLEN(p)	do {		\
-	struct ip *h_ip = (p);			\
-	h_ip->ip_len = ntohs(h_ip->ip_len);	\
-	h_ip->ip_off = ntohs(h_ip->ip_off);	\
-	} while (0)
-#endif /* !HAVE_NET_IPLEN */
 
 #endif /* _KERNEL */
 

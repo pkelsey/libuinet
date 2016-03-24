@@ -328,7 +328,8 @@ static int del_m6if_locked(mifi_t *);
 static int get_mif6_cnt(struct sioc_mif_req6 *);
 static int get_sg_cnt(struct sioc_sg_req6 *);
 
-static struct callout expire_upcalls_ch;
+static VNET_DEFINE(struct vnet_callout, expire_upcalls_ch);
+#define V_expire_upcalls_sh	VNET(expire_upcalls_ch)
 
 int X_ip6_mforward(struct ip6_hdr *, struct ifnet *, struct mbuf *);
 int X_ip6_mrouter_done(void);
@@ -551,9 +552,9 @@ ip6_mrouter_init(struct socket *so, int v, int cmd)
 
 	V_pim6 = 0;/* used for stubbing out/in pim stuff */
 
-	callout_init(&expire_upcalls_ch, 0);
-	callout_reset(&expire_upcalls_ch, EXPIRE_TIMEOUT,
-	    expire_upcalls, NULL);
+	vnet_callout_init(&V_expire_upcalls_ch, 0);
+	vnet_callout_reset(&V_expire_upcalls_ch, EXPIRE_TIMEOUT,
+	    expire_upcalls, curvnet);
 
 	MROUTER6_UNLOCK();
 
@@ -598,7 +599,7 @@ X_ip6_mrouter_done(void)
 
 	V_pim6 = 0; /* used to stub out/in pim specific code */
 
-	callout_stop(&expire_upcalls_ch);
+	vnet_callout_stop(&V_expire_upcalls_ch);
 
 	/*
 	 * Free all multicast forwarding cache entries.
@@ -1334,11 +1335,13 @@ X_ip6_mforward(struct ip6_hdr *ip6, struct ifnet *ifp, struct mbuf *m)
  * Call from the Slow Timeout mechanism, every half second.
  */
 static void
-expire_upcalls(void *unused)
+expire_upcalls(void *vnet)
 {
 	struct rtdetq *rte;
 	struct mf6c *mfc, **nptr;
 	int i;
+
+	CURVNET_SET(vnet);
 
 	MFC6_LOCK();
 	for (i = 0; i < MF6CTBLSIZ; i++) {
@@ -1385,8 +1388,9 @@ expire_upcalls(void *unused)
 		}
 	}
 	MFC6_UNLOCK();
-	callout_reset(&expire_upcalls_ch, EXPIRE_TIMEOUT,
-	    expire_upcalls, NULL);
+	vnet_callout_reset(&V_expire_upcalls_ch, EXPIRE_TIMEOUT,
+	    expire_upcalls, curvnet);
+	CURVNET_RESTORE();
 }
 
 /*

@@ -373,8 +373,6 @@ if_span_attach(struct uinet_if *uif)
 	sc->sc_ifp->if_transmit = if_span_transmit;
 	sc->sc_ifp->if_qflush = if_span_qflush;
 
-	sc->sc_ifp->if_fib = sc->uif->cdom;
-
 	/* Mutex protecting the span list */
 	mtx_init(&sc->sc_mtx, "if_span", NULL, MTX_DEF);
 

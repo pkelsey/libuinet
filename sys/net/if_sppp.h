@@ -156,9 +156,9 @@ struct sppp {
 #define CONF_ENABLE_IPV6  0x02	/* IPv6 administratively enabled */
 	time_t	pp_last_recv;	/* time last packet has been received */
 	time_t	pp_last_sent;	/* time last packet has been sent */
-	struct callout ch[IDX_COUNT];	/* per-proto and if callouts */
-	struct callout pap_my_to_ch;	/* PAP needs one more... */
-	struct callout keepalive_callout; /* keepalive callout */
+	struct vnet_callout ch[IDX_COUNT];	/* per-proto and if callouts */
+	struct vnet_callout pap_my_to_ch;	/* PAP needs one more... */
+	struct vnet_callout keepalive_callout; /* keepalive callout */
 	struct slcp lcp;		/* LCP params */
 	struct sipcp ipcp;		/* IPCP params */
 	struct sipcp ipv6cp;		/* IPv6CP params */
@@ -201,7 +201,7 @@ struct sppp {
 	struct mtx	mtx;
 	/* if_start () wrapper */
 	void	(*if_start) (struct ifnet *);
-	struct callout ifstart_callout; /* if_start () scheduler */
+	struct vnet_callout ifstart_callout; /* if_start () scheduler */
 };
 #define IFP2SP(ifp)	((struct sppp *)(ifp)->if_l2com)
 #define SP2IFP(sp)	((sp)->pp_ifp)

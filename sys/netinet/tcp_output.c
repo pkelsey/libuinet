@@ -175,7 +175,6 @@ tcp_output(struct tcpcb *tp)
 	int off, flags, error = 0;	/* Keep compiler happy */
 	struct mbuf *m;
 	struct ip *ip = NULL;
-	struct ipovly *ipov = NULL;
 	struct tcphdr *th;
 	u_char opt[TCP_MAXOLEN];
 	unsigned ipoptlen, optlen, hdrlen;
@@ -913,7 +912,6 @@ send:
 #endif /* INET6 */
 	{
 		ip = mtod(m, struct ip *);
-		ipov = (struct ipovly *)ip;
 		th = (struct tcphdr *)(ip + 1);
 		tcpip_fillheaders(tp->t_inpcb, ip, th);
 	}
@@ -1235,7 +1233,7 @@ timer:
 #endif
 #ifdef INET
     {
-	ip->ip_len = m->m_pkthdr.len;
+	ip->ip_len = htons(m->m_pkthdr.len);
 #ifdef INET6
 	if (tp->t_inpcb->inp_vflag & INP_IPV6PROTO)
 		ip->ip_ttl = in6_selecthlim(tp->t_inpcb, NULL);
@@ -1249,7 +1247,7 @@ timer:
 	 * NB: Don't set DF on small MTU/MSS to have a safe fallback.
 	 */
 	if (V_path_mtu_discovery && tp->t_maxopd > V_tcp_minmss)
-		ip->ip_off |= IP_DF;
+		ip->ip_off |= htons(IP_DF);
 
 	error = ip_output(m, tp->t_inpcb->inp_options, NULL,
 	    ((so->so_options & SO_DONTROUTE) ? IP_ROUTETOIF : 0), 0,
@@ -1479,7 +1477,7 @@ tcp_addoptions(struct tcpopt *to, u_char *optp)
 		case TOF_SACK:
 			{
 			int sackblks = 0;
-			struct sackblk *sack = (struct sackblk *)to->to_sacks;
+			const struct sackblk *sack = (const struct sackblk *)to->to_sacks;
 			tcp_seq sack_seq;
 
 			while (!optlen || optlen % 4 != 2) {

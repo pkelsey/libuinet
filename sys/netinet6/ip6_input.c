@@ -134,7 +134,7 @@ static struct netisr_handler ip6_nh = {
 	.nh_policy = NETISR_POLICY_FLOW,
 };
 
-VNET_DECLARE(struct callout, in6_tmpaddrtimer_ch);
+VNET_DECLARE(struct vnet_callout, in6_tmpaddrtimer_ch);
 #define	V_in6_tmpaddrtimer_ch		VNET(in6_tmpaddrtimer_ch)
 
 VNET_DEFINE(struct pfil_head, inet6_pfil_hook);
@@ -294,9 +294,9 @@ ip6proto_unregister(short ip6proto)
 void
 ip6_destroy()
 {
-
+	frag6_destroy();
 	nd6_destroy();
-	callout_drain(&V_in6_tmpaddrtimer_ch);
+	vnet_callout_drain(&V_in6_tmpaddrtimer_ch);
 }
 #endif
 
@@ -305,12 +305,12 @@ ip6_init2_vnet(const void *unused __unused)
 {
 
 	/* nd6_timer_init */
-	callout_init(&V_nd6_timer_ch, 0);
-	callout_reset(&V_nd6_timer_ch, hz, nd6_timer, curvnet);
+	vnet_callout_init(&V_nd6_timer_ch, 0);
+	vnet_callout_reset(&V_nd6_timer_ch, hz, nd6_timer, curvnet);
 
 	/* timer for regeneranation of temporary addresses randomize ID */
-	callout_init(&V_in6_tmpaddrtimer_ch, 0);
-	callout_reset(&V_in6_tmpaddrtimer_ch,
+	vnet_callout_init(&V_in6_tmpaddrtimer_ch, 0);
+	vnet_callout_reset(&V_in6_tmpaddrtimer_ch,
 		      (V_ip6_temp_preferred_lifetime - V_ip6_desync_factor -
 		       V_ip6_temp_regen_advance) * hz,
 		      in6_tmpaddrtimer, curvnet);

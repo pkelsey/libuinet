@@ -75,7 +75,7 @@ VNET_DEFINE(int, ip6_auto_linklocal) = IP6_AUTO_LINKLOCAL;
 VNET_DEFINE(int, ip6_auto_linklocal) = 1;	/* enabled by default */
 #endif
 
-VNET_DEFINE(struct callout, in6_tmpaddrtimer_ch);
+VNET_DEFINE(struct vnet_callout, in6_tmpaddrtimer_ch);
 #define	V_in6_tmpaddrtimer_ch		VNET(in6_tmpaddrtimer_ch)
 
 VNET_DECLARE(struct inpcbinfo, ripcbinfo);
@@ -911,7 +911,7 @@ in6_tmpaddrtimer(void *arg)
 	u_int8_t nullbuf[8];
 	struct ifnet *ifp;
 
-	callout_reset(&V_in6_tmpaddrtimer_ch,
+	vnet_callout_reset(&V_in6_tmpaddrtimer_ch,
 	    (V_ip6_temp_preferred_lifetime - V_ip6_desync_factor -
 	    V_ip6_temp_regen_advance) * hz, in6_tmpaddrtimer, curvnet);
 

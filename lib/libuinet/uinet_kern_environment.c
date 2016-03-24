@@ -55,6 +55,18 @@ static MALLOC_DEFINE(M_KENV, "kenv", "kernel environment");
 
 #define KENV_SIZE	512	/* Maximum number of environment strings */
 
+/* pointer to the static environment */
+char		*kern_envp; /* NULL */
+
+/* dynamic environment variables */
+char		**kenvp = &kern_envp; /* points to a pointer to NULL */
+struct mtx	kenv_lock;  /* does not need initialization - it will not be used as dynamic_kenv == 0 */
+
+/*
+ * No need to protect this with a mutex since SYSINITS are single threaded.
+ */
+int	dynamic_kenv = 0;
+
 
 void
 freeenv(char *env)

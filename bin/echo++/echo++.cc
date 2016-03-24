@@ -44,7 +44,6 @@
 class EchoServer {
 private:
 	ev::dynamic_loop &loop_;
-	unsigned int cdom_;
 	struct uinet_socket *listener_;
 	struct ev_uinet_ctx *soctx_;
 	ev::uinet watcher_;
@@ -78,7 +77,6 @@ public:
 
 struct interface_config {
 	char *ifname;
-	unsigned int cdom;
 	int thread_create_result;
 	pthread_t thread;
 	ev::dynamic_loop *loop;
@@ -213,7 +211,6 @@ err:
 EchoServer::EchoServer(ev::dynamic_loop &loop, struct server_config *cfg)
 	: loop_(loop),
 	  listener_(NULL),
-	  cdom_(cfg->interface->cdom),
 	  soctx_(NULL),
 	  watcher_(loop),
 	  verbose_(cfg->verbose)
@@ -229,7 +226,7 @@ EchoServer::EchoServer(ev::dynamic_loop &loop, struct server_config *cfg)
 		goto done;
 	}
 
-	error = uinet_socreate(UINET_PF_INET, &listener_, UINET_SOCK_STREAM, 0);
+	error = uinet_socreate(uinet_instance_default(), UINET_PF_INET, &listener_, UINET_SOCK_STREAM, 0);
 	if (0 != error) {
 		printf("Listen socket creation failed (%d)\n", error);
 		goto done;
@@ -241,7 +238,7 @@ EchoServer::EchoServer(ev::dynamic_loop &loop, struct server_config *cfg)
 		goto done;
 	}
 	
-	if ((error = uinet_make_socket_promiscuous(listener_, cdom_))) {
+	if ((error = uinet_make_socket_promiscuous(listener_, NULL))) {
 		printf("Failed to make listen socket promiscuous (%d)\n", error);
 		goto done;
 	}
@@ -328,7 +325,7 @@ void *interface_thread_start(void *arg)
 {
 	struct interface_config *cfg = (struct interface_config *)arg;
 
-	uinet_initialize_thread();
+	uinet_initialize_thread(NULL);
 
 	cfg->loop->run();
 
@@ -389,7 +386,6 @@ int main (int argc, char **argv)
 				return (1);
 			} else {
 				interfaces[num_interfaces].ifname = optarg;
-				interfaces[num_interfaces].cdom = num_interfaces + 1;
 				num_interfaces++;
 				interface_server_count = 0;
 			}
@@ -458,11 +454,11 @@ int main (int argc, char **argv)
 	uinet_install_sighandlers();
 
 	for (i = 0; i < num_interfaces; i++) {
-		error = uinet_ifcreate(UINET_IFTYPE_NETMAP, interfaces[i].ifname, interfaces[i].ifname, interfaces[i].cdom, 0, NULL);
+		error = uinet_ifcreate(uinet_instance_default(), UINET_IFTYPE_NETMAP, interfaces[i].ifname, interfaces[i].ifname, 0, NULL);
 		if (0 != error) {
 			printf("Failed to create interface %s (%d)\n", interfaces[i].ifname, error);
 		} else {
-			error = uinet_interface_up(interfaces[i].ifname, 1, 1);
+			error = uinet_interface_up(uinet_instance_default(), interfaces[i].ifname, 1, 1);
 			if (0 != error) {
 				printf("Failed to bring up interface %s (%d)\n", interfaces[i].ifname, error);
 			}

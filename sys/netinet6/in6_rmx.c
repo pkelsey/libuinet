@@ -283,7 +283,7 @@ in6_rtqkill(struct radix_node *rn, void *rock)
 
 #define RTQ_TIMEOUT	60*10	/* run no less than once every ten minutes */
 static VNET_DEFINE(int, rtq_timeout6) = RTQ_TIMEOUT;
-static VNET_DEFINE(struct callout, rtq_timer6);
+static VNET_DEFINE(struct vnet_callout, rtq_timer6);
 
 #define	V_rtq_timeout6			VNET(rtq_timeout6)
 #define	V_rtq_timer6			VNET(rtq_timer6)
@@ -347,7 +347,7 @@ in6_rtqtimo(void *rock)
 
 	atv.tv_usec = 0;
 	atv.tv_sec = V_rtq_timeout6;
-	callout_reset(&V_rtq_timer6, tvtohz(&atv), in6_rtqtimo, rock);
+	vnet_callout_reset(&V_rtq_timer6, tvtohz(&atv), in6_rtqtimo, rock);
 	CURVNET_RESTORE();
 }
 
@@ -358,7 +358,7 @@ struct mtuex_arg {
 	struct radix_node_head *rnh;
 	time_t nextstop;
 };
-static VNET_DEFINE(struct callout, rtq_mtutimer);
+static VNET_DEFINE(struct vnet_callout, rtq_mtutimer);
 #define	V_rtq_mtutimer			VNET(rtq_mtutimer)
 
 static int
@@ -413,7 +413,7 @@ in6_mtutimo(void *rock)
 
 	atv.tv_sec = MTUTIMO_DEFAULT;
 	atv.tv_usec = 0;
-	callout_reset(&V_rtq_mtutimer, tvtohz(&atv), in6_mtutimo, rock);
+	vnet_callout_reset(&V_rtq_mtutimer, tvtohz(&atv), in6_mtutimo, rock);
 	CURVNET_RESTORE();
 }
 
@@ -443,8 +443,8 @@ in6_inithead(void **head, int off)
 	rnh->rnh_matchaddr = in6_matroute;
 
 	if (V__in6_rt_was_here == 0) {
-		callout_init(&V_rtq_timer6, CALLOUT_MPSAFE);
-		callout_init(&V_rtq_mtutimer, CALLOUT_MPSAFE);
+		vnet_callout_init(&V_rtq_timer6, CALLOUT_MPSAFE);
+		vnet_callout_init(&V_rtq_mtutimer, CALLOUT_MPSAFE);
 		in6_rtqtimo(curvnet);	/* kick off timeout first time */
 		in6_mtutimo(curvnet);	/* kick off timeout first time */
 		V__in6_rt_was_here = 1;
@@ -458,8 +458,8 @@ int
 in6_detachhead(void **head, int off)
 {
 
-	callout_drain(&V_rtq_timer6);
-	callout_drain(&V_rtq_mtutimer);
+	vnet_callout_drain(&V_rtq_timer6);
+	vnet_callout_drain(&V_rtq_mtutimer);
 	return (1);
 }
 #endif

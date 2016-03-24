@@ -47,8 +47,8 @@ vnet_if_list_init(const void *unused __unused)
 }
 VNET_SYSINIT(vnet_if_list_init, SI_SUB_VNET, SI_ORDER_ANY, vnet_if_list_init, 0);
 
-struct uinet_if *
-uinet_iffind_byname(const char *ifname)
+static struct uinet_if *
+uinet_iffind_byname_internal(const char *ifname)
 {
 	struct uinet_if *uif;
 
@@ -66,24 +66,20 @@ uinet_iffind_byname(const char *ifname)
 }
 
 
-static struct uinet_if *
-uinet_iffind_bycdom(unsigned int cdom)
+uinet_if_t
+uinet_iffind_byname(uinet_instance_t uinst, const char *ifname)
 {
 	struct uinet_if *uif;
 
-	TAILQ_FOREACH(uif, &V_uinet_if_list, link) {
-		if (cdom == uif->cdom) {
-			return (uif);
-		}
-	}
+	CURVNET_SET(uinst->ui_vnet);
+	uif = uinet_iffind_byname_internal(ifname);
+	CURVNET_RESTORE();
 
-	return (NULL);
+	return (uif);
 }
 
-
 int
-uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configstr,
-	       const char *alias, unsigned int cdom, int cpu, uinet_if_t *uif)
+uinet_ifcreate(uinet_instance_t uinst, struct uinet_if_cfg *cfg, uinet_if_t *uif)
 {
 	struct uinet_if *new_uif;
 	int alias_len;
@@ -91,54 +87,62 @@ uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configst
 
 	CURVNET_SET(uinst->ui_vnet);
 
-	if (alias) {
-		alias_len = strlen(alias);
+	if (cfg->alias) {
+		alias_len = strlen(cfg->alias);
 		if (alias_len >= IF_NAMESIZE) {
 			error = EINVAL;
 			goto out;
 		}
 		
-		if ((alias_len > 0) && (NULL != uinet_iffind_byname(alias))) {
+		if ((alias_len > 0) && (NULL != uinet_iffind_byname_internal(cfg->alias))) {
 			error = EEXIST;
 			goto out;
 		}
 	}
 
-	/*
-	 * CDOM 0 is for non-promiscuous-inet interfaces and can contain
-	 * multiple interfaces.  All other CDOMs are for promiscuous-inet
-	 * interfaces and can only contain one interface.
-	 */
-	if ((cdom != 0) && (NULL != uinet_iffind_bycdom(cdom))) {
-		error = EEXIST;
-		goto out;
-	}
-
-	new_uif = malloc(sizeof(struct uinet_if), M_DEVBUF, M_WAITOK);
+	new_uif = malloc(sizeof(struct uinet_if), M_DEVBUF, M_WAITOK | M_ZERO);
 	if (NULL == new_uif) {
 		error = ENOMEM;
 		goto out;
 	}
 
-	new_uif->type = type;
+	new_uif->uinst = uinst;
+	new_uif->type = cfg->type;
 
-	if (configstr) {
-		new_uif->configstr = strdup(configstr, M_DEVBUF);
+	if (cfg->configstr) {
+		new_uif->configstr = strdup(cfg->configstr, M_DEVBUF);
 	} else {
 		new_uif->configstr = NULL;
 	}
 
-	if (alias) {
+	if (cfg->alias) {
 		/* copy guaranteed not to overflow the destinations due to above
 		 * checks against IF_NAMESIZE.
 		 */
-		strcpy(new_uif->alias, alias);
+		strcpy(new_uif->alias, cfg->alias);
 	} else {
 		new_uif->alias[0] = '\0';
 	}
-	new_uif->cpu = cpu;
-	new_uif->cdom = cdom;
+	new_uif->rx_cpu = cfg->rx_cpu;
+	new_uif->tx_cpu = cfg->tx_cpu;
+	new_uif->rx_batch_size = cfg->rx_batch_size;
+	new_uif->tx_inject_queue_len = cfg->tx_inject_queue_len;
+	new_uif->batch_event_handler = NULL;
+	new_uif->batch_event_handler_arg = NULL;
+	new_uif->first_look_handler = cfg->first_look_handler;
+	new_uif->first_look_handler_arg = cfg->first_look_handler_arg;
+	new_uif->timestamp_mode = cfg->timestamp_mode;
+	new_uif->type_cfg = cfg->type_cfg;
+	
 	new_uif->ifdata = NULL;
+
+	if (uinet_uifsts(new_uif)) {
+		new_uif->sts_evifctx = uinst->ui_sts.sts_if_created_cb(uinst->ui_sts_evinstctx, new_uif);
+		if (new_uif->sts_evifctx == NULL) {
+			error = ENXIO;
+			goto out;
+		}
+	}
 
 	switch (new_uif->type) {
 	case UINET_IFTYPE_NETMAP:
@@ -146,12 +150,6 @@ uinet_ifcreate(uinet_instance_t uinst, uinet_iftype_t type, const char *configst
 		break;
 	case UINET_IFTYPE_PCAP:
 		error = if_pcap_attach(new_uif);
-		break;
-	case UINET_IFTYPE_BRIDGE:
-		error = if_bridge_attach(new_uif);
-		break;
-	case UINET_IFTYPE_SPAN:
-		error = if_span_attach(new_uif);
 		break;
 	default:
 		printf("Error attaching interface with config %s: unknown interface type %d\n", new_uif->configstr, new_uif->type);
@@ -184,9 +182,12 @@ out:
 
 
 static int
-uinet_ifdestroy_internal(struct uinet_if *uif)
+uinet_ifdestroy_internal(struct uinet_instance *uinst, struct uinet_if *uif)
 {
 	int error;
+
+	if (uinet_uifsts(uif))
+		uinst->ui_sts.sts_if_destroyed_cb(uif->sts_evifctx);
 
 	switch (uif->type) {
 	case UINET_IFTYPE_NETMAP:
@@ -215,12 +216,12 @@ uinet_ifdestroy_internal(struct uinet_if *uif)
 int
 uinet_ifdestroy(uinet_if_t uif)
 {
+	struct uinet_instance *uinst = uif->uinst;
 	int error = EINVAL;
 
-	CURVNET_SET(uif->uinst->ui_vnet);
+	CURVNET_SET(uinst->ui_vnet);
 
-	if (NULL != uif)
-		error = uinet_ifdestroy_internal(uif);
+	error = uinet_ifdestroy_internal(uinst, uif);
 
 	CURVNET_RESTORE();
 
@@ -235,7 +236,7 @@ uinet_ifdestroy_all(struct uinet_instance *uinst)
 
 	CURVNET_SET(uinst->ui_vnet);
 	TAILQ_FOREACH_SAFE(uif, &V_uinet_if_list, link, tmp) {
-		uinet_ifdestroy_internal(uif);
+		uinet_ifdestroy_internal(uinst, uif);
 	}
 	CURVNET_RESTORE();
 }
@@ -248,9 +249,9 @@ uinet_ifdestroy_byname(uinet_instance_t uinst, const char *ifname)
 	int error = EINVAL;
 
 	CURVNET_SET(uinst->ui_vnet);
-	uif = uinet_iffind_byname(ifname);
+	uif = uinet_iffind_byname_internal(ifname);
 	if (uif)
-		error = uinet_ifdestroy_internal(uif);
+		error = uinet_ifdestroy_internal(uinst, uif);
 	CURVNET_RESTORE();
 
 	return (error);
@@ -271,18 +272,32 @@ uinet_ifgenericname(uinet_if_t uif)
 }
 
 
-int
-uinet_if_set_batch_event_handler(uinet_if_t uif,
-				 void (*handler)(void *arg, int event),
-				 void *arg)
+const char *
+uinet_iftypename(uinet_iftype_t type)
 {
-	int error = EINVAL;
+	const struct uinet_if_type_info *ti;
 
-	if (NULL != uif) {
-		uif->batch_event_handler = handler;
-		uif->batch_event_handler_arg = arg;
-		error = 0;
-	}
+	ti = uinet_if_get_type_info(type);
+	if (ti == NULL)
+		return ("<unknown>");
+	else
+		return ti->type_name;
+}
 
-	return (error);
+
+uinet_if_t
+uinet_ifnext(struct uinet_instance *uinst, uinet_if_t cur)
+{
+	uinet_if_t next;
+
+	CURVNET_SET(uinst->ui_vnet);
+
+	if ((cur == NULL) || (TAILQ_NEXT(cur, link) == NULL))
+		next = TAILQ_FIRST(&V_uinet_if_list);
+	else
+		next = TAILQ_NEXT(cur, link);
+
+	CURVNET_RESTORE();
+
+	return (next);
 }

@@ -2584,7 +2584,7 @@ fgetsock(struct thread *td, int fd, cap_rights_t rights, struct socket **spp,
 void
 fputsock(struct socket *so)
 {
-
+	CURVNET_SET(so->so_vnet);
 	ACCEPT_LOCK();
 #ifdef PASSIVE_INET
 	if (so->so_passive_peer)
@@ -2592,7 +2592,6 @@ fputsock(struct socket *so)
 	else
 #endif
 		SOCK_LOCK(so);
-	CURVNET_SET(so->so_vnet);
 	sorele(so);
 	CURVNET_RESTORE();
 }

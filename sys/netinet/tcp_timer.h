@@ -145,13 +145,13 @@ static const char *tcptimers[] =
 struct xtcp_timer;
 
 struct tcp_timer {
-	struct	callout tt_rexmt;	/* retransmit timer */
-	struct	callout tt_persist;	/* retransmit persistence */
-	struct	callout tt_keep;	/* keepalive */
-	struct	callout tt_2msl;	/* 2*msl TIME_WAIT timer */
-	struct	callout tt_delack;	/* delayed ACK timer */
+	struct	vnet_callout tt_rexmt;	/* retransmit timer */
+	struct	vnet_callout tt_persist;/* retransmit persistence */
+	struct	vnet_callout tt_keep;	/* keepalive */
+	struct	vnet_callout tt_2msl;	/* 2*msl TIME_WAIT timer */
+	struct	vnet_callout tt_delack;	/* delayed ACK timer */
 #ifdef PASSIVE_INET
-	struct	callout tt_reassdl;	/* reassmbly deadline timer */
+	struct	vnet_callout tt_reassdl;/* reassmbly deadline timer */
 #endif
 };
 #define TT_DELACK	0x01

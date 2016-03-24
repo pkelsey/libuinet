@@ -390,7 +390,7 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 			}
 
 			ifa = &ia->ia_ifa;
-			ifa_init(ifa);
+			ifa_init(ifa, ifp);
 			ifa->ifa_addr = (struct sockaddr *)&ia->ia_addr;
 			ifa->ifa_dstaddr = (struct sockaddr *)&ia->ia_dstaddr;
 			ifa->ifa_netmask = (struct sockaddr *)&ia->ia_sockmask;
@@ -401,7 +401,6 @@ in_control(struct socket *so, u_long cmd, caddr_t data, struct ifnet *ifp,
 				ia->ia_broadaddr.sin_len = sizeof(ia->ia_addr);
 				ia->ia_broadaddr.sin_family = AF_INET;
 			}
-			ia->ia_ifp = ifp;
 
 			ifa_ref(ifa);			/* if_addrhead */
 			IF_ADDR_WLOCK(ifp);
@@ -1332,7 +1331,7 @@ in_lltable_new(const struct sockaddr *l3addr, u_int flags)
 	if (lle == NULL)		/* NB: caller generates msg */
 		return NULL;
 
-	callout_init(&lle->base.la_timer, CALLOUT_MPSAFE);
+	vnet_callout_init(&lle->base.la_timer, CALLOUT_MPSAFE);
 	/*
 	 * For IPv4 this will trigger "arpresolve" to generate
 	 * an ARP request.
@@ -1386,7 +1385,7 @@ in_lltable_prefix_free(struct lltable *llt,
 			    ((flags & LLE_STATIC) || !(lle->la_flags & LLE_STATIC))) {
 				int canceled;
 
-				canceled = callout_drain(&lle->la_timer);
+				canceled = vnet_callout_drain(&lle->la_timer);
 				LLE_WLOCK(lle);
 				if (canceled)
 					LLE_REMREF(lle);

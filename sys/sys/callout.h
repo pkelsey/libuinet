@@ -66,6 +66,7 @@ void	_callout_init_lock(struct callout *, struct lock_object *, int);
 #define	callout_init_rw(c, rw, flags)					\
 	_callout_init_lock((c), ((rw) != NULL) ? &(rw)->lock_object :	\
 	   NULL, (flags))
+#define callout_msecs_remaining(c) (1000 * ((c)->c_time - ticks) / hz)
 #define	callout_pending(c)	((c)->c_flags & CALLOUT_PENDING)
 int	callout_reset_on(struct callout *, int, void (*)(void *), void *, int);
 #define	callout_reset(c, on_tick, fn, arg)				\

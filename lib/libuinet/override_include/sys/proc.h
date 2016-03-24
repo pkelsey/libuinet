@@ -27,18 +27,29 @@
 #define _UINET_SYS_PROC_H_
 
 #include "uinet_host_interface.h"
-
-struct thread;
+#include_next <sys/proc.h>
 
 struct uinet_thread {
-	struct thread *td;
+	/*
+	 * td must be the first member in this structure so that it can be
+	 * retrieved given a uinet_thread * without having the definition of
+	 * struct uinet_thread, otherwise there is a circular dependency
+	 * where sys/proc.h needs to know what a struct uinet_thread, but it
+	 * cannot as it defines struct thread, which is a part of struct
+	 * uinet_thread.
+	 */
+	struct thread td;
+	struct mtx lock;
+	struct cv cond;
 	/* other uinet thread local data goes here */
 };
 
+#define thread0 (*((struct thread *)uinet_thread0))
+
+extern struct uinet_thread *uinet_thread0;
 extern uhi_tls_key_t kthread_tls_key;
 
-#include_next <sys/proc.h>
-
+void uinet_thread_init(void);
 struct uinet_thread *uinet_thread_alloc(struct proc *p);
 void uinet_thread_free(struct uinet_thread *utd);
 

@@ -41,7 +41,7 @@
 #include <sys/types.h>
 #include <sys/mman.h>
 
-#include "uinet_internal.h"
+#include "uinet_api.h"
 #include "uinet_nv.h"
 #include "uinet_host_sysctl_api.h"
 #include "uinet_host_sysctl_api_priv.h"
@@ -467,7 +467,7 @@ uinet_host_sysctl_listener_thread(void *arg)
 	if (cfg) {
 		path = cfg->sysctl_sock_path;
 	}
-	uinet_initialize_thread();
+	uinet_initialize_thread("sysctl");
 
 	(void) unlink(path);
 

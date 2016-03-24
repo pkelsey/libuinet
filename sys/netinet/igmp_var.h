@@ -190,12 +190,12 @@ CTASSERT(sizeof(struct igmpstat) == 168);
  * The IGMP lock is only taken with IGMP. Currently it is system-wide.
  * VIMAGE: The lock could be pushed to per-VIMAGE granularity in future.
  */
-#define	IGMP_LOCK_INIT()	mtx_init(&igmp_mtx, "igmp_mtx", NULL, MTX_DEF)
-#define	IGMP_LOCK_DESTROY()	mtx_destroy(&igmp_mtx)
-#define	IGMP_LOCK()		mtx_lock(&igmp_mtx)
-#define	IGMP_LOCK_ASSERT()	mtx_assert(&igmp_mtx, MA_OWNED)
-#define	IGMP_UNLOCK()		mtx_unlock(&igmp_mtx)
-#define	IGMP_UNLOCK_ASSERT()	mtx_assert(&igmp_mtx, MA_NOTOWNED)
+#define	IGMP_LOCK_INIT()	VNET_MTX_INIT(&V_igmp_mtx, "igmp_mtx", NULL, MTX_DEF)
+#define	IGMP_LOCK_DESTROY()	VNET_MTX_DESTROY(&V_igmp_mtx)
+#define	IGMP_LOCK()		VNET_MTX_LOCK(&V_igmp_mtx)
+#define	IGMP_LOCK_ASSERT()	VNET_MTX_ASSERT(&V_igmp_mtx, MA_OWNED)
+#define	IGMP_UNLOCK()		VNET_MTX_UNLOCK(&V_igmp_mtx)
+#define	IGMP_UNLOCK_ASSERT()	VNET_MTX_ASSERT(&V_igmp_mtx, MA_NOTOWNED)
 
 struct igmp_ifinfo;
 

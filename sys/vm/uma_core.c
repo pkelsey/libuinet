@@ -196,7 +196,11 @@ static struct callout uma_callout;
 /* Thread local storage key for per-thread cache state */
 static uhi_tls_key_t uma_tls_key;
 
+#ifdef HAS_NATIVE_TLS
+static __thread struct uma_tls curthread_uma_tls;
+#else
 static MALLOC_DEFINE(M_UMATLS, "UMATls", "UMA Per-thread State");
+#endif
 
 static TAILQ_HEAD(,uma_tls) uma_tls_list; /* List of per-thread uma state blocks */
 static int uma_tls_list_busy;
@@ -1624,7 +1628,11 @@ uma_thread_start_hook(void *arg)
 	struct uma_tls *tls;
 	int i;
 
+#ifdef HAS_NATIVE_TLS
+	tls = &curthread_uma_tls;
+#else
 	tls = malloc(sizeof(struct uma_tls), M_UMATLS, M_ZERO|M_WAITOK);
+#endif
 	for (i = 0; i < UMA_CACHE_TABLE_SLOTS; i++)
 		tls->ut_caches[i].uc_cacheid = uhi_thread_self_id();
 	uhi_tls_set(uma_tls_key, tls);
@@ -1674,7 +1682,9 @@ uma_tls_destructor(void *arg)
 
 	uhi_tls_set(uma_tls_key, NULL);
 
+#ifndef HAS_NATIVE_TLS
 	free(tls, M_UMATLS);
+#endif
 }
 #endif
 

@@ -55,6 +55,7 @@ struct	icmpstat {
 	u_long	icps_bmcasttstamp;	/* b/mcast tstamp requests dropped */
 	u_long	icps_badaddr;		/* bad return address */
 	u_long	icps_noroute;		/* no route back */
+	u_long	icps_nomem;		/* could not allocate response mbuf */
 };
 
 #ifdef _KERNEL

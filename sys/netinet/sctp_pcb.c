@@ -6997,37 +6997,26 @@ sctp_drain()
 	 * is LOW on MBUF's and needs help. This is where reneging will
 	 * occur. We really hope this does NOT happen!
 	 */
-	VNET_ITERATOR_DECL(vnet_iter);
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		struct sctp_inpcb *inp;
-		struct sctp_tcb *stcb;
+	struct sctp_inpcb *inp;
+	struct sctp_tcb *stcb;
 
-		SCTP_STAT_INCR(sctps_protocol_drain_calls);
-		if (SCTP_BASE_SYSCTL(sctp_do_drain) == 0) {
-#ifdef VIMAGE
-			continue;
-#else
-			return;
-#endif
-		}
-		SCTP_INP_INFO_RLOCK();
-		LIST_FOREACH(inp, &SCTP_BASE_INFO(listhead), sctp_list) {
-			/* For each endpoint */
-			SCTP_INP_RLOCK(inp);
-			LIST_FOREACH(stcb, &inp->sctp_asoc_list, sctp_tcblist) {
-				/* For each association */
-				SCTP_TCB_LOCK(stcb);
-				sctp_drain_mbufs(stcb);
-				SCTP_TCB_UNLOCK(stcb);
-			}
-			SCTP_INP_RUNLOCK(inp);
-		}
-		SCTP_INP_INFO_RUNLOCK();
-		CURVNET_RESTORE();
+	SCTP_STAT_INCR(sctps_protocol_drain_calls);
+	if (SCTP_BASE_SYSCTL(sctp_do_drain) == 0) {
+		return;
 	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
+	SCTP_INP_INFO_RLOCK();
+	LIST_FOREACH(inp, &SCTP_BASE_INFO(listhead), sctp_list) {
+		/* For each endpoint */
+		SCTP_INP_RLOCK(inp);
+		LIST_FOREACH(stcb, &inp->sctp_asoc_list, sctp_tcblist) {
+			/* For each association */
+			SCTP_TCB_LOCK(stcb);
+			sctp_drain_mbufs(stcb);
+			SCTP_TCB_UNLOCK(stcb);
+		}
+		SCTP_INP_RUNLOCK(inp);
+	}
+	SCTP_INP_INFO_RUNLOCK();
 }
 
 /*

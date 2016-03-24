@@ -1,8 +1,8 @@
 /*-
  * Copyright (c) 2010 Kip Macy
  * All rights reserved.
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
-
+ * Copyright (c) 2013-2015 Patrick Kelsey. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -45,12 +45,15 @@
 #include <vm/uma.h>
 #include <vm/uma_int.h>
 
+#if defined(__amd64__) || defined(__i386__)
+#include <machine/cpufunc.h>
+#endif
+
 #include "uinet_internal.h"
 #include "uinet_host_interface.h"
+#include "uinet_if_netmap.h"
 
 
-pid_t     getpid(void);
-char *strndup(const char *str, size_t len);
 unsigned int     sleep(unsigned int seconds);
 
 extern void mi_startup(void);
@@ -67,19 +70,84 @@ pthread_mutex_t init_lock;
 pthread_cond_t init_cond;
 #endif
 
+char static_hints[] = "";
+int hintmode = 0;
+
 static struct thread *shutdown_helper_thread;
 static struct thread *at_least_one_sighandling_thread;
 static struct uhi_msg shutdown_helper_msg;
 struct uinet_instance uinst0;
+uint64_t global_timestamp_counter;
+uint32_t epoch_number;
+uint32_t instance_count;
+
+unsigned int uinet_hz;
+
+#if defined(__amd64__) || defined(__i386__)
+unsigned int cpu_feature;
+unsigned int cpu_feature2;
+#endif
+
+
+static unsigned int
+roundup_nearest_power_of_2(unsigned int n)
+{
+	unsigned int shift;
+
+	if (powerof2(n))
+		return (n);
+
+	shift = 0;
+	while (n != 1) {
+		n >>= 1;
+		shift++;
+	}
+
+	return (1 << shift);
+}
+
 
 int
-uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_cfg *inst_cfg)
+uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 {
 	struct thread *td;
 	char tmpbuf[32];
 	int boot_pages;
-	int num_hash_buckets;
 	caddr_t v;
+	struct uinet_global_cfg default_cfg;
+	unsigned int ncpus;
+	unsigned int num_hash_buckets;
+
+#if defined(__amd64__) || defined(__i386__)
+	unsigned int regs[4];
+
+	do_cpuid(1, regs);
+	cpu_feature = regs[3];
+	cpu_feature2 = regs[2];
+#endif
+
+uinet_hz = HZ;
+
+	if (cfg == NULL) {
+		uinet_default_cfg(&default_cfg, UINET_GLOBAL_CFG_MEDIUM);
+		cfg = &default_cfg;
+	}
+
+	epoch_number = cfg->epoch_number;
+	
+#if defined(VIMAGE_STS) || defined(VIMAGE_STS_ONLY)
+	if (inst_cfg) {
+		uinet_instance_init_vnet_sts(&vnet0_sts, inst_cfg);
+	}
+#endif
+
+	printf("uinet starting\n");
+	printf("requested configuration:\n");
+	uinet_print_cfg(cfg);
+
+	if_netmap_num_extra_bufs = cfg->netmap_extra_bufs;
+
+	ncpus = cfg->ncpus;
 
 	if (ncpus > MAXCPU) {
 		printf("Limiting number of CPUs to %u\n", MAXCPU);
@@ -89,9 +157,10 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_c
 		ncpus = 1;
 	}
 
-	printf("uinet starting: cpus=%u, nmbclusters=%u\n", ncpus, nmbclusters);
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->kern.ipc.maxsockets);
+	setenv("kern.ipc.maxsockets", tmpbuf);
 
-	snprintf(tmpbuf, sizeof(tmpbuf), "%u", nmbclusters);
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->kern.ipc.nmbclusters);
 	setenv("kern.ipc.nmbclusters", tmpbuf);
 
 	/* The env var kern.ncallout will get read in proc0_init(), but
@@ -103,18 +172,17 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_c
 	snprintf(tmpbuf, sizeof(tmpbuf), "%u", ncallout);
 	setenv("kern.ncallout", tmpbuf);
 
-	/* Assuming maxsockets will be set to nmbclusters, the following
-	 * sets the TCP tcbhash size so that perfectly uniform hashing would
-	 * result in a maximum bucket depth of about 16.
-	 */
-	num_hash_buckets = 1;
-	while (num_hash_buckets < nmbclusters / 16)
-		num_hash_buckets <<= 1;
-	snprintf(tmpbuf, sizeof(tmpbuf), "%u", num_hash_buckets);	
-	setenv("net.inet.tcp.tcbhashsize", tmpbuf);
-
-	snprintf(tmpbuf, sizeof(tmpbuf), "%u", 2048);
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", roundup_nearest_power_of_2(cfg->net.inet.tcp.syncache.hashsize));
 	setenv("net.inet.tcp.syncache.hashsize", tmpbuf);
+
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->net.inet.tcp.syncache.bucketlimit);
+	setenv("net.inet.tcp.syncache.bucketlimit", tmpbuf);
+
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", cfg->net.inet.tcp.syncache.cachelimit);
+	setenv("net.inet.tcp.syncache.cachelimit", tmpbuf);
+
+	snprintf(tmpbuf, sizeof(tmpbuf), "%u", roundup_nearest_power_of_2(cfg->net.inet.tcp.tcbhashsize));	
+	setenv("net.inet.tcp.tcbhashsize", tmpbuf);
 
 	boot_pages = 16;  /* number of pages made available for uma to bootstrap itself */
 
@@ -131,6 +199,7 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_c
 	kern_timeout_callwheel_alloc(malloc(round_page((vm_offset_t)v), M_DEVBUF, M_ZERO));
         kern_timeout_callwheel_init();
 
+	uinet_thread_init();
 	uinet_init_thread0();
 
         uma_startup(malloc(boot_pages*PAGE_SIZE, M_DEVBUF, M_ZERO), boot_pages);
@@ -156,6 +225,9 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_c
 	 */
 	sleep(1);
 
+	kernel_sysctlbyname(curthread, "kern.ipc.somaxconn", NULL, NULL,
+			    &cfg->kern.ipc.somaxconn, sizeof(cfg->kern.ipc.somaxconn), NULL, 0);
+
 	uinet_instance_init(&uinst0, vnet0, inst_cfg);
 
 	if (uhi_msg_init(&shutdown_helper_msg, 1, 0) != 0)
@@ -170,13 +242,6 @@ uinet_init(unsigned int ncpus, unsigned int nmbclusters, struct uinet_instance_c
 	if (kthread_add(one_sighandling_thread, NULL, NULL, &at_least_one_sighandling_thread, 0, 0, "one_sighandler"))
 		printf("Failed to create at least one signal handling thread\n");
 	uhi_mask_all_signals();
-
-#if 0
-	printf("maxusers=%d\n", maxusers);
-	printf("maxfiles=%d\n", maxfiles);
-	printf("maxsockets=%d\n", maxsockets);
-	printf("nmbclusters=%d\n", nmbclusters);
-#endif
 
 	return (0);
 }

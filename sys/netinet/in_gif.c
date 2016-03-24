@@ -111,6 +111,18 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 		return EAFNOSUPPORT;
 	}
 
+#ifdef NO_MBUF_TURNAROUND
+	{
+		struct mbuf *m0;
+
+		m0 = m_dup(m, M_NOWAIT);
+		m_freem(m);
+		if (m0 == NULL)
+			return ENOBUFS;
+		m = m0;
+	}
+#endif
+
 	switch (family) {
 #ifdef INET
 	case AF_INET:
@@ -192,7 +204,7 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 	iphdr.ip_p = proto;
 	/* version will be set in ip_output() */
 	iphdr.ip_ttl = V_ip_gif_ttl;
-	iphdr.ip_len = m->m_pkthdr.len + sizeof(struct ip);
+	iphdr.ip_len = htons(m->m_pkthdr.len + sizeof(struct ip));
 	ip_ecn_ingress((ifp->if_flags & IFF_LINK1) ? ECN_ALLOWED : ECN_NOCARE,
 		       &iphdr.ip_tos, &tos);
 

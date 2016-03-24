@@ -89,6 +89,9 @@ in_cksum_update(struct ip *ip)
 	__tmpsum = (int)ntohs(ip->ip_sum) + 256;
 	ip->ip_sum = htons(__tmpsum + (__tmpsum >> 16));
 }
+
+uint16_t in_cksum_pseudo_header(struct mbuf *m, int plen, int off0,
+				uint32_t src, uint32_t dst, uint8_t protonum);
 #endif
 
 static __inline u_short
@@ -131,6 +134,8 @@ in_pseudo(u_int sum, u_int b, u_int c)
 		ip->ip_sum = htons(__tmpsum + (__tmpsum >> 16)); \
 	} while(0)
 
+uint16_t in_cksum_pseudo_header(struct mbuf *m, int plen, int off0,
+				uint32_t src, uint32_t dst, uint8_t protonum);
 #endif
 #endif
 

@@ -132,7 +132,7 @@ tcp_usr_attach(struct socket *so, int proto, struct thread *td)
 	struct tcpcb *tp = NULL;
 	int error;
 	TCPDEBUG0;
-
+	
 	inp = sotoinpcb(so);
 	KASSERT(inp == NULL, ("tcp_usr_attach: inp != NULL"));
 	TCPDEBUG1();
@@ -146,6 +146,7 @@ tcp_usr_attach(struct socket *so, int proto, struct thread *td)
 
 	inp = sotoinpcb(so);
 	tp = intotcpcb(inp);
+
 out:
 	TCPDEBUG2(PRU_ATTACH);
 	return error;
@@ -1538,6 +1539,38 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 			break;
 #endif
 
+#ifdef PROMISCUOUS_INET
+		case TCP_TRIVIAL_ISN:
+			INP_WUNLOCK(inp);
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+			    sizeof optval);
+			if (error)
+				return (error);
+
+			INP_WLOCK_RECHECK(inp);
+			if (optval > 0)
+				tp->t_flags |= TF_TRIVIAL_ISN;
+			else
+				tp->t_flags &= ~TF_TRIVIAL_ISN;
+			INP_WUNLOCK(inp);
+			break;
+
+		case TCP_NOTIMEWAIT:
+			INP_WUNLOCK(inp);
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+			    sizeof optval);
+			if (error)
+				return (error);
+
+			INP_WLOCK_RECHECK(inp);
+			if (optval > 0)
+				tp->t_flags |= TF_NO_TIMEWAIT;
+			else
+				tp->t_flags &= ~TF_NO_TIMEWAIT;
+			INP_WUNLOCK(inp);
+			break;
+#endif
+
 		case TCP_KEEPCNT:
 			INP_WUNLOCK(inp);
 			error = sooptcopyin(sopt, &ui, sizeof(ui), sizeof(ui));
@@ -1596,6 +1629,19 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 			INP_WUNLOCK(inp);
 			error = sooptcopyout(sopt, &ti, sizeof ti);
 			break;
+#ifdef PROMISCUOUS_INET
+		case TCP_TRIVIAL_ISN:
+			optval = (tp->t_flags & TF_TRIVIAL_ISN) ? 1 : 0;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof optval);
+			break;
+		case TCP_NOTIMEWAIT:
+			optval = (tp->t_flags & TF_NO_TIMEWAIT) ? 1 : 0;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof optval);
+			break;
+#endif
+
 		case TCP_CONGESTION:
 			bzero(buf, sizeof(buf));
 			strlcpy(buf, CC_ALGO(tp)->name, TCP_CA_NAME_MAX);
@@ -1636,6 +1682,9 @@ tcp_attach(struct socket *so)
 	struct tcpcb *tp;
 	struct inpcb *inp;
 	int error;
+#ifdef INET_COPY
+	struct inpcb *head_inp = NULL;
+#endif
 
 	if (so->so_snd.sb_hiwat == 0 || so->so_rcv.sb_hiwat == 0) {
 		error = soreserve(so, tcp_sendspace, tcp_recvspace);
@@ -1659,6 +1708,20 @@ tcp_attach(struct socket *so)
 	else
 #endif
 	inp->inp_vflag |= INP_IPV4;
+#ifdef INET_COPY
+	if (so->so_head) {
+		/*
+		 * Sockets created passively inherit their copy settings
+		 * from the listen socket.  The listen socket inp lock is
+		 * already held, having been acquired in tcp_input() on the
+		 * way here.
+		 */
+		head_inp = sotoinpcb(so->so_head);
+		inp->inp_copy_mode = head_inp->inp_copy_mode;
+		inp->inp_copy_limit = head_inp->inp_copy_limit;
+		inp->inp_copyif = head_inp->inp_copyif;
+	}
+#endif
 	tp = tcp_newtcpcb(inp);
 	if (tp == NULL) {
 		in_pcbdetach(inp);
@@ -1904,8 +1967,8 @@ db_print_tflags(u_int t_flags)
 		db_printf("%sTF_MORETOCOME", comma ? ", " : "");
 		comma = 1;
 	}
-	if (t_flags & TF_LQ_OVERFLOW) {
-		db_printf("%sTF_LQ_OVERFLOW", comma ? ", " : "");
+	if (t_flags & TF_NO_TIMEWAIT) {
+		db_printf("%sTF_NO_TIMEWAIT", comma ? ", " : "");
 		comma = 1;
 	}
 	if (t_flags & TF_LASTIDLE) {

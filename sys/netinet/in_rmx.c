@@ -241,7 +241,7 @@ in_rtqkill(struct radix_node *rn, void *rock)
 
 #define RTQ_TIMEOUT	60*10	/* run no less than once every ten minutes */
 static VNET_DEFINE(int, rtq_timeout) = RTQ_TIMEOUT;
-static VNET_DEFINE(struct callout, rtq_timer);
+static VNET_DEFINE(struct vnet_callout, rtq_timer);
 
 #define	V_rtq_timeout		VNET(rtq_timeout)
 #define	V_rtq_timer		VNET(rtq_timer)
@@ -263,7 +263,7 @@ in_rtqtimo(void *rock)
 	}
 	atv.tv_usec = 0;
 	atv.tv_sec = V_rtq_timeout;
-	callout_reset(&V_rtq_timer, tvtohz(&atv), in_rtqtimo, rock);
+	vnet_callout_reset(&V_rtq_timer, tvtohz(&atv), in_rtqtimo, rock);
 	CURVNET_RESTORE();
 }
 
@@ -315,29 +315,21 @@ in_rtqtimo_one(void *rock)
 void
 in_rtqdrain(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
 	struct radix_node_head *rnh;
 	struct rtqk_arg arg;
 	int 	fibnum;
 
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-
-		for ( fibnum = 0; fibnum < rt_numfibs; fibnum++) {
-			rnh = rt_tables_get_rnh(fibnum, AF_INET);
-			arg.found = arg.killed = 0;
-			arg.rnh = rnh;
-			arg.nextstop = 0;
-			arg.draining = 1;
-			arg.updating = 0;
-			RADIX_NODE_HEAD_LOCK(rnh);
-			rnh->rnh_walktree(rnh, in_rtqkill, &arg);
-			RADIX_NODE_HEAD_UNLOCK(rnh);
-		}
-		CURVNET_RESTORE();
+	for ( fibnum = 0; fibnum < rt_numfibs; fibnum++) {
+		rnh = rt_tables_get_rnh(fibnum, AF_INET);
+		arg.found = arg.killed = 0;
+		arg.rnh = rnh;
+		arg.nextstop = 0;
+		arg.draining = 1;
+		arg.updating = 0;
+		RADIX_NODE_HEAD_LOCK(rnh);
+		rnh->rnh_walktree(rnh, in_rtqkill, &arg);
+		RADIX_NODE_HEAD_UNLOCK(rnh);
 	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
 }
 
 static int _in_rt_was_here;
@@ -368,8 +360,8 @@ in_inithead(void **head, int off)
 	rnh->rnh_matchaddr = in_matroute;
 	rnh->rnh_close = in_clsroute;
 	if (_in_rt_was_here == 0 ) {
-		callout_init(&V_rtq_timer, CALLOUT_MPSAFE);
-		callout_reset(&V_rtq_timer, 1, in_rtqtimo, curvnet);
+		vnet_callout_init(&V_rtq_timer, CALLOUT_MPSAFE);
+		vnet_callout_reset(&V_rtq_timer, 1, in_rtqtimo, curvnet);
 		_in_rt_was_here = 1;
 	}
 	return 1;
@@ -380,7 +372,7 @@ int
 in_detachhead(void **head, int off)
 {
 
-	callout_drain(&V_rtq_timer);
+	vnet_callout_drain(&V_rtq_timer);
 	return (1);
 }
 #endif

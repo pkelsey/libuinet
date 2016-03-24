@@ -33,6 +33,7 @@
 #include <sys/lock.h>		/* XXX */
 #include <sys/mutex.h>		/* XXX */
 #include <sys/event.h>		/* XXX */
+#include <net/vnet.h>
 #endif
 
 #ifdef _KERNEL_OPT
@@ -53,6 +54,7 @@ struct	ifaltq {
 	int	ifq_drops;
 #ifdef __FreeBSD__
 	struct	mtx ifq_mtx;
+	struct	vnet *ifq_vnet;
 #endif
 
 	/* driver owned queue (used for bulk dequeue and prepend) UNLOCKED */

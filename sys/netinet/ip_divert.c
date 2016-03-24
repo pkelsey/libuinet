@@ -210,17 +210,13 @@ divert_packet(struct mbuf *m, int incoming)
 
 	/* Delayed checksums are currently not compatible with divert. */
 	if (m->m_pkthdr.csum_flags & CSUM_DELAY_DATA) {
-		ip->ip_len = ntohs(ip->ip_len);
 		in_delayed_cksum(m);
 		m->m_pkthdr.csum_flags &= ~CSUM_DELAY_DATA;
-		ip->ip_len = htons(ip->ip_len);
 	}
 #ifdef SCTP
 	if (m->m_pkthdr.csum_flags & CSUM_SCTP) {
-		ip->ip_len = ntohs(ip->ip_len);
 		sctp_delayed_cksum(m, (uint32_t)(ip->ip_hl << 2));
 		m->m_pkthdr.csum_flags &= ~CSUM_SCTP;
-		ip->ip_len = htons(ip->ip_len);
 	}
 #endif
 	bzero(&divsrc, sizeof(divsrc));
@@ -393,9 +389,6 @@ div_output(struct socket *so, struct mbuf *m, struct sockaddr_in *sin,
 				goto cantsend;
 			}
 
-			/* Convert fields to host order for ip_output() */
-			ip->ip_len = ntohs(ip->ip_len);
-			ip->ip_off = ntohs(ip->ip_off);
 			break;
 #ifdef INET6
 		case IPV6_VERSION >> 4:
@@ -669,7 +662,7 @@ div_pcblist(SYSCTL_HANDLER_ARGS)
 	xig.xig_len = sizeof xig;
 	xig.xig_count = n;
 	xig.xig_gen = gencnt;
-	xig.xig_sogen = so_gencnt;
+	xig.xig_sogen = V_so_gencnt;
 	error = SYSCTL_OUT(req, &xig, sizeof xig);
 	if (error)
 		return error;
@@ -728,7 +721,7 @@ div_pcblist(SYSCTL_HANDLER_ARGS)
 		 */
 		INP_INFO_RLOCK(&V_divcbinfo);
 		xig.xig_gen = V_divcbinfo.ipi_gencnt;
-		xig.xig_sogen = so_gencnt;
+		xig.xig_sogen = V_so_gencnt;
 		xig.xig_count = V_divcbinfo.ipi_count;
 		INP_INFO_RUNLOCK(&V_divcbinfo);
 		error = SYSCTL_OUT(req, &xig, sizeof xig);
@@ -739,7 +732,7 @@ div_pcblist(SYSCTL_HANDLER_ARGS)
 
 #ifdef SYSCTL_NODE
 SYSCTL_NODE(_net_inet, IPPROTO_DIVERT, divert, CTLFLAG_RW, 0, "IPDIVERT");
-SYSCTL_PROC(_net_inet_divert, OID_AUTO, pcblist, CTLTYPE_OPAQUE | CTLFLAG_RD,
+SYSCTL_VNET_PROC(_net_inet_divert, OID_AUTO, pcblist, CTLTYPE_OPAQUE | CTLFLAG_RD,
     NULL, 0, div_pcblist, "S,xinpcb", "List of active divert sockets");
 #endif
 

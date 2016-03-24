@@ -88,8 +88,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_input.c 237910 2012-07-01 08:47
 CTASSERT(sizeof(struct ip) == 20);
 #endif
 
-struct	rwlock in_ifaddr_lock;
-RW_SYSINIT(in_ifaddr_lock, &in_ifaddr_lock, "in_ifaddr_lock");
+VNET_DEFINE(struct rwlock, in_ifaddr_lock);
 
 VNET_DEFINE(int, rsvp_on);
 
@@ -163,15 +162,17 @@ SYSCTL_VNET_STRUCT(_net_inet_ip, IPCTL_STATS, stats, CTLFLAG_RW,
 
 static VNET_DEFINE(uma_zone_t, ipq_zone);
 static VNET_DEFINE(TAILQ_HEAD(ipqhead, ipq), ipq[IPREASS_NHASH]);
-static struct mtx ipqlock;
+static VNET_DEFINE(struct mtx, ipqlock);
 
 #define	V_ipq_zone		VNET(ipq_zone)
 #define	V_ipq			VNET(ipq)
+#define V_ipqlock		VNET(ipqlock)
 
-#define	IPQ_LOCK()	mtx_lock(&ipqlock)
-#define	IPQ_UNLOCK()	mtx_unlock(&ipqlock)
-#define	IPQ_LOCK_INIT()	mtx_init(&ipqlock, "ipqlock", NULL, MTX_DEF)
-#define	IPQ_LOCK_ASSERT()	mtx_assert(&ipqlock, MA_OWNED)
+#define	IPQ_LOCK()	VNET_MTX_LOCK(&V_ipqlock)
+#define	IPQ_UNLOCK()	VNET_MTX_UNLOCK(&V_ipqlock)
+#define	IPQ_LOCK_INIT()	VNET_MTX_INIT(&V_ipqlock, "V_ipqlock", NULL, MTX_DEF)
+#define	IPQ_LOCK_DESTROY()	VNET_MTX_DESTROY(&V_ipqlock)
+#define	IPQ_LOCK_ASSERT()	VNET_MTX_ASSERT(&V_ipqlock, MA_OWNED)
 
 static void	maxnipq_update(void);
 static void	ipq_zone_change(void *);
@@ -214,6 +215,21 @@ SYSCTL_VNET_INT(_net_inet_ip, OID_AUTO, output_flowtable_size, CTLFLAG_RDTUN,
 #endif
 
 static void	ip_freef(struct ipqhead *, struct ipq *);
+
+
+static void
+ip_vnet_init(void *unused __unused)
+{
+	IN_IFADDR_LOCK_INIT();
+}
+VNET_SYSINIT(ip_init, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, ip_vnet_init, NULL);
+
+static void
+ip_vnet_uninit(void *unused __unused)
+{
+	IN_IFADDR_LOCK_DESTROY();
+}
+VNET_SYSUNINIT(ip_uninit, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, ip_vnet_uninit, NULL);
 
 /*
  * Kernel module interface for updating ipstat.  The argument is an index
@@ -323,6 +339,8 @@ ip_init(void)
 	V_ip_ft = flowtable_alloc("ipv4", V_ip_output_flowtable_size, FL_PCPU);
 #endif
 
+	IPQ_LOCK_INIT();
+
 	/* Skip initialization of globals for non-default instances. */
 	if (!IS_DEFAULT_VNET(curvnet))
 		return;
@@ -351,7 +369,6 @@ ip_init(void)
 		NULL, EVENTHANDLER_PRI_ANY);
 
 	/* Initialize various other remaining things. */
-	IPQ_LOCK_INIT();
 	netisr_register(&ip_nh);
 }
 
@@ -366,6 +383,8 @@ ip_destroy(void)
 	IPQ_LOCK();
 	ip_drain_locked();
 	IPQ_UNLOCK();
+
+	IPQ_LOCK_DESTROY();
 
 	uma_zdestroy(V_ipq_zone);
 }
@@ -383,21 +402,18 @@ ip_input(struct mbuf *m)
 	struct ifaddr *ifa;
 	struct ifnet *ifp;
 	int    checkif, hlen = 0;
-	u_short sum;
+	uint16_t sum, ip_len;
 	int dchg = 0;				/* dest changed after fw */
 	struct in_addr odst;			/* original dst address */
 
 	M_ASSERTPKTHDR(m);
 
 	if (m->m_flags & M_FASTFWD_OURS) {
-		/*
-		 * Firewall or NAT changed destination to local.
-		 * We expect ip_len and ip_off to be in host byte order.
-		 */
 		m->m_flags &= ~M_FASTFWD_OURS;
 		/* Set up some basics that will be used later. */
 		ip = mtod(m, struct ip *);
 		hlen = ip->ip_hl << 2;
+		ip_len = ntohs(ip->ip_len);
 		goto ours;
 	}
 
@@ -464,12 +480,11 @@ ip_input(struct mbuf *m)
 	/*
 	 * Convert fields to host representation.
 	 */
-	ip->ip_len = ntohs(ip->ip_len);
-	if (ip->ip_len < hlen) {
+	ip_len = ntohs(ip->ip_len);
+	if (ip_len < hlen) {
 		IPSTAT_INC(ips_badlen);
 		goto bad;
 	}
-	ip->ip_off = ntohs(ip->ip_off);
 
 	/*
 	 * Check that the amount of data in the buffers
@@ -477,17 +492,17 @@ ip_input(struct mbuf *m)
 	 * Trim mbufs if longer than we expect.
 	 * Drop packet if shorter than we expect.
 	 */
-	if (m->m_pkthdr.len < ip->ip_len) {
+	if (m->m_pkthdr.len < ip_len) {
 tooshort:
 		IPSTAT_INC(ips_tooshort);
 		goto bad;
 	}
-	if (m->m_pkthdr.len > ip->ip_len) {
+	if (m->m_pkthdr.len > ip_len) {
 		if (m->m_len == m->m_pkthdr.len) {
-			m->m_len = ip->ip_len;
-			m->m_pkthdr.len = ip->ip_len;
+			m->m_len = ip_len;
+			m->m_pkthdr.len = ip_len;
 		} else
-			m_adj(m, ip->ip_len - m->m_pkthdr.len);
+			m_adj(m, ip_len - m->m_pkthdr.len);
 	}
 #ifdef IPSEC
 	/*
@@ -536,6 +551,7 @@ tooshort:
 #endif /* IPFIREWALL_FORWARD */
 
 passin:
+
 	/*
 	 * Process options and, if not destined for us,
 	 * ship it on.  ip_dooptions returns 1 when an
@@ -741,20 +757,15 @@ ours:
 	 * Attempt reassembly; if it succeeds, proceed.
 	 * ip_reass() will return a different mbuf.
 	 */
-	if (ip->ip_off & (IP_MF | IP_OFFMASK)) {
+	if (ip->ip_off & htons(IP_MF | IP_OFFMASK)) {
 		m = ip_reass(m);
 		if (m == NULL)
 			return;
 		ip = mtod(m, struct ip *);
 		/* Get the header length of the reassembled packet */
 		hlen = ip->ip_hl << 2;
+		ip_len = ntohs(ip->ip_len);
 	}
-
-	/*
-	 * Further protocols expect the packet length to be w/o the
-	 * IP header.
-	 */
-	ip->ip_len -= hlen;
 
 #ifdef IPSEC
 	/*
@@ -923,20 +934,20 @@ found:
 	 * Adjust ip_len to not reflect header,
 	 * convert offset of this to bytes.
 	 */
-	ip->ip_len -= hlen;
-	if (ip->ip_off & IP_MF) {
+	ip->ip_len = htons(ntohs(ip->ip_len) - hlen);
+	if (ip->ip_off & htons(IP_MF)) {
 		/*
 		 * Make sure that fragments have a data length
 		 * that's a non-zero multiple of 8 bytes.
 		 */
-		if (ip->ip_len == 0 || (ip->ip_len & 0x7) != 0) {
+		if (ntohs(ip->ip_len) == 0 || (ntohs(ip->ip_len) & 0x7) != 0) {
 			IPSTAT_INC(ips_toosmall); /* XXX */
 			goto dropfrag;
 		}
 		m->m_flags |= M_FRAG;
 	} else
 		m->m_flags &= ~M_FRAG;
-	ip->ip_off <<= 3;
+	ip->ip_off = htons(ntohs(ip->ip_off) << 3);
 
 
 	/*
@@ -1009,7 +1020,7 @@ found:
 	 * Find a segment which begins after this one does.
 	 */
 	for (p = NULL, q = fp->ipq_frags; q; p = q, q = q->m_nextpkt)
-		if (GETIP(q)->ip_off > ip->ip_off)
+		if (ntohs(GETIP(q)->ip_off) > ntohs(ip->ip_off))
 			break;
 
 	/*
@@ -1022,14 +1033,15 @@ found:
 	 * segment, then it's checksum is invalidated.
 	 */
 	if (p) {
-		i = GETIP(p)->ip_off + GETIP(p)->ip_len - ip->ip_off;
+		i = ntohs(GETIP(p)->ip_off) + ntohs(GETIP(p)->ip_len) -
+		    ntohs(ip->ip_off);
 		if (i > 0) {
-			if (i >= ip->ip_len)
+			if (i >= ntohs(ip->ip_len))
 				goto dropfrag;
 			m_adj(m, i);
 			m->m_pkthdr.csum_flags = 0;
-			ip->ip_off += i;
-			ip->ip_len -= i;
+			ip->ip_off = htons(ntohs(ip->ip_off) + i);
+			ip->ip_len = htons(ntohs(ip->ip_len) - i);
 		}
 		m->m_nextpkt = p->m_nextpkt;
 		p->m_nextpkt = m;
@@ -1042,12 +1054,13 @@ found:
 	 * While we overlap succeeding segments trim them or,
 	 * if they are completely covered, dequeue them.
 	 */
-	for (; q != NULL && ip->ip_off + ip->ip_len > GETIP(q)->ip_off;
-	     q = nq) {
-		i = (ip->ip_off + ip->ip_len) - GETIP(q)->ip_off;
-		if (i < GETIP(q)->ip_len) {
-			GETIP(q)->ip_len -= i;
-			GETIP(q)->ip_off += i;
+	for (; q != NULL && ntohs(ip->ip_off) + ntohs(ip->ip_len) >
+	    ntohs(GETIP(q)->ip_off); q = nq) {
+		i = (ntohs(ip->ip_off) + ntohs(ip->ip_len)) -
+		    ntohs(GETIP(q)->ip_off);
+		if (i < ntohs(GETIP(q)->ip_len)) {
+			GETIP(q)->ip_len = htons(ntohs(GETIP(q)->ip_len) - i);
+			GETIP(q)->ip_off = htons(ntohs(GETIP(q)->ip_off) + i);
 			m_adj(q, i);
 			q->m_pkthdr.csum_flags = 0;
 			break;
@@ -1071,14 +1084,14 @@ found:
 	 */
 	next = 0;
 	for (p = NULL, q = fp->ipq_frags; q; p = q, q = q->m_nextpkt) {
-		if (GETIP(q)->ip_off != next) {
+		if (ntohs(GETIP(q)->ip_off) != next) {
 			if (fp->ipq_nfrags > V_maxfragsperpacket) {
 				IPSTAT_ADD(ips_fragdropped, fp->ipq_nfrags);
 				ip_freef(head, fp);
 			}
 			goto done;
 		}
-		next += GETIP(q)->ip_len;
+		next += ntohs(GETIP(q)->ip_len);
 	}
 	/* Make sure the last packet didn't have the IP_MF flag */
 	if (p->m_flags & M_FRAG) {
@@ -1134,7 +1147,7 @@ found:
 	 * packet;  dequeue and discard fragment reassembly header.
 	 * Make header visible.
 	 */
-	ip->ip_len = (ip->ip_hl << 2) + next;
+	ip->ip_len = htons((ip->ip_hl << 2) + next);
 	ip->ip_src = fp->ipq_src;
 	ip->ip_dst = fp->ipq_dst;
 	TAILQ_REMOVE(head, fp, ipq_list);
@@ -1190,47 +1203,40 @@ ip_freef(struct ipqhead *fhp, struct ipq *fp)
 void
 ip_slowtimo(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
 	struct ipq *fp;
 	int i;
 
-	VNET_LIST_RLOCK_NOSLEEP();
 	IPQ_LOCK();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		for (i = 0; i < IPREASS_NHASH; i++) {
-			for(fp = TAILQ_FIRST(&V_ipq[i]); fp;) {
-				struct ipq *fpp;
+	for (i = 0; i < IPREASS_NHASH; i++) {
+		for(fp = TAILQ_FIRST(&V_ipq[i]); fp;) {
+			struct ipq *fpp;
 
-				fpp = fp;
-				fp = TAILQ_NEXT(fp, ipq_list);
-				if(--fpp->ipq_ttl == 0) {
-					IPSTAT_ADD(ips_fragtimeout,
-					    fpp->ipq_nfrags);
-					ip_freef(&V_ipq[i], fpp);
-				}
+			fpp = fp;
+			fp = TAILQ_NEXT(fp, ipq_list);
+			if(--fpp->ipq_ttl == 0) {
+				IPSTAT_ADD(ips_fragtimeout,
+				    fpp->ipq_nfrags);
+				ip_freef(&V_ipq[i], fpp);
 			}
 		}
-		/*
-		 * If we are over the maximum number of fragments
-		 * (due to the limit being lowered), drain off
-		 * enough to get down to the new limit.
-		 */
-		if (V_maxnipq >= 0 && V_nipq > V_maxnipq) {
-			for (i = 0; i < IPREASS_NHASH; i++) {
-				while (V_nipq > V_maxnipq &&
-				    !TAILQ_EMPTY(&V_ipq[i])) {
-					IPSTAT_ADD(ips_fragdropped,
-					    TAILQ_FIRST(&V_ipq[i])->ipq_nfrags);
-					ip_freef(&V_ipq[i],
-					    TAILQ_FIRST(&V_ipq[i]));
-				}
+	}
+	/*
+	 * If we are over the maximum number of fragments
+	 * (due to the limit being lowered), drain off
+	 * enough to get down to the new limit.
+	 */
+	if (V_maxnipq >= 0 && V_nipq > V_maxnipq) {
+		for (i = 0; i < IPREASS_NHASH; i++) {
+			while (V_nipq > V_maxnipq &&
+			       !TAILQ_EMPTY(&V_ipq[i])) {
+				IPSTAT_ADD(ips_fragdropped,
+				    TAILQ_FIRST(&V_ipq[i])->ipq_nfrags);
+				ip_freef(&V_ipq[i],
+				    TAILQ_FIRST(&V_ipq[i]));
 			}
 		}
-		CURVNET_RESTORE();
 	}
 	IPQ_UNLOCK();
-	VNET_LIST_RUNLOCK_NOSLEEP();
 }
 
 /*
@@ -1255,17 +1261,10 @@ ip_drain_locked(void)
 void
 ip_drain(void)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
 	IPQ_LOCK();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		ip_drain_locked();
-		CURVNET_RESTORE();
-	}
+	ip_drain_locked();
 	IPQ_UNLOCK();
-	VNET_LIST_RUNLOCK_NOSLEEP();
+
 	in_rtqdrain();
 }
 
@@ -1443,7 +1442,7 @@ ip_forward(struct mbuf *m, int srcrt)
 		mcopy = NULL;
 	}
 	if (mcopy != NULL) {
-		mcopy->m_len = min(ip->ip_len, M_TRAILINGSPACE(mcopy));
+		mcopy->m_len = min(ntohs(ip->ip_len), M_TRAILINGSPACE(mcopy));
 		mcopy->m_pkthdr.len = mcopy->m_len;
 		m_copydata(m, 0, mcopy->m_len, mtod(mcopy, caddr_t));
 	}
@@ -1572,7 +1571,7 @@ ip_forward(struct mbuf *m, int srcrt)
 			if (ia != NULL)
 				mtu = ia->ia_ifp->if_mtu;
 			else
-				mtu = ip_next_mtu(ip->ip_len, 0);
+				mtu = ip_next_mtu(ntohs(ip->ip_len), 0);
 		}
 		IPSTAT_INC(ips_cantfrag);
 		break;

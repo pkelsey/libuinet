@@ -93,8 +93,7 @@ static MALLOC_DEFINE(M_IPMSOURCE, "ip_msource",
  * any need for in_multi itself to be virtualized -- it is bound to an ifp
  * anyway no matter what happens.
  */
-struct mtx in_multi_mtx;
-MTX_SYSINIT(in_multi_mtx, &in_multi_mtx, "in_multi_mtx", MTX_DEF);
+VNET_DEFINE(struct mtx, in_multi_mtx);
 
 /*
  * Functions with non-static linkage defined in this file should be
@@ -179,6 +178,22 @@ TUNABLE_INT("net.inet.ip.mcast.loop", &in_mcast_loop);
 SYSCTL_NODE(_net_inet_ip_mcast, OID_AUTO, filters,
     CTLFLAG_RD | CTLFLAG_MPSAFE, sysctl_ip_mcast_filters,
     "Per-interface stack-wide source filters");
+
+
+static void
+inm_init_locks(void *ignored)
+{
+	IN_MULTI_LOCK_INIT();
+}
+VNET_SYSINIT(inm_init_locks, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, inm_init_locks, NULL);
+
+static void
+inm_destroy_locks(void *ignored)
+{
+	IN_MULTI_LOCK_DESTROY();
+}
+VNET_SYSUNINIT(inm_init_locks, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, inm_destroy_locks, NULL);
+
 
 #ifdef KTR
 /*

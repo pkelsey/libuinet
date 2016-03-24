@@ -87,6 +87,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/tcp_input.c 238247 2012-07-08 14:2
 
 #include <netinet/cc.h>
 #include <netinet/in.h>
+#ifdef INET_COPY
+#include <netinet/in_copy.h>
+#endif
 #include <netinet/in_pcb.h>
 #include <netinet/in_systm.h>
 #include <netinet/in_var.h>
@@ -218,16 +221,15 @@ VNET_DEFINE(struct inpcbhead, tcb);
 #define	tcb6	tcb  /* for KAME src sync over BSD*'s */
 VNET_DEFINE(struct inpcbinfo, tcbinfo);
 
-static void	 tcp_dooptions(struct tcpopt *, u_char *, int, int);
+static void	 tcp_dooptions(struct tcpopt *, const uint8_t *, int, int);
 static void	 tcp_dropwithreset(struct mbuf *, struct tcphdr *,
 		     struct tcpcb *, int, int);
 static void	 tcp_pulloutofband(struct socket *,
 		     struct tcphdr *, struct mbuf *, int);
 static void	 tcp_xmit_timer(struct tcpcb *, int);
 static void	 tcp_newreno_partial_ack(struct tcpcb *, struct tcphdr *);
-static void inline 	tcp_fields_to_host(struct tcphdr *);
+static void inline 	tcp_fields_copy_to_host(struct tcphdr *, const struct tcphdr *);
 #ifdef TCP_SIGNATURE
-static void inline 	tcp_fields_to_net(struct tcphdr *);
 static int inline	tcp_signature_verify_input(struct mbuf *, int, int,
 			    int, struct tcpopt *, struct tcphdr *, u_int);
 #endif
@@ -463,35 +465,28 @@ cc_post_recovery(struct tcpcb *tp, struct tcphdr *th)
 }
 
 static inline void
-tcp_fields_to_host(struct tcphdr *th)
+tcp_fields_copy_to_host(struct tcphdr *th, const struct tcphdr *mbuf_th)
 {
-
-	th->th_seq = ntohl(th->th_seq);
-	th->th_ack = ntohl(th->th_ack);
-	th->th_win = ntohs(th->th_win);
-	th->th_urp = ntohs(th->th_urp);
+	th->th_sport = mbuf_th->th_sport;
+	th->th_dport = mbuf_th->th_dport;
+	th->th_seq = ntohl(mbuf_th->th_seq);
+	th->th_ack = ntohl(mbuf_th->th_ack);
+	th->th_x2 = mbuf_th->th_x2;
+	th->th_off = mbuf_th->th_off;
+	th->th_flags = mbuf_th->th_flags;
+	th->th_win = ntohs(mbuf_th->th_win);
+	th->th_sum = 0;
+	th->th_urp = ntohs(mbuf_th->th_urp);
 }
 
 #ifdef TCP_SIGNATURE
-static inline void
-tcp_fields_to_net(struct tcphdr *th)
-{
-
-	th->th_seq = htonl(th->th_seq);
-	th->th_ack = htonl(th->th_ack);
-	th->th_win = htons(th->th_win);
-	th->th_urp = htons(th->th_urp);
-}
-
 static inline int
 tcp_signature_verify_input(struct mbuf *m, int off0, int tlen, int optlen,
     struct tcpopt *to, struct tcphdr *th, u_int tcpbflag)
 {
 	int ret;
 
-	tcp_fields_to_net(th);
 	ret = tcp_signature_verify(m, off0, tlen, optlen, to, th, tcpbflag);
-	tcp_fields_to_host(th);
 	return (ret);
 }
 #endif
@@ -565,18 +560,13 @@ void
 tcp_input(struct mbuf *m, int off0)
 {
 	struct tcphdr *th = NULL;
+	struct tcphdr stack_th;
 	struct ip *ip = NULL;
-#ifdef INET
-	struct ipovly *ipov;
-#endif
 	struct inpcb *inp = NULL;
 	struct tcpcb *tp = NULL;
 	struct socket *so = NULL;
-	u_char *optp = NULL;
+	const uint8_t *optp = NULL;
 	int optlen = 0;
-#ifdef INET
-	int len;
-#endif
 	int tlen = 0, off;
 	int drop_hdrlen;
 	int thflags;
@@ -588,6 +578,7 @@ tcp_input(struct mbuf *m, int off0)
 	uint8_t sig_checked = 0;
 #endif
 	uint8_t iptos = 0;
+	uint16_t th_sum;
 #ifdef IPFIREWALL_FORWARD
 	struct m_tag *fwd_tag;
 #endif
@@ -635,14 +626,14 @@ tcp_input(struct mbuf *m, int off0)
 		tlen = sizeof(*ip6) + ntohs(ip6->ip6_plen) - off0;
 		if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID_IPV6) {
 			if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
-				th->th_sum = m->m_pkthdr.csum_data;
+				th_sum = m->m_pkthdr.csum_data;
 			else
-				th->th_sum = in6_cksum_pseudo(ip6, tlen,
+				th_sum = in6_cksum_pseudo(ip6, tlen,
 				    IPPROTO_TCP, m->m_pkthdr.csum_data);
-			th->th_sum ^= 0xffff;
+			th_sum ^= 0xffff;
 		} else
-			th->th_sum = in6_cksum(m, IPPROTO_TCP, off0, tlen);
-		if (th->th_sum) {
+			th_sum = in6_cksum(m, IPPROTO_TCP, off0, tlen);
+		if (th_sum) {
 			TCPSTAT_INC(tcps_rcvbadsum);
 			goto drop;
 		}
@@ -667,50 +658,61 @@ tcp_input(struct mbuf *m, int off0)
 #ifdef INET
 	{
 		/*
-		 * Get IP and TCP header together in first mbuf.
-		 * Note: IP leaves IP header in first mbuf.
+		 * Ensure that the contents of mbufs using external buffers
+		 * are not modified.  This permits configurations where
+		 * inbound packets can be sent up the stack while
+		 * simultaneously be used for another purpose (such as
+		 * forwarding) without copying.  Such configurations must
+		 * use mbufs with external buffers, as that is the only way
+		 * to ensure that m_cat() (used in reassembly queue
+		 * processing) and m_pullup() don't move data into an mbuf.
+		 *
+		 * Using ip_stripoptions() modifies mbuf contents, and is
+		 * not necessary.  Without ip_stripoptions(), a maximally
+		 * sized ip + tcp header combination (with maximum options,
+		 * 120 bytes) fits within MHLEN with room to spare for
+		 * preserving the link header (for example, MHLEN is
+		 * currently 168 bytes on amd64, leaving 48 bytes for the
+		 * link header).
 		 */
-		if (off0 > sizeof (struct ip)) {
-			ip_stripoptions(m, (struct mbuf *)0);
-			off0 = sizeof(struct ip);
-		}
-		if (m->m_len < sizeof (struct tcpiphdr)) {
-			if ((m = m_pullup(m, sizeof (struct tcpiphdr)))
+
+		/*
+		 * Ensure IP header with options and minimal TCP header are
+		 * in the first mbuf (if the input mbuf is using an external
+		 * buffer, m_pullup() will always prepend a new mbuf instead
+		 * of modifying the existing buffer).
+		 */
+		if (m->m_len < off0 + sizeof (*th)) {
+			if ((m = m_pullup(m, off0 + sizeof (*th)))
 			    == NULL) {
 				TCPSTAT_INC(tcps_rcvshort);
 				return;
 			}
 		}
+
 		ip = mtod(m, struct ip *);
-		ipov = (struct ipovly *)ip;
 		th = (struct tcphdr *)((caddr_t)ip + off0);
-		tlen = ip->ip_len;
+		tlen = ntohs(ip->ip_len) - off0;
 
 		if (m->m_pkthdr.csum_flags & CSUM_DATA_VALID) {
 			if (m->m_pkthdr.csum_flags & CSUM_PSEUDO_HDR)
-				th->th_sum = m->m_pkthdr.csum_data;
+				th_sum = m->m_pkthdr.csum_data;
 			else
-				th->th_sum = in_pseudo(ip->ip_src.s_addr,
+				th_sum = in_pseudo(ip->ip_src.s_addr,
 						ip->ip_dst.s_addr,
 						htonl(m->m_pkthdr.csum_data +
-							ip->ip_len +
+							tlen +
 							IPPROTO_TCP));
-			th->th_sum ^= 0xffff;
-#ifdef TCPDEBUG
-			ipov->ih_len = (u_short)tlen;
-			ipov->ih_len = htons(ipov->ih_len);
-#endif
+			th_sum ^= 0xffff;
 		} else {
 			/*
 			 * Checksum extended TCP header and data.
 			 */
-			len = sizeof (struct ip) + tlen;
-			bzero(ipov->ih_x1, sizeof(ipov->ih_x1));
-			ipov->ih_len = (u_short)tlen;
-			ipov->ih_len = htons(ipov->ih_len);
-			th->th_sum = in_cksum(m, len);
+			th_sum = in_cksum_pseudo_header(m, tlen, off0,
+					ip->ip_src.s_addr, ip->ip_dst.s_addr,
+					IPPROTO_TCP);
 		}
-		if (th->th_sum) {
+		if (th_sum) {
 			TCPSTAT_INC(tcps_rcvbadsum);
 			goto drop;
 		}
@@ -753,27 +755,30 @@ tcp_input(struct mbuf *m, int off0)
 #endif
 #ifdef INET
 		{
-			if (m->m_len < sizeof(struct ip) + off) {
-				if ((m = m_pullup(m, sizeof (struct ip) + off))
+			if (m->m_len < off0 + off) {
+				if ((m = m_pullup(m, off0 + off))
 				    == NULL) {
 					TCPSTAT_INC(tcps_rcvshort);
 					return;
 				}
 				ip = mtod(m, struct ip *);
-				ipov = (struct ipovly *)ip;
 				th = (struct tcphdr *)((caddr_t)ip + off0);
 			}
 		}
 #endif
 		optlen = off - sizeof (struct tcphdr);
-		optp = (u_char *)(th + 1);
+		optp = (const uint8_t *)(th + 1);
 	}
 	thflags = th->th_flags;
 
 	/*
-	 * Convert TCP protocol specific fields to host format.
+	 * Convert TCP protocol specific fields to host format and store on
+	 * the stack.  After this, the options pointer set above still
+	 * points into the mbuf, but the header pointer points at the
+	 * on-stack copy.
 	 */
-	tcp_fields_to_host(th);
+	tcp_fields_copy_to_host(&stack_th, th);
+	th = &stack_th;
 
 	/*
 	 * Delay dropping TCP, IP headers, IPv6 ext headers, and TCP options.
@@ -1181,6 +1186,9 @@ relocked:
 			tp = intotcpcb(inp);
 			KASSERT(tp->t_state == TCPS_SYN_RECEIVED,
 			    ("%s: ", __func__));
+#ifdef INET_COPY
+			in_copy(inp, m);
+#endif
 #ifdef TCP_SIGNATURE
 			if (sig_checked == 0)  {
 				tcp_dooptions(&to, optp, optlen,
@@ -1206,7 +1214,7 @@ relocked:
 			 * contains.  tcp_do_segment() consumes
 			 * the mbuf chain and unlocks the inpcb.
 			 */
-			tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen,
+			tcp_do_segment(m, th, optp, so, tp, drop_hdrlen, tlen,
 			    iptos, ti_locked, 0);
 			INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
 			return;
@@ -1247,7 +1255,8 @@ relocked:
 		 */
 		if (passive_reverse_syn_ack && (thflags & TH_ACK)) {
 			tcp_dooptions(&to, optp, optlen, TH_SYN);
-			syncache_passive_synack(&inc, &to, th, m);
+			if (syncache_passive_synack(&inc, &to, th, m))
+				m = NULL; /* don't free mbuf */
 			goto dropunlock;
 		}
 #endif /* PASSIVE_INET */
@@ -1431,6 +1440,10 @@ relocked:
 		return;
 	}
 
+#ifdef INET_COPY
+	in_copy(inp, m);
+#endif
+	
 #ifdef TCP_SIGNATURE
 	if (sig_checked == 0)  {
 		tcp_dooptions(&to, optp, optlen,
@@ -1455,7 +1468,7 @@ relocked:
 	 * state.  tcp_do_segment() always consumes the mbuf chain, unlocks
 	 * the inpcb, and unlocks pcbinfo.
 	 */
-	tcp_do_segment(m, th, so, tp, drop_hdrlen, tlen, iptos, ti_locked, 0);
+	tcp_do_segment(m, th, optp, so, tp, drop_hdrlen, tlen, iptos, ti_locked, 0);
 	INP_INFO_UNLOCK_ASSERT(&V_tcbinfo);
 	return;
 
@@ -1522,9 +1535,9 @@ drop:
  * used as appropriate.
  */
 void
-tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
-    struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos,
-    int ti_locked, int no_unlock)
+tcp_do_segment(struct mbuf *m, struct tcphdr *th, const uint8_t *optp,
+    struct socket *so, struct tcpcb *tp, int drop_hdrlen, int tlen,
+    uint8_t iptos, int ti_locked, int no_unlock)
 {
 	int thflags, acked, ourfinisacked, needoutput = 0;
 	int rstreason, todrop, win;
@@ -1621,7 +1634,7 @@ tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
 	/*
 	 * Parse options on any incoming segment.
 	 */
-	tcp_dooptions(&to, (u_char *)(th + 1),
+	tcp_dooptions(&to, optp,
 	    (th->th_off << 2) - sizeof(struct tcphdr),
 	    (thflags & TH_SYN) ? TO_SYN : 0);
 
@@ -3256,7 +3269,7 @@ drop:
  * Parse TCP options and place in tcpopt.
  */
 static void
-tcp_dooptions(struct tcpopt *to, u_char *cp, int cnt, int flags)
+tcp_dooptions(struct tcpopt *to, const uint8_t *cp, int cnt, int flags)
 {
 	int opt, optlen;
 
@@ -3281,7 +3294,7 @@ tcp_dooptions(struct tcpopt *to, u_char *cp, int cnt, int flags)
 			if (!(flags & TO_SYN))
 				continue;
 			to->to_flags |= TOF_MSS;
-			bcopy((char *)cp + 2,
+			bcopy(cp + 2,
 			    (char *)&to->to_mss, sizeof(to->to_mss));
 			to->to_mss = ntohs(to->to_mss);
 			break;
@@ -3297,10 +3310,10 @@ tcp_dooptions(struct tcpopt *to, u_char *cp, int cnt, int flags)
 			if (optlen != TCPOLEN_TIMESTAMP)
 				continue;
 			to->to_flags |= TOF_TS;
-			bcopy((char *)cp + 2,
+			bcopy(cp + 2,
 			    (char *)&to->to_tsval, sizeof(to->to_tsval));
 			to->to_tsval = ntohl(to->to_tsval);
-			bcopy((char *)cp + 6,
+			bcopy(cp + 6,
 			    (char *)&to->to_tsecr, sizeof(to->to_tsecr));
 			to->to_tsecr = ntohl(to->to_tsecr);
 			break;
@@ -3797,3 +3810,4 @@ tcp_newreno_partial_ack(struct tcpcb *tp, struct tcphdr *th)
 		tp->snd_cwnd = 0;
 	tp->snd_cwnd += tp->t_maxseg;
 }
+

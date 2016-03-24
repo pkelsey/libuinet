@@ -1097,7 +1097,7 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 		if (ia == NULL)
 			return (ENOBUFS);
 		bzero((caddr_t)ia, sizeof(*ia));
-		ifa_init(&ia->ia_ifa);
+		ifa_init(&ia->ia_ifa, ifp);
 		LIST_INIT(&ia->ia6_memberships);
 		/* Initialize the address and masks, and put time stamp */
 		ia->ia_ifa.ifa_addr = (struct sockaddr *)&ia->ia_addr;
@@ -1115,7 +1115,6 @@ in6_update_ifa(struct ifnet *ifp, struct in6_aliasreq *ifra,
 			ia->ia_ifa.ifa_dstaddr = NULL;
 		}
 		ia->ia_ifa.ifa_netmask = (struct sockaddr *)&ia->ia_prefixmask;
-		ia->ia_ifp = ifp;
 		ifa_ref(&ia->ia_ifa);			/* if_addrhead */
 		IF_ADDR_WLOCK(ifp);
 		TAILQ_INSERT_TAIL(&ifp->if_addrhead, &ia->ia_ifa, ifa_link);
@@ -2434,7 +2433,7 @@ in6_lltable_new(const struct sockaddr *l3addr, u_int flags)
 	lle->l3_addr6 = *(const struct sockaddr_in6 *)l3addr;
 	lle->base.lle_refcnt = 1;
 	LLE_LOCK_INIT(&lle->base);
-	callout_init_rw(&lle->base.ln_timer_ch, &lle->base.lle_lock,
+	vnet_callout_init_rw(&lle->base.ln_timer_ch, &lle->base.lle_lock,
 	    CALLOUT_RETURNUNLOCKED);
 
 	return &lle->base;
@@ -2478,7 +2477,7 @@ in6_lltable_prefix_free(struct lltable *llt,
 			    ((flags & LLE_STATIC) || !(lle->la_flags & LLE_STATIC))) {
 				int canceled;
 
-				canceled = callout_drain(&lle->la_timer);
+				canceled = vnet_callout_drain(&lle->la_timer);
 				LLE_WLOCK(lle);
 				if (canceled)
 					LLE_REMREF(lle);

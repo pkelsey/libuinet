@@ -115,6 +115,7 @@ size_t	 strlen(const char *);
 int	 strncasecmp(const char *, const char *, size_t);
 int	 strncmp(const char *, const char *, size_t);
 char	*strncpy(char * __restrict, const char * __restrict, size_t);
+char	*strndup(const char *__restrict, size_t n, struct malloc_type *);
 size_t	 strnlen(const char *, size_t);
 char	*strsep(char **, const char *delim);
 size_t	 strspn(const char *, const char *);

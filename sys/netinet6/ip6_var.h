@@ -424,6 +424,9 @@ int	ip6_optlen __P((struct inpcb *));
 int	route6_input __P((struct mbuf **, int *, int));
 
 void	frag6_init __P((void));
+#ifdef VIMAGE
+void	frag6_destroy __P((void));
+#endif
 int	frag6_input __P((struct mbuf **, int *, int));
 void	frag6_slowtimo __P((void));
 void	frag6_drain __P((void));

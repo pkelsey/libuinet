@@ -34,6 +34,7 @@
 #define _NETINET_TCP_SYNCACHE_H_
 #ifdef _KERNEL
 
+#include "opt_inet.h"
 #include "opt_passiveinet.h"
 #include "opt_promiscinet.h"
 
@@ -67,7 +68,7 @@ void	 syncache_chkrst(struct in_conninfo *, struct tcphdr *);
 void	 syncache_badack(struct in_conninfo *);
 #endif /* PROMISCUOUS_INET */
 #ifdef PASSIVE_INET
-void	 syncache_passive_synack(struct in_conninfo *, struct tcpopt *,
+int	 syncache_passive_synack(struct in_conninfo *, struct tcpopt *,
 	     struct tcphdr *, struct mbuf *);
 #endif
 int	 syncache_pcbcount(void);
@@ -100,11 +101,17 @@ struct syncache {
 	struct ucred	*sc_cred;		/* cred cache for jail checks */
 #ifdef PROMISCUOUS_INET
 	struct m_tag	*sc_l2tag;		/* L2 info from SYN packet */
-	uint16_t	sc_fib;			/* FIB number for this entry */
-#endif
+	struct ifnet	*sc_txif;		/* Transmit interface to use */
 #ifdef PASSIVE_INET
-	uint16_t	sc_altfib;		/* FIB for syncache responses */
-#endif
+	struct ifnet	*sc_client_txif;	/* Transmit interface to use */
+#endif /* PASSIVE_INET */
+#endif /* PROMISCUOUS_INET */
+#ifdef INET_COPY
+	struct mbuf	*sc_syn;
+#ifdef PASSIVE_INET
+	struct mbuf	*sc_synack;
+#endif /* PASSIVE_INET */
+#endif /* INET_COPY */
 	u_int32_t	sc_spare[2];		/* UTO */
 };
 
@@ -131,7 +138,7 @@ struct syncache_head {
 	struct vnet	*sch_vnet;
 	struct mtx	sch_mtx;
 	TAILQ_HEAD(sch_head, syncache)	sch_bucket;
-	struct callout	sch_timer;
+	struct vnet_callout sch_timer;
 	int		sch_nextc;
 	u_int		sch_length;
 	u_int		sch_oddeven;

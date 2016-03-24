@@ -79,12 +79,24 @@ endif
 
 CFLAGS+= -DUINET=1
 
+ifneq (${HOST_OS},Darwin)
+CFLAGS+= -DHAS_NATIVE_TLS
+endif
+
 VPATH+= $S/${MACHINE_CPUARCH}/${MACHINE_CPUARCH}
 VPATH+= $S/kern
 VPATH+= $S/crypto
+VPATH+= $S/crypto/aesni
+VPATH+= $S/crypto/blowfish
+VPATH+= $S/crypto/camellia
+VPATH+= $S/crypto/des
+VPATH+= $S/crypto/rijndael
+VPATH+= $S/crypto/sha2
 VPATH+= $S/net
 VPATH+= $S/netinet
 VPATH+= $S/netinet/cc
+VPATH+= $S/netipsec
+VPATH+= $S/opencrypto
 VPATH+= $S/vm
 VPATH+= $S/libkern
 
@@ -97,9 +109,8 @@ UINET_SRCS+=			\
 	uinet_config.c		\
 	uinet_config_kernel.c	\
 	uinet_elf_machdep.c	\
-	uinet_if_bridge.c	\
+	uinet_if.c		\
 	uinet_if_pcap.c		\
-	uinet_if_span.c		\
 	uinet_init.c		\
 	uinet_init_main.c	\
 	uinet_kern_clock.c	\
@@ -128,6 +139,7 @@ UINET_SRCS+=			\
 	uinet_kern_timeout.c	\
 	uinet_machdep.c		\
 	uinet_dev_random.c	\
+	uinet_pkt_desc.c	\
 	uinet_sched.c		\
 	uinet_subr_bus.c	\
 	uinet_subr_kdb.c	\
@@ -168,17 +180,35 @@ ifneq (${HOST_OS},Darwin)
 UINET_HOST_SRCS+= uinet_if_netmap_host.c
 endif
 
+CRYPTO_ASM_SRCS+=			\
+	aesencdec_${MACHINE_CPUARCH}.S	\
+	aeskeys_${MACHINE_CPUARCH}.S
 
 CRYPTO_SRCS+=			\
-	sha1.c
+	aesni.c			\
+	aesni_wrap.c		\
+	bf_ecb.c		\
+	bf_enc.c		\
+	bf_skey.c		\
+	camellia.c		\
+	camellia-api.c		\
+	des_ecb.c		\
+	des_enc.c		\
+	des_setkey.c		\
+	rijndael-alg-fst.c	\
+	rijndael-api.c		\
+	sha1.c			\
+	sha2.c
 
 
 KERN_SRCS+=			\
+	kern_cpuset.c		\
 	kern_descrip.c		\
 	kern_event.c		\
 	kern_fail.c		\
 	kern_khelp.c		\
 	kern_hhook.c		\
+	kern_ktr.c		\
 	kern_linker.c		\
 	kern_mbuf.c		\
 	kern_module.c		\
@@ -189,13 +219,16 @@ KERN_SRCS+=			\
 	kern_tc.c		\
 	link_elf.c		\
 	md5c.c			\
+	subr_bus.c		\
 	subr_eventhandler.c	\
 	subr_hash.c		\
+	subr_hints.c		\
 	subr_kobj.c		\
 	subr_lock.c		\
 	subr_module.c		\
 	subr_param.c		\
 	subr_pcpu.c		\
+	subr_rman.c		\
 	subr_sbuf.c		\
 	subr_taskqueue.c	\
 	subr_unit.c		\
@@ -220,13 +253,17 @@ KERN_MHEADERS+=		\
 
 
 KERN_MSRCS+=		\
+	bus_if.m	\
+	device_if.m	\
 	linker_if.m
 
 
 LIBKERN_SRCS+=		\
 	bcd.c		\
 	inet_ntoa.c	\
-	strlcpy.c
+	strlcpy.c	\
+	strndup.c	\
+	strnlen.c
 
 
 MACHINE_SRCS+=		\
@@ -239,6 +276,7 @@ NET_SRCS+=		\
 	if_clone.c	\
 	if_dead.c	\
 	if_ethersubr.c	\
+	if_gif.c	\
 	if_loop.c	\
 	if_llatbl.c	\
 	if_promiscinet.c\
@@ -249,7 +287,8 @@ NET_SRCS+=		\
 	raw_usrreq.c	\
 	route.c		\
 	rtsock.c	\
-	vnet.c
+	vnet.c		\
+	zlib.c
 
 
 NETINET_SRCS+=		\
@@ -257,17 +296,21 @@ NETINET_SRCS+=		\
 	if_ether.c	\
 	igmp.c		\
 	in.c		\
+	in_copy.c	\
+	in_gif.c	\
 	in_mcast.c	\
 	in_passive.c	\
 	in_pcb.c	\
 	in_promisc.c	\
 	in_proto.c	\
 	in_rmx.c	\
+	ip_ecn.c	\
 	ip_encap.c	\
 	ip_fastfwd.c	\
 	ip_icmp.c	\
 	ip_id.c		\
 	ip_input.c	\
+	ip_ipsec.c	\
 	ip_options.c	\
 	ip_output.c	\
 	raw_ip.c	\
@@ -288,9 +331,39 @@ NETINET_SRCS+=		\
 	cc.c		\
 	cc_newreno.c
 
+NETIPSEC_SRCS+=		\
+	ipsec.c		\
+	ipsec_input.c	\
+	ipsec_mbuf.c	\
+	ipsec_output.c	\
+	key.c		\
+	key_debug.c	\
+	keysock.c	\
+	xform_ah.c	\
+	xform_esp.c	\
+	xform_ipcomp.c	\
+	xform_ipip.c
+
+# only if TCP_SIGNTAURE is defined
+#xform_tcp.c
 
 NETINET6_SRCS+=
 
+
+OPENCRYPTO_SRCS+=	\
+	cast.c		\
+	criov.c		\
+	crypto.c	\
+	cryptosoft.c	\
+	deflate.c	\
+	rmd160.c	\
+	skipjack.c	\
+	xform.c
+
+#	cryptodev.c
+
+OPENCRYPTO_MHEADERS= cryptodev_if.m
+OPENCRYPTO_MSRCS= cryptodev_if.m
 
 VM_SRCS+=		\
 	uma_core.c
@@ -298,17 +371,22 @@ VM_SRCS+=		\
 
 MHEADERS= $(patsubst %.m,%.h,${KERN_MHEADERS})
 MHEADERS+= vnode_if.h vnode_if_newproto.h vnode_if_typedef.h
+MHEADERS+= $(patsubst %.m,%.h,${OPENCRYPTO_MHEADERS})
 
 MSRCS= $(patsubst %.m,%.c,${KERN_MSRCS})
+MSRCS+= $(patsubst %.m,%.c,${OPENCRYPTO_MSRCS})
+
+ASM_SRCS = ${CRYPTO_ASM_SRCS}
 
 SRCS=  ${UINET_SRCS} ${CRYPTO_SRCS} ${KERN_SRCS} ${LIBKERN_SRCS} ${MACHINE_SRCS}
-SRCS+= ${MSRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS} ${VM_SRCS}
+SRCS+= ${MSRCS} ${NET_SRCS} ${NETINET_SRCS} ${NETINET6_SRCS} ${NETIPSEC_SRCS} ${OPENCRYPTO_SRCS} ${VM_SRCS}
 
 # If witness is enabled.
 # SRCS+= ${KERN_WITNESS_SRCS}
 
 HOST_SRCS = ${UINET_HOST_SRCS}
 
+ASM_OBJS+= $(patsubst %.S,%.o,${ASM_SRCS})
 OBJS+= $(patsubst %.c,%.o,${SRCS})
 HOST_OBJS+= $(patsubst %.c,%.o,${HOST_SRCS})
 
@@ -320,13 +398,13 @@ all: libuinet.a
 # Then, only the symbols that are part of the UINET API are made
 # externally available.
 #
-libuinet.a: machine_includes uinet_api.symlist ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS}
+libuinet.a: machine_includes uinet_api.symlist ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${ASM_OBJS} ${OBJS}
 ifeq (${HOST_OS},Darwin)
 	sed 's/.*/_&/' < uinet_api.symlist > uinet_api.symlist.darwin
-	${LD} -r -o $*.ro -exported_symbols_list uinet_api.symlist.darwin ${HOST_OBJS} ${OBJS}
+	${LD} -r -o $*.ro -exported_symbols_list uinet_api.symlist.darwin ${HOST_OBJS} ${ASM_OBJS} ${OBJS}
 	rm uinet_api.symlist.darwin
 else
-	${LD} -r -o $*.ro ${OBJS}
+	${LD} -r -o $*.ro ${ASM_OBJS} ${OBJS}
 	nm $*.ro  | grep -v ' U ' | cut -d ' ' -f 3 > $*_localize_list.tmp
 	objcopy --localize-symbols=$*_localize_list.tmp $*.ro 
 	rm $*_localize_list.tmp
@@ -338,6 +416,9 @@ endif
 
 ${HOST_OBJS}: %.o: %.c
 	${HOST_C}
+
+${ASM_OBJS}: %.o: %.S ${IMACROS_FILE}
+	${NORMAL_S}
 
 ${OBJS}: %.o: %.c ${IMACROS_FILE}
 	${NORMAL_C}
@@ -354,7 +435,7 @@ ${OBJS}: %.o: %.c ${IMACROS_FILE}
 .PHONY: clean
 clean:
 	rm -f libuinet.a
-	rm -f ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${OBJS} ${PROGRAM} ${IMACROS_FILE}
+	rm -f ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${ASM_OBJS} ${OBJS} ${PROGRAM} ${IMACROS_FILE}
 	rm -rf ${MACHINE_INCLUDES_ROOT}
 
 

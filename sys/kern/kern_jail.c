@@ -1296,7 +1296,7 @@ kern_jail_set(struct thread *td, struct uio *optuio, int flags)
 #ifdef VIMAGE
 		/* Allocate a new vnet if specified. */
 		pr->pr_vnet = (pr_flags & PR_VNET)
-		    ? vnet_alloc() : ppr->pr_vnet;
+		    ? vnet_alloc(NULL) : ppr->pr_vnet;
 #endif
 		/*
 		 * Allocate a dedicated cpuset for each jail.

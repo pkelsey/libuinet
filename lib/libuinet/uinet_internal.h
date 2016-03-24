@@ -33,35 +33,34 @@
 #include <net/vnet.h>
 
 #include "uinet_api.h"
+#include "uinet_if.h"
+
+/* used by uinet_ifs in UINET_IF_TIMESTAMP_GLOBAL_COUNTER mode */
+extern uint64_t global_timestamp_counter;
+
+/* 32 bits is enough for more than one epoch per second for 100 years */
+extern uint32_t epoch_number;
+
+extern uint32_t instance_count;
 
 struct uinet_instance {
 	struct vnet *ui_vnet;
+	struct uinet_sts_cfg ui_sts;
+	void *ui_sts_evinstctx;
 	void *ui_userdata;
+	uint32_t ui_index;
 };
 
-struct uinet_if {
-	TAILQ_ENTRY(uinet_if) link;
-	struct uinet_instance *uinst;
-	uinet_iftype_t type;
-	char *configstr;
-	char name[IF_NAMESIZE];		/* assigned by driver */
-	char alias[IF_NAMESIZE];	/* assigned by user (optional) */
-	int cpu;
-	unsigned int cdom;
-	unsigned int ifindex;
-	void *ifdata;			/* softc */
-	void *ifp;			/* ifnet */
-	void (*batch_event_handler)(void *arg, int event);
-	void *batch_event_handler_arg;
-};
 
 extern struct uinet_instance uinst0;
 
 void uinet_ifdestroy_all(struct uinet_instance *uinst);
-struct uinet_if *uinet_iffind_byname(const char *ifname);
 
+void uinet_instance_init_vnet_sts(struct vnet_sts *sts, struct uinet_instance_cfg *cfg);
 int uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet, struct uinet_instance_cfg *cfg);
 void uinet_instance_shutdown(uinet_instance_t uinst);
+
+int uinet_if_attach(uinet_if_t uif, struct ifnet *ifp, void *sc);
 
 #endif /* _UINET_INTERNAL_H_ */
 

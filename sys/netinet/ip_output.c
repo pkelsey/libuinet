@@ -32,6 +32,7 @@
 #include <sys/cdefs.h>
 __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:19:14Z glebius $");
 
+#include "opt_inet.h"
 #include "opt_ipfw.h"
 #include "opt_ipsec.h"
 #include "opt_route.h"
@@ -69,6 +70,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/ip_output.c 238713 2012-07-23 09:1
 #include <net/vnet.h>
 
 #include <netinet/in.h>
+#ifdef INET_COPY
+#include <netinet/in_copy.h>
+#endif
 #include <netinet/in_systm.h>
 #include <netinet/ip.h>
 #include <netinet/in_pcb.h>
@@ -113,7 +117,6 @@ extern	struct protosw inetsw[];
 /*
  * IP output.  The packet in mbuf chain m contains a skeletal IP
  * header (with len, off, ttl, proto, tos, src, dst).
- * ip_len and ip_off are in host format.
  * The mbuf chain containing the packet will be freed.
  * The mbuf opt, if present, will not be freed.
  * In the IP forwarding case, the packet will arrive with options already
@@ -133,7 +136,8 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 	int nortfree = 0;
 	struct sockaddr_in *dst;
 	struct in_ifaddr *ia = NULL;
-	int isbroadcast, sw_csum;
+	int isbroadcast;
+	uint16_t ip_len, ip_off, sw_csum;
 	struct route iproute;
 	struct rtentry *rte;	/* cache for ro->ro_rt */
 	struct in_addr odst;
@@ -165,37 +169,26 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 						  NULL);
 
 	if ((inp && (inp->inp_flags2 & INP_PROMISC)) || l2i_tag) {
-		unsigned int fib;
-
 		if (l2i_tag) {
 			/*
 			 * This is a packet that has been turned around
 			 * after reception, such as a TCP SYN packet being
-			 * recycled as a RST, so fib comes from the mbuf,
-			 * not the (probably nonexistent) connection
-			 * context.
+			 * recycled as a RST, or is a syncache response, so
+			 * the transmit interface comes from the tag, not
+			 * the (probably nonexistent) connection context.
 			 */
-			fib = M_GETFIB(m);
+			ifp = l2i_tag->rcvif;
 		} else {
-#ifdef PASSIVE_INET
-			if (inp->inp_inc.inc_flags & INC_ALTFIB)
-				fib = inp->inp_altfibnum;
-			else
-#endif
-			fib = inp->inp_fibnum;
-
+			ifp = inp->inp_txif;
 			if (0 != if_promiscinet_add_tag(m, inp->inp_l2info)) {
 				goto bad;
 			}
 		}
 
-		ifp = ifnet_byfib_ref(fib);
-		if (NULL == ifp) {
-			IPSTAT_INC(ips_noroute);
-			error = EHOSTUNREACH;
-			goto bad;
-		}
-		
+		/* XXX is this necessary? */
+		if_ref(ifp);
+
+		KASSERT(ifp != NULL, ("%s: transmit interface not set", __func__));
 		isbroadcast = 0;
 		ispromisc = 1;
 	}
@@ -230,6 +223,8 @@ ip_output(struct mbuf *m, struct mbuf *opt, struct route *ro, int flags,
 			hlen = len; /* ip->ip_hl is updated above */
 	}
 	ip = mtod(m, struct ip *);
+	ip_len = ntohs(ip->ip_len);
+	ip_off = ntohs(ip->ip_off);
 
 	/*
 	 * Fill in IP header.  If we are not allowing fragmentation,
@@ -502,7 +497,7 @@ again:
 	 * packet or packet fragments, unless ALTQ is enabled on the given
 	 * interface in which case packetdrop should be done by queueing.
 	 */
-	n = ip->ip_len / mtu + 1; /* how many fragments ? */
+	n = ip_len / mtu + 1; /* how many fragments ? */
 	if (
 #ifdef ALTQ
 	    (!ALTQ_IS_ENABLED(&ifp->if_snd)) &&
@@ -529,7 +524,7 @@ again:
 			goto bad;
 		}
 		/* don't allow broadcast messages to be fragmented */
-		if (ip->ip_len > mtu) {
+		if (ip_len > mtu) {
 			error = EMSGSIZE;
 			goto bad;
 		}
@@ -664,11 +659,9 @@ passout:
 	 * If small enough for interface, or the interface will take
 	 * care of the fragmentation for us, we can just send directly.
 	 */
-	if (ip->ip_len <= mtu ||
+	if (ip_len <= mtu ||
 	    (m->m_pkthdr.csum_flags & ifp->if_hwassist & CSUM_TSO) != 0 ||
-	    ((ip->ip_off & IP_DF) == 0 && (ifp->if_hwassist & CSUM_FRAGMENT))) {
-		ip->ip_len = htons(ip->ip_len);
-		ip->ip_off = htons(ip->ip_off);
+	    ((ip_off & IP_DF) == 0 && (ifp->if_hwassist & CSUM_FRAGMENT))) {
 		ip->ip_sum = 0;
 		if (sw_csum & CSUM_DELAY_IP)
 			ip->ip_sum = in_cksum(m, hlen);
@@ -702,7 +695,7 @@ passout:
 	}
 
 	/* Balk when DF bit is set or the interface didn't support TSO. */
-	if ((ip->ip_off & IP_DF) || (m->m_pkthdr.csum_flags & CSUM_TSO)) {
+	if ((ip_off & IP_DF) || (m->m_pkthdr.csum_flags & CSUM_TSO)) {
 		error = EMSGSIZE;
 		IPSTAT_INC(ips_cantfrag);
 		goto bad;
@@ -779,11 +772,15 @@ ip_fragment(struct ip *ip, struct mbuf **m_frag, int mtu,
 	int firstlen;
 	struct mbuf **mnext;
 	int nfrags;
+	uint16_t ip_len, ip_off;
 #ifdef PROMISCUOUS_INET
 	struct ifl2info *l2i_tag;
 #endif
+	ip_len = ntohs(ip->ip_len);
+	ip_off = ntohs(ip->ip_off);
 
-	if (ip->ip_off & IP_DF) {	/* Fragmentation not allowed */
+
+	if (ip_off & IP_DF) {	/* Fragmentation not allowed */
 		IPSTAT_INC(ips_cantfrag);
 		return EMSGSIZE;
 	}
@@ -864,7 +861,7 @@ smart_frag_failure:
 	 * The fragments are linked off the m_nextpkt of the original
 	 * packet, which after processing serves as the first fragment.
 	 */
-	for (nfrags = 1; off < ip->ip_len; off += len, nfrags++) {
+	for (nfrags = 1; off < ip_len; off += len, nfrags++) {
 		struct ip *mhip;	/* ip header on the fragment */
 		struct mbuf *m;
 		int mhlen = sizeof (struct ip);
@@ -890,10 +887,10 @@ smart_frag_failure:
 			mhip->ip_hl = mhlen >> 2;
 		}
 		m->m_len = mhlen;
-		/* XXX do we need to add ip->ip_off below ? */
-		mhip->ip_off = ((off - hlen) >> 3) + ip->ip_off;
-		if (off + len >= ip->ip_len) {	/* last fragment */
-			len = ip->ip_len - off;
+		/* XXX do we need to add ip_off below ? */
+		mhip->ip_off = ((off - hlen) >> 3) + ip_off;
+		if (off + len >= ip_len) {	/* last fragment */
+			len = ip_len - off;
 			m->m_flags |= M_LASTFRAG;
 		} else
 			mhip->ip_off |= IP_MF;
@@ -939,11 +936,10 @@ smart_frag_failure:
 	 * Update first fragment by trimming what's been copied out
 	 * and updating header.
 	 */
-	m_adj(m0, hlen + firstlen - ip->ip_len);
+	m_adj(m0, hlen + firstlen - ip_len);
 	m0->m_pkthdr.len = hlen + firstlen;
 	ip->ip_len = htons((u_short)m0->m_pkthdr.len);
-	ip->ip_off |= IP_MF;
-	ip->ip_off = htons(ip->ip_off);
+	ip->ip_off = htons(ip_off | IP_MF);
 	ip->ip_sum = 0;
 	if (sw_csum & CSUM_DELAY_IP)
 		ip->ip_sum = in_cksum(m0, hlen);
@@ -957,11 +953,12 @@ void
 in_delayed_cksum(struct mbuf *m)
 {
 	struct ip *ip;
-	u_short csum, offset;
+	uint16_t csum, offset, ip_len;
 
 	ip = mtod(m, struct ip *);
 	offset = ip->ip_hl << 2 ;
-	csum = in_cksum_skip(m, ip->ip_len, offset);
+	ip_len = ntohs(ip->ip_len);
+	csum = in_cksum_skip(m, ip_len, offset);
 	if (m->m_pkthdr.csum_flags & CSUM_UDP && csum == 0)
 		csum = 0xffff;
 	offset += m->m_pkthdr.csum_data;	/* checksum offset */
@@ -988,6 +985,7 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 {
 	struct	inpcb *inp = sotoinpcb(so);
 	int	error, optval;
+	uint64_t optval64;
 
 	error = optval = 0;
 	if (sopt->sopt_level != IPPROTO_IP) {
@@ -1022,20 +1020,6 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 				inp->inp_inc.inc_fibnum = so->so_fibnum;
 				INP_WUNLOCK(inp);
 				error = 0;
-				break;
-			case SO_ALTFIB:
-#if defined(PROMISCUOUS_INET) && defined(PASSIVE_INET)
-				INP_WLOCK(inp);
-				if (so->so_options & SO_ALTFIB)
-					inp->inp_inc.inc_flags |= INC_ALTFIB;
-				else
-					inp->inp_inc.inc_flags &= ~INC_ALTFIB;
-				inp->inp_inc.inc_altfibnum = so->so_altfibnum;
-				INP_WUNLOCK(inp);
-				error = 0;
-#else
-				error = ENOPROTOOPT;
-#endif
 				break;
 			case SO_PASSIVE:
 #ifdef PASSIVE_INET
@@ -1300,8 +1284,106 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		case IP_SYNFILTER_RESULT:
 			error = syn_filter_setopt(so, sopt);
 			break;
+
+		case IP_TXIF:
+		{
+			struct ifnet *ifp;
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+					    sizeof optval);
+			if (error)
+				break;
+
+			ifp = ifnet_byindex(optval);
+			if (ifp == NULL) {
+				error = EINVAL;
+				break;
+			}
+			INP_WLOCK(inp);
+			inp->inp_txif = ifp;
+			INP_WUNLOCK(inp);
+			break;
+		}
 #endif /* PROMISCUOUS_INET */
 
+#ifdef INET_COPY
+		case IP_COPY_MODE:
+			error = sooptcopyin(sopt, &optval, sizeof optval, sizeof optval);
+			if (error)
+				return (error);
+
+			/* XXX copy mode on the TX side is not yet supported */
+			if (optval & IP_COPY_MODE_TX)
+				return (EINVAL);
+
+			/*
+			 * If capture is a possibility, at least one
+			 * direction must be chosen, and if one direction is
+			 * chosen, then capture must be a possibility.
+			 */
+			if (((optval & (IP_COPY_MODE_MAYBE|IP_COPY_MODE_ON)) &&
+			     !(optval & (IP_COPY_MODE_TX|IP_COPY_MODE_RX))) ||
+			    (!(optval & (IP_COPY_MODE_MAYBE|IP_COPY_MODE_ON)) &&
+			     (optval & (IP_COPY_MODE_TX|IP_COPY_MODE_RX))))
+				return (EINVAL);
+
+			/* ON trumps MAYBE */
+			if (optval & IP_COPY_MODE_ON)
+				optval &= ~IP_COPY_MODE_MAYBE;
+				
+			INP_WLOCK(inp);
+			if (optval & IP_COPY_MODE_ON) {
+				if (inp->inp_copy_mode == IP_COPY_MODE_OFF) {
+					/* OFF -> ON */
+					inp->inp_copy_mode = optval;
+				} else if (inp->inp_copy_mode & IP_COPY_MODE_MAYBE) {
+					inp->inp_copy_mode &= ~IP_COPY_MODE_MAYBE;
+					/* MAYBE -> ON */
+					inp->inp_copy_mode |= IP_COPY_MODE_ON;
+					in_copy_flush(inp, 0);
+				}
+			} else if (optval == IP_COPY_MODE_OFF) {
+				if (inp->inp_copy_mode & IP_COPY_MODE_MAYBE) {
+					/* MAYBE -> OFF */
+					in_copy_dispose(inp);
+				} else if (inp->inp_copy_mode & IP_COPY_MODE_ON) {
+					/* ON -> OFF */
+					in_copy_flush(inp, 1);
+				}
+			}
+			inp->inp_copy_mode = optval;
+			INP_WUNLOCK(inp);
+			break;
+
+		case IP_COPY_LIMIT:
+			error = sooptcopyin(sopt, &optval64, sizeof optval64, sizeof optval64);
+			if (error)
+				return (error);
+
+			INP_WLOCK(inp);
+			inp->inp_copy_limit = optval64;
+			INP_WUNLOCK(inp);
+			break;
+
+		case IP_COPY_IF:
+		{
+			struct ifnet *ifp;
+			error = sooptcopyin(sopt, &optval, sizeof optval,
+					    sizeof optval);
+			if (error)
+				break;
+
+			ifp = ifnet_byindex(optval);
+			if (ifp == NULL) {
+				error = EINVAL;
+				break;
+			}
+			INP_WLOCK(inp);
+			inp->inp_copyif = ifp;
+			INP_WUNLOCK(inp);
+			break;
+		}
+#endif /* INET_COPY */
+			
 		default:
 			error = ENOPROTOOPT;
 			break;
@@ -1438,6 +1520,28 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			break;
 #endif /* PROMISCUOUS_INET */
 
+#ifdef INET_COPY
+		case IP_COPY_MODE:
+			INP_WLOCK(inp);
+			optval = inp->inp_copy_mode;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval, sizeof optval);
+			break;
+
+		case IP_COPY_LIMIT:
+			INP_WLOCK(inp);
+			optval64 = inp->inp_copy_limit;
+			INP_WUNLOCK(inp);
+			error = sooptcopyout(sopt, &optval64, sizeof optval64);
+			break;
+#endif /* INET_COPY */
+
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+		case IP_SERIALNO:
+			optval64 = inp->inp_serialno;
+			error = sooptcopyout(sopt, &optval64, sizeof optval64);
+			break;
+#endif			
 		default:
 			error = ENOPROTOOPT;
 			break;
@@ -1482,8 +1586,6 @@ ip_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in *dst,
 		 * than the interface's MTU.  Can this possibly matter?
 		 */
 		ip = mtod(copym, struct ip *);
-		ip->ip_len = htons(ip->ip_len);
-		ip->ip_off = htons(ip->ip_off);
 		ip->ip_sum = 0;
 		ip->ip_sum = in_cksum(copym, hlen);
 #if 1 /* XXX */

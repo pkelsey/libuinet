@@ -26,6 +26,8 @@
 #ifndef _UINET_IF_NETMAP_H_
 #define _UINET_IF_NETMAP_H_
 
+extern uint32_t if_netmap_num_extra_bufs;
+
 int if_netmap_attach(struct uinet_if *uif);
 int if_netmap_detach(struct uinet_if *uif);
 

@@ -1,7 +1,7 @@
 /*
  * loop member variable declarations
  *
- * Copyright (c) 2007,2008,2009,2010,2011,2012 Marc Alexander Lehmann <libev@schmorp.de>
+ * Copyright (c) 2007,2008,2009,2010,2011,2012,2013 Marc Alexander Lehmann <libev@schmorp.de>
  * All rights reserved.
  * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
@@ -195,9 +195,10 @@ VARx(unsigned int, loop_count) /* total number of loop iterations/blocks */
 VARx(unsigned int, loop_depth) /* #ev_run enters - #ev_run leaves */
 
 VARx(void *, userdata)
+/* C++ doesn't support the ev_loop_callback typedef here. stinks. */
 VAR (release_cb, void (*release_cb)(EV_P) EV_THROW)
 VAR (acquire_cb, void (*acquire_cb)(EV_P) EV_THROW)
-VAR (invoke_cb , void (*invoke_cb) (EV_P))
+VAR (invoke_cb , ev_loop_callback invoke_cb)
 #endif
 
 #if EV_UINET_ENABLE || EV_GENWRAP
@@ -210,6 +211,20 @@ VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_prev_pend_head)
 VARx(ev_async, uinet_async_w)
 VARx(ev_prepare, uinet_prepare_w)
 VARx(int, uinet_in_batch)
+
+VARx(unsigned int, uinet_sts_enabled)
+VARx(UINET_LIST_HEAD(, ev_uinet_ctx), uinet_sts_ready_sockets_head)
+VARx(ev_prepare, uinet_sts_prepare_w)
+VARx(ev_check, uinet_sts_check_w)
+VARx(ev_idle, uinet_sts_idle_w)
+VARx(unsigned int, uinet_sts_if_max)
+VARx(unsigned int, uinet_sts_stack_max)
+VARx(uinet_sts_stack, uinet_sts_stacks[EV_UINET_STS_MAX_STACKS])
+VARx(uinet_sts_if, uinet_sts_ifs[EV_UINET_STS_MAX_IFS])
+#endif
+
+#if EV_COUNTERS_ENABLE || EV_GENWRAP
+VARx(ev_loop_counters, counters)
 #endif
 
 #undef VARx

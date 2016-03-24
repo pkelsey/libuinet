@@ -142,12 +142,12 @@ sblock(struct sockbuf *sb, int flags)
 	if (flags & SBL_WAIT) {
 		if ((sb->sb_flags & SB_NOINTR) ||
 		    (flags & SBL_NOINTR)) {
-			sx_xlock(&sb->sb_sx);
+			VNET_SX_XLOCK(&sb->sb_sx);
 			return (0);
 		}
-		return (sx_xlock_sig(&sb->sb_sx));
+		return (VNET_SX_XLOCK_SIG(&sb->sb_sx));
 	} else {
-		if (sx_try_xlock(&sb->sb_sx) == 0)
+		if (VNET_SX_TRY_XLOCK(&sb->sb_sx) == 0)
 			return (EWOULDBLOCK);
 		return (0);
 	}
@@ -157,7 +157,7 @@ void
 sbunlock(struct sockbuf *sb)
 {
 
-	sx_xunlock(&sb->sb_sx);
+	VNET_SX_XUNLOCK(&sb->sb_sx);
 }
 
 /*
@@ -176,15 +176,20 @@ void
 sowakeup(struct socket *so, struct sockbuf *sb)
 {
 	int ret;
+	int is_sts;
 
 	SOCKBUF_LOCK_ASSERT(sb);
 
-	selwakeuppri(&sb->sb_sel, PSOCK);
+	is_sts = CURVNET_IS_STS();
+
+	if (!is_sts)
+		selwakeuppri(&sb->sb_sel, PSOCK);
 	if (!SEL_WAITING(&sb->sb_sel))
 		sb->sb_flags &= ~SB_SEL;
 	if (sb->sb_flags & SB_WAIT) {
 		sb->sb_flags &= ~SB_WAIT;
-		wakeup(&sb->sb_cc);
+		if (!is_sts)
+			wakeup(&sb->sb_cc);
 	}
 	KNOTE_LOCKED(&sb->sb_sel.si_note, 0);
 	if (sb->sb_upcall != NULL) {
@@ -302,11 +307,17 @@ sbreserve_locked(struct sockbuf *sb, u_long cc, struct socket *so,
 	 */
 	if (cc > sb_max_adj)
 		return (0);
+
+/*
+ * No need for rlimits in uinet, so don't spend the time on the PROC_LOCK.
+ */
+#ifndef UINET
 	if (td != NULL) {
 		PROC_LOCK(td->td_proc);
 		sbsize_limit = lim_cur(td->td_proc, RLIMIT_SBSIZE);
 		PROC_UNLOCK(td->td_proc);
 	} else
+#endif
 		sbsize_limit = RLIM_INFINITY;
 	if (!chgsbsize(so->so_cred->cr_uidinfo, &sb->sb_hiwat, cc,
 	    sbsize_limit))
@@ -771,8 +782,9 @@ sbcompress(struct sockbuf *sb, struct mbuf *m, struct mbuf *n)
 		    M_WRITABLE(n) &&
 		    ((sb->sb_flags & SB_NOCOALESCE) == 0) &&
 		    m->m_len <= M_TRAILINGSPACE(n) &&
-		    n->m_type == m->m_type) {
-			if (n->m_flags & M_HOLE) {
+		    n->m_type == m->m_type && 
+		    !((m->m_flags ^ n->m_flags) & M_HOLE)) {
+			if (n->m_flags & M_HOLE) { /* combine holes */
 				n->m_len += m->m_len;
 				sb->sb_cc += m->m_len;
 				m = m_free(m);

@@ -133,10 +133,10 @@ static struct llentry *nd6_free(struct llentry *, int);
 static void nd6_llinfo_timer(void *);
 static void clear_llinfo_pqueue(struct llentry *);
 
-static VNET_DEFINE(struct callout, nd6_slowtimo_ch);
+static VNET_DEFINE(struct vnet_callout, nd6_slowtimo_ch);
 #define	V_nd6_slowtimo_ch		VNET(nd6_slowtimo_ch)
 
-VNET_DEFINE(struct callout, nd6_timer_ch);
+VNET_DEFINE(struct vnet_callout, nd6_timer_ch);
 
 void
 nd6_init(void)
@@ -154,8 +154,8 @@ nd6_init(void)
 	TAILQ_INIT(&V_nd_defrouter);
 
 	/* start timer */
-	callout_init(&V_nd6_slowtimo_ch, 0);
-	callout_reset(&V_nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL * hz,
+	vnet_callout_init(&V_nd6_slowtimo_ch, 0);
+	vnet_callout_reset(&V_nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL * hz,
 	    nd6_slowtimo, curvnet);
 }
 
@@ -164,8 +164,8 @@ void
 nd6_destroy()
 {
 
-	callout_drain(&V_nd6_slowtimo_ch);
-	callout_drain(&V_nd6_timer_ch);
+	vnet_callout_drain(&V_nd6_slowtimo_ch);
+	vnet_callout_drain(&V_nd6_timer_ch);
 }
 #endif
 
@@ -422,17 +422,17 @@ nd6_llinfo_settimer_locked(struct llentry *ln, long tick)
 	if (tick < 0) {
 		ln->la_expire = 0;
 		ln->ln_ntick = 0;
-		canceled = callout_stop(&ln->ln_timer_ch);
+		canceled = vnet_callout_stop(&ln->ln_timer_ch);
 	} else {
 		ln->la_expire = time_second + tick / hz;
 		LLE_ADDREF(ln);
 		if (tick > INT_MAX) {
 			ln->ln_ntick = tick - INT_MAX;
-			canceled = callout_reset(&ln->ln_timer_ch, INT_MAX,
+			canceled = vnet_callout_reset(&ln->ln_timer_ch, INT_MAX,
 			    nd6_llinfo_timer, ln);
 		} else {
 			ln->ln_ntick = 0;
-			canceled = callout_reset(&ln->ln_timer_ch, tick,
+			canceled = vnet_callout_reset(&ln->ln_timer_ch, tick,
 			    nd6_llinfo_timer, ln);
 		}
 	}
@@ -580,7 +580,7 @@ nd6_timer(void *arg)
 	struct nd_prefix *pr, *npr;
 	struct in6_ifaddr *ia6, *nia6;
 
-	callout_reset(&V_nd6_timer_ch, V_nd6_prune * hz,
+	vnet_callout_reset(&V_nd6_timer_ch, V_nd6_prune * hz,
 	    nd6_timer, curvnet);
 
 	/* expire default router list */
@@ -1805,7 +1805,7 @@ nd6_slowtimo(void *arg)
 	struct nd_ifinfo *nd6if;
 	struct ifnet *ifp;
 
-	callout_reset(&V_nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL * hz,
+	vnet_callout_reset(&V_nd6_slowtimo_ch, ND6_SLOWTIMER_INTERVAL * hz,
 	    nd6_slowtimo, curvnet);
 	IFNET_RLOCK_NOSLEEP();
 	TAILQ_FOREACH(ifp, &V_ifnet, if_list) {

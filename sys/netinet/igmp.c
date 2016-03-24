@@ -89,7 +89,6 @@ static struct igmp_ifinfo *
 		igi_alloc_locked(struct ifnet *);
 static void	igi_delete_locked(const struct ifnet *);
 static void	igmp_dispatch_queue(struct ifqueue *, int, const int);
-static void	igmp_fasttimo_vnet(void);
 static void	igmp_final_leave(struct in_multi *, struct igmp_ifinfo *);
 static int	igmp_handle_state_change(struct in_multi *,
 		    struct igmp_ifinfo *);
@@ -114,7 +113,6 @@ static struct mbuf *
 static char *	igmp_rec_type_to_str(const int);
 #endif
 static void	igmp_set_version(struct igmp_ifinfo *, const int);
-static void	igmp_slowtimo_vnet(void);
 static int	igmp_v1v2_queue_report(struct in_multi *, const int);
 static void	igmp_v1v2_process_group_timer(struct in_multi *, const int);
 static void	igmp_v1v2_process_querier_timers(struct igmp_ifinfo *);
@@ -184,7 +182,8 @@ static const struct netisr_handler igmp_nh = {
  * as anything which modifies ifma needs to be covered by that lock.
  * So check for ifma_protospec being NULL before proceeding.
  */
-struct mtx		 igmp_mtx;
+VNET_DEFINE(struct mtx, igmp_mtx);
+#define V_igmp_mtx	VNET_NAME(igmp_mtx)
 
 struct mbuf		*m_raopt;		 /* Router Alert option */
 MALLOC_DEFINE(M_IGMP, "igmp", "igmp state");
@@ -1443,7 +1442,7 @@ igmp_input(struct mbuf *m, int off)
 
 	ip = mtod(m, struct ip *);
 	iphlen = off;
-	igmplen = ip->ip_len;
+	igmplen = ntohs(ip->ip_len) - off;
 
 	/*
 	 * Validate lengths.
@@ -1613,31 +1612,13 @@ igmp_input(struct mbuf *m, int off)
 
 
 /*
- * Fast timeout handler (global).
- * VIMAGE: Timeout handlers are expected to service all vimages.
- */
-void
-igmp_fasttimo(void)
-{
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		igmp_fasttimo_vnet();
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
-}
-
-/*
  * Fast timeout handler (per-vnet).
  * Sends are shuffled off to a netisr to deal with Giant.
  *
  * VIMAGE: Assume caller has set up our curvnet.
  */
-static void
-igmp_fasttimo_vnet(void)
+void
+igmp_fasttimo(void)
 {
 	struct ifqueue		 scq;	/* State-change packets */
 	struct ifqueue		 qrq;	/* Query response packets */
@@ -2153,28 +2134,10 @@ igmp_v1v2_process_querier_timers(struct igmp_ifinfo *igi)
 }
 
 /*
- * Global slowtimo handler.
- * VIMAGE: Timeout handlers are expected to service all vimages.
+ * Per-vnet slowtimo handler.
  */
 void
 igmp_slowtimo(void)
-{
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);
-		igmp_slowtimo_vnet();
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
-}
-
-/*
- * Per-vnet slowtimo handler.
- */
-static void
-igmp_slowtimo_vnet(void)
 {
 	struct igmp_ifinfo *igi;
 
@@ -2226,7 +2189,7 @@ igmp_v1v2_queue_report(struct in_multi *inm, const int type)
 
 	ip = mtod(m, struct ip *);
 	ip->ip_tos = 0;
-	ip->ip_len = sizeof(struct ip) + sizeof(struct igmp);
+	ip->ip_len = htons(sizeof(struct ip) + sizeof(struct igmp));
 	ip->ip_off = 0;
 	ip->ip_p = IPPROTO_IGMP;
 	ip->ip_src.s_addr = INADDR_ANY;
@@ -3525,8 +3488,8 @@ igmp_v3_encap_report(struct ifnet *ifp, struct mbuf *m)
 
 	ip = mtod(m, struct ip *);
 	ip->ip_tos = IPTOS_PREC_INTERNETCONTROL;
-	ip->ip_len = hdrlen + igmpreclen;
-	ip->ip_off = IP_DF;
+	ip->ip_len = htons(hdrlen + igmpreclen);
+	ip->ip_off = htons(IP_DF);
 	ip->ip_p = IPPROTO_IGMP;
 	ip->ip_sum = 0;
 
@@ -3584,13 +3547,21 @@ igmp_init(void *unused __unused)
 
 	CTR1(KTR_IGMPV3, "%s: initializing", __func__);
 
-	IGMP_LOCK_INIT();
-
 	m_raopt = igmp_ra_alloc();
 
 	netisr_register(&igmp_nh);
 }
 SYSINIT(igmp_init, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, igmp_init, NULL);
+
+static void
+igmp_vnet_init(void *unused __unused)
+{
+
+	CTR2(KTR_IGMPV3, "%s: initializing for vnet %p", __func__, curvnet);
+
+	IGMP_LOCK_INIT();
+}
+VNET_SYSINIT(igmp_init, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, igmp_vnet_init, NULL);
 
 static void
 igmp_uninit(void *unused __unused)
@@ -3606,6 +3577,16 @@ igmp_uninit(void *unused __unused)
 	IGMP_LOCK_DESTROY();
 }
 SYSUNINIT(igmp_uninit, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, igmp_uninit, NULL);
+
+static void
+igmp_vnet_uninit(void *unused __unused)
+{
+
+	CTR2(KTR_IGMPV3, "%s: tearing down for vnet %p", __func__, curvnet);
+
+	IGMP_LOCK_DESTROY();
+}
+VNET_SYSUNINIT(igmp_uninit, SI_SUB_PSEUDO, SI_ORDER_MIDDLE, igmp_vnet_uninit, NULL);
 
 static void
 vnet_igmp_init(const void *unused __unused)

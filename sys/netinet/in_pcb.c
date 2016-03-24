@@ -80,6 +80,9 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/in_pcb.c 237910 2012-07-01 08:47:1
 
 #if defined(INET) || defined(INET6)
 #include <netinet/in.h>
+#ifdef INET_COPY
+#include <netinet/in_copy.h>
+#endif
 #include <netinet/in_pcb.h>
 #include <netinet/ip_var.h>
 #include <netinet/tcp_var.h>
@@ -109,7 +112,8 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/netinet/in_pcb.c 237910 2012-07-01 08:47:1
 #include <security/mac/mac_framework.h>
 #endif /* MAC */
 
-static struct callout	ipport_tick_callout;
+static VNET_DEFINE(struct vnet_callout,	ipport_tick_callout);
+#define V_ipport_tick_callout VNET(ipport_tick_callout)
 
 /*
  * These configure the range of local port addresses assigned to
@@ -139,6 +143,10 @@ VNET_DEFINE(int, ipport_tcpallocs);
 static VNET_DEFINE(int, ipport_tcplastcount);
 
 #define	V_ipport_tcplastcount		VNET(ipport_tcplastcount)
+
+#if defined(PROMISCUOUS_INET) || defined(PASSIVE_INET) || defined(INET_COPY)
+VNET_DEFINE(uint64_t, ip_flow_serial_next);
+#endif
 
 static void	in_pcbremlists(struct inpcb *inp);
 #ifdef INET
@@ -1108,10 +1116,19 @@ in_pcbconnect_setup(struct inpcb *inp, struct sockaddr *nam,
 			return (error);
 	}
 #ifdef PROMISCUOUS_INET
-	if (inp->inp_flags2 & INP_PROMISC)
+	if (inp->inp_flags2 & INP_PROMISC) {
 		oinp = in_pcblookup_hash_promisc_locked(inp->inp_pcbinfo, faddr, fport,
 		    laddr, lport, 0, NULL, NULL, inp);
-	else
+		if ((inp->inp_flags2 & INP_REUSEPORT) && (oinp != NULL) &&
+		    (oinp->inp_flags & INP_TIMEWAIT) && (oinp->inp_flags2 & INP_REUSEPORT)) {
+			struct tcptw *tw;
+
+			tw = intotw(oinp);
+			if (tw != NULL)
+				tcp_twclose(tw, 0);
+			oinp = NULL;
+		}
+	} else
 		oinp = in_pcblookup_hash_locked(inp->inp_pcbinfo, faddr, fport,
 		    laddr, lport, 0, NULL);
 #else
@@ -1347,6 +1364,12 @@ in_pcbdrop(struct inpcb *inp)
 		in_pcbgroup_remove(inp);
 #endif
 	}
+#ifdef INET_COPY
+	if (inp->inp_copy_mode & IP_COPY_MODE_ON)
+		in_copy_flush(inp, 1);
+	else
+		in_copy_dispose(inp);
+#endif
 }
 
 #ifdef INET
@@ -1868,10 +1891,10 @@ in_pcblookup_hash_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr,
 #ifdef PROMISCUOUS_INET
 static uint32_t
 in_pcbhash_promisc(uint32_t laddr, uint32_t faddr, uint16_t lport, uint16_t fport,
-		   uint16_t fibnum, struct in_l2info *l2i, uint32_t mask)
+		   struct in_l2info *l2i, uint32_t mask)
 {
-	uint32_t hash_input[4] = { laddr, faddr, (lport << 16) | fport, fibnum };
-	uint32_t hash_input_masks[4] = { 0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff };
+	uint32_t hash_input[3] = { laddr, faddr, (lport << 16) | fport };
+	uint32_t hash_input_masks[3] = { 0xffffffff, 0xffffffff, 0xffffffff };
 	uint32_t hash;
 
 	hash = in_promisc_hash32(hash_input, hash_input_masks,
@@ -1889,11 +1912,10 @@ in_pcbhash_promisc(uint32_t laddr, uint32_t faddr, uint16_t lport, uint16_t fpor
 
 
 static uint16_t
-in_pcbporthash_promisc(uint16_t lport, uint16_t fibnum, struct in_l2info *l2i,
-		       uint16_t mask)
+in_pcbporthash_promisc(uint16_t lport, struct in_l2info *l2i, uint16_t mask)
 {
-	uint32_t hash_input[2] = { lport, fibnum };
-	uint32_t hash_input_masks[2] = { 0xffffffff, 0xffffffff };
+	uint32_t hash_input[1] = { lport };
+	uint32_t hash_input_masks[2] = { 0xffffffff };
 	uint32_t hash;
 
 
@@ -1927,7 +1949,6 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 	struct inpcb *inp;
 	uint16_t fport = fport_arg, lport = lport_arg;
 	uint32_t hash;
-	uint16_t fib;
 	struct ifl2info *l2i_tag;
 	struct in_l2info *l2i;
 
@@ -1937,8 +1958,6 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 	INP_HASH_LOCK_ASSERT(pcbinfo);
 
 	if (m) {
-		fib = M_GETFIB(m);
-
 		l2i_tag = (struct ifl2info *)m_tag_locate(m,
 							  MTAG_PROMISCINET,
 							  MTAG_PROMISCINET_L2INFO,
@@ -1952,7 +1971,6 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 		KASSERT(ctx_inp != NULL,
 			("%s: Both mbuf and ctx_inp are NULL", __func__));
 
-		fib = ctx_inp->inp_fibnum;
 		l2i = ctx_inp->inp_l2info;
 	}
 
@@ -1960,7 +1978,7 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 	 * First look for an exact match.
 	 */
 	hash = in_pcbhash_promisc(laddr.s_addr, faddr.s_addr, lport, fport,
-				  fib, l2i, pcbinfo->ipi_hashmask);
+				  l2i, pcbinfo->ipi_hashmask);
 	head = &pcbinfo->ipi_hashbase[hash];
 	LIST_FOREACH(inp, head, inp_hash) {
 #ifdef INET6
@@ -1976,8 +1994,7 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 		if (prison_flag(inp->inp_cred, PR_IP4))
 			continue;
 
-		if (inp->inp_fibnum == fib &&
-		    inp->inp_faddr.s_addr == faddr.s_addr &&
+		if (inp->inp_faddr.s_addr == faddr.s_addr &&
 		    inp->inp_laddr.s_addr == laddr.s_addr &&
 		    inp->inp_fport == fport &&
 		    inp->inp_lport == lport) {
@@ -2013,8 +2030,6 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 		 *	7. specific local addr, IN_PROMISC_PORT_ANY, any tags
 		 *	8. INADDR_ANY         , IN_PROMISC_PORT_ANY, any tags
 		 *
-		 * fib must always match
-		 *
 		 * Note that in the case of an incoming packet with no tags,
 		 * the hashes computed for the first four search phases will
 		 * be identical to the hashes computed for the second four
@@ -2030,7 +2045,7 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 				hash = hash_history[i] =
 				    in_pcbhash_promisc(laddr_to_match.s_addr, INADDR_ANY,
 						       lport_to_match, IN_PROMISC_PORT_ANY,
-						       fib, any_tag_flag ? NULL : l2i,
+						       any_tag_flag ? NULL : l2i,
 						       pcbinfo->ipi_hashmask);
 			} else {
 				/* There are no tags on the inbound packet
@@ -2055,8 +2070,7 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 				if (inp->inp_faddr.s_addr != INADDR_ANY ||
 				    inp->inp_laddr.s_addr != laddr_to_match.s_addr ||
 				    inp->inp_lport != lport_to_match ||
-				    (inp_l2i->inl2i_flags & INL2I_TAG_ANY) != any_tag_flag || 
-				    inp->inp_fibnum != fib)
+				    (inp_l2i->inl2i_flags & INL2I_TAG_ANY) != any_tag_flag)
 					continue;
 				
 				/*
@@ -2257,8 +2271,8 @@ in_pcbinshash_internal(struct inpcb *inp, int do_pcbgroup_update)
 		hashkey_laddr = inp->inp_laddr.s_addr;
 
 		hashkey = in_pcbhash_promisc(hashkey_laddr, hashkey_faddr,
-		     inp->inp_lport, inp->inp_fport, inp->inp_fibnum,
-		     inp->inp_l2info, pcbinfo->ipi_hashmask);
+		     inp->inp_lport, inp->inp_fport, inp->inp_l2info,
+		     pcbinfo->ipi_hashmask);
 	} else
 #endif /* PROMISCUOUS_INET */
 	hashkey = INP_PCBHASH(hashkey_faddr,
@@ -2268,8 +2282,8 @@ in_pcbinshash_internal(struct inpcb *inp, int do_pcbgroup_update)
 
 #ifdef PROMISCUOUS_INET
 	if (inp->inp_flags2 & INP_PROMISC)
-		hashkey = in_pcbporthash_promisc(inp->inp_lport, inp->inp_fibnum,
-			inp->inp_l2info, pcbinfo->ipi_hashmask);
+		hashkey = in_pcbporthash_promisc(inp->inp_lport, inp->inp_l2info,
+			pcbinfo->ipi_hashmask);
 	else
 #endif /* PROMISCUOUS_INET */
 	hashkey = INP_PCBPORTHASH(inp->inp_lport, pcbinfo->ipi_porthashmask);
@@ -2370,8 +2384,8 @@ in_pcbrehash_mbuf(struct inpcb *inp, struct mbuf *m)
 		hashkey_laddr = inp->inp_laddr.s_addr;
 
 		hashkey = in_pcbhash_promisc(hashkey_laddr, hashkey_faddr,
-		     inp->inp_lport, inp->inp_fport, inp->inp_fibnum,
-		     inp->inp_l2info, pcbinfo->ipi_hashmask);
+		     inp->inp_lport, inp->inp_fport, inp->inp_l2info,
+		     pcbinfo->ipi_hashmask);
 	} else
 #endif /* PROMISCUOUS_INET */
 	hashkey = INP_PCBHASH(hashkey_faddr,
@@ -2458,31 +2472,33 @@ in_pcbsosetlabel(struct socket *so)
  * ipport_randomcps for at least ipport_randomtime seconds.
  */
 static void
-ipport_tick(void *xtp)
+ipport_tick(void *vnet)
 {
-	VNET_ITERATOR_DECL(vnet_iter);
-
-	VNET_LIST_RLOCK_NOSLEEP();
-	VNET_FOREACH(vnet_iter) {
-		CURVNET_SET(vnet_iter);	/* XXX appease INVARIANTS here */
-		if (V_ipport_tcpallocs <=
-		    V_ipport_tcplastcount + V_ipport_randomcps) {
-			if (V_ipport_stoprandom > 0)
-				V_ipport_stoprandom--;
-		} else
-			V_ipport_stoprandom = V_ipport_randomtime;
-		V_ipport_tcplastcount = V_ipport_tcpallocs;
-		CURVNET_RESTORE();
-	}
-	VNET_LIST_RUNLOCK_NOSLEEP();
-	callout_reset(&ipport_tick_callout, hz, ipport_tick, NULL);
+	CURVNET_SET(vnet);
+	if (V_ipport_tcpallocs <=
+	    V_ipport_tcplastcount + V_ipport_randomcps) {
+		if (V_ipport_stoprandom > 0)
+			V_ipport_stoprandom--;
+	} else
+		V_ipport_stoprandom = V_ipport_randomtime;
+	V_ipport_tcplastcount = V_ipport_tcpallocs;
+	vnet_callout_reset(&V_ipport_tick_callout, hz, ipport_tick, curvnet);
+	CURVNET_RESTORE();
 }
 
+/*
+ * This is only called for vnets that are not in single-thread-stack mode -
+ * the event loops (and consequently, callouts) of vnets in
+ * single-thread-stack mode should have been stopped by the time the
+ * shutdown_pre_sync EVENTHANDLER runs, so it is not necessary for such
+ * vnets.
+ */
 static void
-ip_fini(void *xtp)
+ip_fini(void *vnet)
 {
-
-	callout_stop(&ipport_tick_callout);
+	CURVNET_SET(vnet);
+	vnet_callout_stop(&V_ipport_tick_callout);
+	CURVNET_RESTORE();
 }
 
 /* 
@@ -2494,12 +2510,20 @@ ipport_tick_init(const void *unused __unused)
 {
 
 	/* Start ipport_tick. */
-	callout_init(&ipport_tick_callout, CALLOUT_MPSAFE);
-	callout_reset(&ipport_tick_callout, 1, ipport_tick, NULL);
-	EVENTHANDLER_REGISTER(shutdown_pre_sync, ip_fini, NULL,
-		SHUTDOWN_PRI_DEFAULT);
+	vnet_callout_init(&V_ipport_tick_callout, CALLOUT_MPSAFE);
+	vnet_callout_reset(&V_ipport_tick_callout, 1, ipport_tick, curvnet);
+	/*
+	 * Only register a shutdown event handler for vnets that are not in
+	 * single-thread-stack mode as it is unsafe (event handlers will not
+	 * be run in the event loop contexts of those stacks) and
+	 * unnecessary (the event loops for such stacks should have been
+	 * stopped by the time the shutdown_pre_sync EVENTHANDLER runs).
+	 */
+	if (!CURVNET_IS_STS())
+		EVENTHANDLER_REGISTER(shutdown_pre_sync, ip_fini, curvnet,
+			SHUTDOWN_PRI_DEFAULT);
 }
-SYSINIT(ipport_tick_init, SI_SUB_PROTO_DOMAIN, SI_ORDER_MIDDLE, 
+VNET_SYSINIT(ipport_tick_init, SI_SUB_PROTO_DOMAIN, SI_ORDER_MIDDLE, 
     ipport_tick_init, NULL);
 
 void

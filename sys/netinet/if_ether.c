@@ -182,9 +182,9 @@ arptimer(void *arg)
 	if (lle->la_flags & LLE_STATIC)
 		LLE_WUNLOCK(lle);
 	else {
-		if (!callout_pending(&lle->la_timer) &&
-		    callout_active(&lle->la_timer)) {
-			callout_stop(&lle->la_timer);
+		if (!vnet_callout_pending(&lle->la_timer) &&
+		    vnet_callout_active(&lle->la_timer)) {
+			vnet_callout_stop(&lle->la_timer);
 			LLE_REMREF(lle);
 			pkts_dropped = llentry_free(lle);
 			ARPSTAT_ADD(dropped, pkts_dropped);
@@ -406,7 +406,7 @@ retry:
 
 		LLE_ADDREF(la);
 		la->la_expire = time_uptime;
-		canceled = callout_reset(&la->la_timer, hz * V_arpt_down,
+		canceled = vnet_callout_reset(&la->la_timer, hz * V_arpt_down,
 		    arptimer, la);
 		if (canceled)
 			LLE_REMREF(la);
@@ -743,7 +743,7 @@ match:
 
 			LLE_ADDREF(la);
 			la->la_expire = time_uptime + V_arpt_keep;
-			canceled = callout_reset(&la->la_timer,
+			canceled = vnet_callout_reset(&la->la_timer,
 			    hz * V_arpt_keep, arptimer, la);
 			if (canceled)
 				LLE_REMREF(la);

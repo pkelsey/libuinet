@@ -78,6 +78,7 @@
 #endif /* __FreeBSD__ */
 
 #include <sys/mman.h>
+#include <sys/stat.h>
 
 #include "uinet_api.h"
 #include "uinet_host_interface.h"
@@ -396,6 +397,40 @@ uhi_close(int d)
 }
 
 
+int
+uhi_mkdir(const char *path, unsigned int mode)
+{
+	unsigned int host_mode;
+
+	host_mode = 0;
+	if ((mode & UHI_S_IRWXU) == UHI_S_IRWXU)
+		host_mode |= S_IRWXU;
+	else {
+		if ((mode & UHI_S_IRUSR) == UHI_S_IRUSR) host_mode |= S_IRUSR;
+		if ((mode & UHI_S_IWUSR) == UHI_S_IWUSR) host_mode |= S_IWUSR;
+		if ((mode & UHI_S_IXUSR) == UHI_S_IXUSR) host_mode |= S_IXUSR;
+	}
+	if ((mode & UHI_S_IRWXG) == UHI_S_IRWXG)
+		host_mode |= S_IRWXG;
+	else {
+		if ((mode & UHI_S_IRGRP) == UHI_S_IRGRP) host_mode |= S_IRGRP;
+		if ((mode & UHI_S_IWGRP) == UHI_S_IWGRP) host_mode |= S_IWGRP;
+		if ((mode & UHI_S_IXGRP) == UHI_S_IXGRP) host_mode |= S_IXGRP;
+	}
+	if ((mode & UHI_S_IRWXO) == UHI_S_IRWXO)
+		host_mode |= S_IRWXO;
+	else {
+		if ((mode & UHI_S_IROTH) == UHI_S_IROTH) host_mode |= S_IROTH;
+		if ((mode & UHI_S_IWOTH) == UHI_S_IWOTH) host_mode |= S_IWOTH;
+		if ((mode & UHI_S_IXOTH) == UHI_S_IXOTH) host_mode |= S_IXOTH;
+	}
+
+	if (mkdir(path, host_mode))
+		return (errno);
+	else
+		return (0);
+}
+
 void *
 uhi_mmap(void *addr, uint64_t len, int prot, int flags, int fd, uint64_t offset)
 {
@@ -532,7 +567,6 @@ pthread_start_routine(void *arg)
 {
 	struct uhi_thread_start_args *tsa = arg;
 	int error;
-	int cpuid;
 
 	/*
 	 * uinet_shutdown() waits for a message from the shutdown thread
@@ -551,30 +585,22 @@ pthread_start_routine(void *arg)
 	setitimer(ITIMER_PROF, &prof_itimer, NULL);
 #endif /* UINET_PROFILE */
 
-	error = uhi_tls_set(tsa->tls_key, tsa->tls_data);
-	if (error != 0)
-		printf("Warning: unable to set user-supplied thread-specific data (%d)\n", error);
+	if (tsa->set_tls) {
+		error = uhi_tls_set(tsa->tls_key, tsa->tls_data);
+		if (error != 0)
+			printf("Warning: unable to set user-supplied thread-specific data (%d)\n", error);
+	}
 
 	error = uhi_tls_set(uhi_thread_tls_key, tsa);
 	if (error != 0)
 		printf("Warning: unable to set uhi thread-specific data (%d)\n", error);
 
-	if (tsa->host_thread_id) {
-		*tsa->host_thread_id = (uhi_thread_t)pthread_self();
-	}
-
-	if (tsa->oncpu) {
-		cpuid = uhi_thread_bound_cpu();
-		*(tsa->oncpu) = (cpuid == -1) ? 0 : cpuid;
-	}
-
-#if defined(__FreeBSD__)
-	pthread_set_name_np(pthread_self(), tsa->name);
-#elif defined(__linux__)
-	pthread_setname_np(pthread_self(), tsa->name);
-#endif
+	uhi_thread_set_name(tsa->name);
 
 	uhi_thread_run_hooks(UHI_THREAD_HOOK_START);
+
+	if (tsa->start_notify_routine)
+		tsa->start_notify_routine(tsa->start_notify_routine_arg);
 
 	tsa->start_routine(tsa->start_routine_arg);
 
@@ -660,6 +686,18 @@ uhi_thread_run_hooks(int which)
 	_uhi_mutex_unlock(&uhi_thread_hook_lock, NULL, UINET_LOCK_FILE, UINET_LOCK_LINE);
 }
 
+
+void
+uhi_thread_set_name(const char *name)
+{
+	if (name != NULL) {
+#if defined(__FreeBSD__)
+		pthread_set_name_np(pthread_self(), name);
+#elif defined(__linux__)
+		pthread_setname_np(pthread_self(), name);
+#endif
+	}
+}
 
 int
 uhi_tls_key_create(uhi_tls_key_t *key, void (*destructor)(void *))

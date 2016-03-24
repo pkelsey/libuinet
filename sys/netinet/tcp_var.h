@@ -36,6 +36,7 @@
 #include <netinet/tcp.h>
 
 #ifdef _KERNEL
+#include "opt_inet.h"
 #include "opt_passiveinet.h"
 
 #include <net/vnet.h>
@@ -52,7 +53,8 @@ VNET_DECLARE(int, tcp_do_rfc1323);
 struct tseg_qent {
 	LIST_ENTRY(tseg_qent) tqe_q;
 	int	tqe_len;		/* TCP segment data length */
-	struct	tcphdr *tqe_th;		/* a pointer to tcp header */
+	uint32_t tqe_seq;		/* copy of TCP sequence no. */
+	uint8_t	tqe_flags;		/* copy of TCP header flags */
 	struct	mbuf	*tqe_m;		/* mbuf contains packet */
 #ifdef PASSIVE_INET
 	TAILQ_ENTRY(tseg_qent) tqe_ageq;
@@ -114,6 +116,7 @@ struct tcpcb {
 	struct	tsegageqe_head t_segageq; /* segment age queue */
 #endif
 	void	*t_pspare[2];		/* new reassembly queue */
+	
 	int	t_segqlen;		/* segment reassembly queue length */
 	int	t_dupacks;		/* consecutive dup acks recd */
 
@@ -221,11 +224,9 @@ struct tcpcb {
 	u_int	t_keepcnt;		/* number of keepalives before close */
 
 #ifdef PASSIVE_INET
-	uint32_t t_ispare[7];		/* 5 UTO, 3 TBD, 1 PASSIVE */
 	uint32_t t_reassdl;
-#else
-	uint32_t t_ispare[8];		/* 5 UTO, 3 TBD */
 #endif
+	uint32_t t_ispare[8];	/* 5 UTO, 3 TBD */
 	void	*t_pspare2[4];		/* 4 TBD */
 	uint64_t _pad[6];		/* 6 TBD (1-2 CC/RTT?) */
 };
@@ -248,7 +249,7 @@ struct tcpcb {
 #define	TF_NOPUSH	0x001000	/* don't push */
 #define	TF_PREVVALID	0x002000	/* saved values for bad rxmit valid */
 #define	TF_MORETOCOME	0x010000	/* More data to be appended to sock */
-#define	TF_LQ_OVERFLOW	0x020000	/* listen queue overflow */
+#define	TF_NO_TIMEWAIT	0x020000	/* skip TIME_WAIT state */
 #define	TF_LASTIDLE	0x040000	/* connection was previously idle */
 #define	TF_RXWIN0SENT	0x080000	/* sent a receiver win 0 in response */
 #define	TF_FASTRECOVERY	0x100000	/* in NewReno Fast Recovery */
@@ -262,6 +263,7 @@ struct tcpcb {
 #define	TF_ECN_SND_ECE	0x10000000	/* ECN ECE in queue */
 #define	TF_CONGRECOVERY	0x20000000	/* congestion recovery mode */
 #define	TF_WASCRECOVERY	0x40000000	/* was in congestion recovery */
+#define	TF_TRIVIAL_ISN	0x80000000	/* use cheap, insecure ISN */
 
 #define	IN_FASTRECOVERY(t_flags)	(t_flags & TF_FASTRECOVERY)
 #define	ENTER_FASTRECOVERY(t_flags)	t_flags |= TF_FASTRECOVERY
@@ -317,8 +319,8 @@ struct tcpopt {
 #define	TOF_MAXOPT	0x0100
 	u_int32_t	to_tsval;	/* new timestamp */
 	u_int32_t	to_tsecr;	/* reflected timestamp */
-	u_char		*to_sacks;	/* pointer to the first SACK blocks */
-	u_char		*to_signature;	/* pointer to the TCP-MD5 signature */
+	const uint8_t	*to_sacks;	/* pointer to the first SACK blocks */
+	const uint8_t	*to_signature;	/* pointer to the TCP-MD5 signature */
 	u_int16_t	to_mss;		/* maximum segment size */
 	u_int8_t	to_wscale;	/* window scaling */
 	u_int8_t	to_nsacks;	/* number of SACK blocks */
@@ -700,9 +702,9 @@ void	 tcp_reass_destroy(void);
 void	 tcp_input(struct mbuf *, int);
 #define	TI_UNLOCKED	1
 #define	TI_WLOCKED	2
-void	 tcp_do_segment(struct mbuf *m, struct tcphdr *th, struct socket *so,
-	     struct tcpcb *tp, int drop_hdrlen, int tlen, uint8_t iptos,
-	     int ti_locked, int no_unlock);
+void	 tcp_do_segment(struct mbuf *m, struct tcphdr *th, const uint8_t *optp,
+	     struct socket *so, struct tcpcb *tp, int drop_hdrlen, int tlen,
+	     uint8_t iptos, int ti_locked, int no_unlock);
 u_long	 tcp_maxmtu(struct in_conninfo *, int *);
 u_long	 tcp_maxmtu6(struct in_conninfo *, int *);
 void	 tcp_mss_update(struct tcpcb *, int, int, struct hc_metrics_lite *,

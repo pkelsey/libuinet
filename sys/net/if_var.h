@@ -111,6 +111,13 @@ struct	ifqueue {
 	int	ifq_maxlen;
 	int	ifq_drops;
 	struct	mtx ifq_mtx;
+	
+	/*
+	 * ifq_vnet is used to avoid queue locking when running in STS mode.
+	 * It's OK if it is NULL, as that only leads to unnecessary locking
+	 * if running in STS mode.
+	 */
+	struct	vnet *ifq_vnet;
 };
 
 /*
@@ -208,7 +215,7 @@ struct ifnet {
 	 */
 	char	if_cspare[3];
 	int	if_ispare[4];
-	void	*if_pspare[8];		/* 1 netmap, 7 TDB */
+	void	*if_pspare[8];		/* 1 netmap, 1 UINET, 6 TDB */
 };
 
 typedef void if_init_f_t(void *);
@@ -250,21 +257,59 @@ typedef void if_init_f_t(void *);
 #define	if_list		if_link
 #define	if_name(ifp)	((ifp)->if_xname)
 
+#if defined(VIMAGE) && (defined(VIMAGE_STS) || defined(VIMAGE_STS_ONLY))
+
+#define IF_MTX_INIT(v, m, n, t, o)	(VNET_IS_STS(v) ? (void)0 : mtx_init(m, n, t, o))
+#define IF_MTX_DESTROY(v, m)		(VNET_IS_STS(v) ? (void)0 : mtx_destroy(m))
+#define IF_MTX_LOCK(v, m)		(VNET_IS_STS(v) ? (void)0 : mtx_lock(m))
+#define IF_MTX_UNLOCK(v, m)		(VNET_IS_STS(v) ? (void)0 : mtx_unlock(m))
+#define IF_MTX_ASSERT(v, m, a)		(VNET_IS_STS(v) ? (void)0 : mtx_assert(m, a))
+
+#define IF_RWLOCK_INIT(v, r, n, o) 	(VNET_IS_STS(v) ? (void)0 : rw_init_flags(r, n, o)) 
+#define IF_RWLOCK_DESTROY(v, r)		(VNET_IS_STS(v) ? (void)0 : rw_destroy(r))
+#define IF_RWLOCK_RLOCK(v, r) 		(VNET_IS_STS(v) ? (void)0 : rw_rlock(r))
+#define IF_RWLOCK_WLOCK(v, r) 		(VNET_IS_STS(v) ? (void)0 : rw_wlock(r))
+#define IF_RWLOCK_TRY_RLOCK(v, r)	(VNET_IS_STS(v) ?       1 : rw_try_rlock(r))
+#define IF_RWLOCK_TRY_WLOCK(v, r)	(VNET_IS_STS(v) ?       1 : rw_try_wlock(r))
+#define IF_RWLOCK_RUNLOCK(v, r) 	(VNET_IS_STS(v) ? (void)0 : rw_runlock(r))
+#define IF_RWLOCK_WUNLOCK(v, r) 	(VNET_IS_STS(v) ? (void)0 : rw_wunlock(r))
+#define IF_RWLOCK_ASSERT(v, r, a)	(VNET_IS_STS(v) ? (void)0 : rw_assert(r, a))
+
+#else /* !VIMAGE || !(VIMAGE_STS || VIMAGE_STS_ONLY) */
+
+#define IF_MTX_INIT(v, m, n, t, o)	mtx_init(m, n, t, o)
+#define IF_MTX_DESTROY(v, m)		mtx_destroy(m)
+#define IF_MTX_LOCK(v, m)		mtx_lock(m)
+#define IF_MTX_UNLOCK(v, m)		mtx_unlock(m)
+#define IF_MTX_ASSERT(v, m, a)		mtx_assert(m, a)
+
+#define IF_RWLOCK_INIT(v, r, n, o) 	rw_init_flags(r, n, o) 
+#define IF_RWLOCK_DESTROY(v, r)		rw_destroy(r)
+#define IF_RWLOCK_RLOCK(v, r) 		rw_rlock(r)
+#define IF_RWLOCK_WLOCK(v, r) 		rw_wlock(r)
+#define IF_RWLOCK_TRY_RLOCK(v, r)	rw_try_rlock(r)
+#define IF_RWLOCK_TRY_WLOCK(v, r)	rw_try_wlock(r)
+#define IF_RWLOCK_RUNLOCK(v, r) 	rw_runlock(r)
+#define IF_RWLOCK_WUNLOCK(v, r) 	rw_wunlock(r)
+#define IF_RWLOCK_ASSERT(v, r, a)	rw_assert(r, a)
+
+#endif /* VIMAGE && (VIMAGE_STS || VIMAGE_STS_ONLY) */
+
 /*
  * Locks for address lists on the network interface.
  */
-#define	IF_ADDR_LOCK_INIT(if)	mtx_init(&(if)->if_addr_mtx,		\
-				    "if_addr_mtx", NULL, MTX_DEF)
-#define	IF_ADDR_LOCK_DESTROY(if)	mtx_destroy(&(if)->if_addr_mtx)
-#define	IF_ADDR_WLOCK(if)	mtx_lock(&(if)->if_addr_mtx)
-#define	IF_ADDR_WUNLOCK(if)	mtx_unlock(&(if)->if_addr_mtx)
-#define	IF_ADDR_RLOCK(if)	mtx_lock(&(if)->if_addr_mtx)
-#define	IF_ADDR_RUNLOCK(if)	mtx_unlock(&(if)->if_addr_mtx)
-#define	IF_ADDR_LOCK_ASSERT(if)	mtx_assert(&(if)->if_addr_mtx, MA_OWNED)
-#define	IF_ADDR_WLOCK_ASSERT(if)	mtx_assert(&(if)->if_addr_mtx, MA_OWNED)
+#define	IF_ADDR_LOCK_INIT(if)		IF_MTX_INIT((if)->if_vnet, &(if)->if_addr_mtx, \
+				    		"if_addr_mtx", NULL, MTX_DEF)
+#define	IF_ADDR_LOCK_DESTROY(if)	IF_MTX_DESTROY((if)->if_vnet, &(if)->if_addr_mtx)
+#define	IF_ADDR_WLOCK(if)		IF_MTX_LOCK((if)->if_vnet, &(if)->if_addr_mtx)
+#define	IF_ADDR_WUNLOCK(if)		IF_MTX_UNLOCK((if)->if_vnet, &(if)->if_addr_mtx)
+#define	IF_ADDR_RLOCK(if)		IF_MTX_LOCK((if)->if_vnet, &(if)->if_addr_mtx)
+#define	IF_ADDR_RUNLOCK(if)		IF_MTX_UNLOCK((if)->if_vnet, &(if)->if_addr_mtx)
+#define	IF_ADDR_LOCK_ASSERT(if)		IF_MTX_ASSERT((if)->if_vnet, &(if)->if_addr_mtx, MA_OWNED)
+#define	IF_ADDR_WLOCK_ASSERT(if)	IF_MTX_ASSERT((if)->if_vnet, &(if)->if_addr_mtx, MA_OWNED)
 /* XXX: Compat. */
-#define	IF_ADDR_LOCK(if)	IF_ADDR_WLOCK(if)
-#define	IF_ADDR_UNLOCK(if)	IF_ADDR_WUNLOCK(if)
+#define	IF_ADDR_LOCK(if)		IF_ADDR_WLOCK(if)
+#define	IF_ADDR_UNLOCK(if)		IF_ADDR_WUNLOCK(if)
 
 /*
  * Function variations on locking macros intended to be used by loadable
@@ -282,9 +327,11 @@ void	if_maddr_runlock(struct ifnet *ifp);	/* if_multiaddrs */
  * (defined above).  Entries are added to and deleted from these structures
  * by these macros, which should be called with ipl raised to splimp().
  */
-#define IF_LOCK(ifq)		mtx_lock(&(ifq)->ifq_mtx)
-#define IF_UNLOCK(ifq)		mtx_unlock(&(ifq)->ifq_mtx)
-#define	IF_LOCK_ASSERT(ifq)	mtx_assert(&(ifq)->ifq_mtx, MA_OWNED)
+#define IF_LOCK_INIT(ifq, n, t,o) IF_MTX_INIT((ifq)->ifq_vnet, &(ifq)->ifq_mtx, n, t, o)
+#define IF_LOCK_DESTROY(ifq)	IF_MTX_DESTROY((ifq)->ifq_vnet, &(ifq)->ifq_mtx)
+#define IF_LOCK(ifq)		IF_MTX_LOCK((ifq)->ifq_vnet, &(ifq)->ifq_mtx)
+#define IF_UNLOCK(ifq)		IF_MTX_UNLOCK((ifq)->ifq_vnet, &(ifq)->ifq_mtx)
+#define	IF_LOCK_ASSERT(ifq)	IF_MTX_ASSERT((ifq)->ifq_vnet, &(ifq)->ifq_mtx, MA_OWNED)
 #define	_IF_QFULL(ifq)		((ifq)->ifq_len >= (ifq)->ifq_maxlen)
 #define	_IF_DROP(ifq)		((ifq)->ifq_drops++)
 #define	_IF_QLEN(ifq)		((ifq)->ifq_len)
@@ -415,19 +462,19 @@ typedef void (*group_change_event_handler_t)(void *, const char *);
 EVENTHANDLER_DECLARE(group_change_event, group_change_event_handler_t);
 
 #define	IF_AFDATA_LOCK_INIT(ifp)	\
-	rw_init(&(ifp)->if_afdata_lock, "if_afdata")
+	IF_RWLOCK_INIT((ifp)->if_vnet, &(ifp)->if_afdata_lock, "if_afdata", 0)
 
-#define	IF_AFDATA_WLOCK(ifp)	rw_wlock(&(ifp)->if_afdata_lock)
-#define	IF_AFDATA_RLOCK(ifp)	rw_rlock(&(ifp)->if_afdata_lock)
-#define	IF_AFDATA_WUNLOCK(ifp)	rw_wunlock(&(ifp)->if_afdata_lock)
-#define	IF_AFDATA_RUNLOCK(ifp)	rw_runlock(&(ifp)->if_afdata_lock)
+#define	IF_AFDATA_WLOCK(ifp)	IF_RWLOCK_WLOCK((ifp)->if_vnet, &(ifp)->if_afdata_lock)
+#define	IF_AFDATA_RLOCK(ifp)	IF_RWLOCK_RLOCK((ifp)->if_vnet, &(ifp)->if_afdata_lock)
+#define	IF_AFDATA_WUNLOCK(ifp)	IF_RWLOCK_WUNLOCK((ifp)->if_vnet, &(ifp)->if_afdata_lock)
+#define	IF_AFDATA_RUNLOCK(ifp)	IF_RWLOCK_RUNLOCK((ifp)->if_vnet, &(ifp)->if_afdata_lock)
 #define	IF_AFDATA_LOCK(ifp)	IF_AFDATA_WLOCK(ifp)
 #define	IF_AFDATA_UNLOCK(ifp)	IF_AFDATA_WUNLOCK(ifp)
-#define	IF_AFDATA_TRYLOCK(ifp)	rw_try_wlock(&(ifp)->if_afdata_lock)
-#define	IF_AFDATA_DESTROY(ifp)	rw_destroy(&(ifp)->if_afdata_lock)
+#define	IF_AFDATA_TRYLOCK(ifp)	IF_RWLOCK_TRY_WLOCK((ifp)->if_vnet, &(ifp)->if_afdata_lock)
+#define	IF_AFDATA_DESTROY(ifp)	IF_RWLOCK_DESTROY((ifp)->if_vnet, &(ifp)->if_afdata_lock)
 
-#define	IF_AFDATA_LOCK_ASSERT(ifp)	rw_assert(&(ifp)->if_afdata_lock, RA_LOCKED)
-#define	IF_AFDATA_UNLOCK_ASSERT(ifp)	rw_assert(&(ifp)->if_afdata_lock, RA_UNLOCKED)
+#define	IF_AFDATA_LOCK_ASSERT(ifp)	IF_RWLOCK_ASSERT((ifp)->if_vnet, &(ifp)->if_afdata_lock, RA_LOCKED)
+#define	IF_AFDATA_UNLOCK_ASSERT(ifp)	IF_RWLOCK_ASSERT((ifp)->if_vnet, &(ifp)->if_afdata_lock, RA_UNLOCKED)
 
 int	if_handoff(struct ifqueue *ifq, struct mbuf *m, struct ifnet *ifp,
 	    int adjust);
@@ -760,11 +807,16 @@ struct ifaddr {
 #define	ifa_list	ifa_link
 
 #ifdef _KERNEL
-#define	IFA_LOCK(ifa)		mtx_lock(&(ifa)->ifa_mtx)
-#define	IFA_UNLOCK(ifa)		mtx_unlock(&(ifa)->ifa_mtx)
+#define IFA_TO_VNET(ifa)	((ifa)->ifa_ifp->if_vnet)
+
+#define IFA_LOCK_INIT(ifa)	IF_MTX_INIT(IFA_TO_VNET(ifa), &(ifa)->ifa_mtx, \
+				    "ifaddr", NULL, MTX_DEF)
+#define IFA_LOCK_DESTROY(ifa)	IF_MTX_DESTROY(IFA_TO_VNET(ifa), &(ifa)->ifa_mtx)
+#define	IFA_LOCK(ifa)		IF_MTX_LOCK(IFA_TO_VNET(ifa), &(ifa)->ifa_mtx)
+#define	IFA_UNLOCK(ifa)		IF_MTX_UNLOCK(IFA_TO_VNET(ifa), &(ifa)->ifa_mtx)
 
 void	ifa_free(struct ifaddr *ifa);
-void	ifa_init(struct ifaddr *ifa);
+void	ifa_init(struct ifaddr *ifa, struct ifnet *ifp);
 void	ifa_ref(struct ifaddr *ifa);
 #endif
 
@@ -840,11 +892,6 @@ extern	struct sx ifnet_sxlock;
 struct ifnet	*ifnet_byindex(u_short idx);
 struct ifnet	*ifnet_byindex_locked(u_short idx);
 struct ifnet	*ifnet_byindex_ref(u_short idx);
-#ifdef PROMISCUOUS_INET
-struct ifnet	*ifnet_byfib(unsigned int fib);
-struct ifnet	*ifnet_byfib_locked(unsigned int fib);
-struct ifnet	*ifnet_byfib_ref(unsigned int fib);
-#endif
 
 /*
  * Given the index, ifaddr_byindex() returns the one and only

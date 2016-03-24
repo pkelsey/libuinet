@@ -47,6 +47,8 @@
 #include <sys/sockstate.h>
 #ifdef _KERNEL
 #include <sys/sockopt.h>
+
+#include <net/vnet.h>
 #endif
 
 struct vnet;
@@ -130,7 +132,6 @@ struct socket {
 	 * so_user_cookie is used by ipfw/dummynet.
 	 */
 	int so_fibnum;		/* routing domain for this socket */
-	int so_altfibnum;
 	uint32_t so_user_cookie;
 
 	struct so_upcallprep {
@@ -151,17 +152,23 @@ struct socket {
 
 
 #ifdef _KERNEL
+
 /*
  * Global accept mutex to serialize access to accept queues and
  * fields associated with multiple sockets.  This allows us to
  * avoid defining a lock order between listen and accept sockets
  * until such time as it proves to be a good idea.
  */
-extern struct mtx accept_mtx;
-#define	ACCEPT_LOCK_ASSERT()		mtx_assert(&accept_mtx, MA_OWNED)
-#define	ACCEPT_UNLOCK_ASSERT()		mtx_assert(&accept_mtx, MA_NOTOWNED)
-#define	ACCEPT_LOCK()			mtx_lock(&accept_mtx)
-#define	ACCEPT_UNLOCK()			mtx_unlock(&accept_mtx)
+VNET_DECLARE(struct mtx, accept_mtx);
+#define V_accept_mtx	VNET(accept_mtx)
+
+#define ACCEPT_LOCK_INIT()					\
+	VNET_MTX_INIT(&V_accept_mtx, "accept", NULL, MTX_DEF)
+#define ACCEPT_LOCK_DESTROY()		VNET_MTX_DESTROY(&V_accept_mtx)
+#define	ACCEPT_LOCK_ASSERT()		VNET_MTX_ASSERT(&V_accept_mtx, MA_OWNED)
+#define	ACCEPT_UNLOCK_ASSERT()		VNET_MTX_ASSERT(&V_accept_mtx, MA_NOTOWNED)
+#define	ACCEPT_LOCK()			VNET_MTX_LOCK(&V_accept_mtx)
+#define	ACCEPT_UNLOCK()			VNET_MTX_UNLOCK(&V_accept_mtx)
 
 /*
  * Per-socket mutex: we reuse the receive socket buffer mutex for space
@@ -341,6 +348,12 @@ MALLOC_DECLARE(M_ACCF);
 MALLOC_DECLARE(M_PCB);
 MALLOC_DECLARE(M_SONAME);
 #endif
+
+VNET_DECLARE(int, numopensockets);
+#define V_numopensockets	VNET(numopensockets)
+
+VNET_DECLARE(so_gen_t, so_gencnt);
+#define V_so_gencnt		VNET(so_gencnt)
 
 extern int	maxsockets;
 extern u_long	sb_max;

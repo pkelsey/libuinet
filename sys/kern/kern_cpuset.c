@@ -61,6 +61,7 @@ __FBSDID("$FreeBSD: release/9.1.0/sys/kern/kern_cpuset.c 225617 2011-09-16 13:58
 #include <ddb/ddb.h>
 #endif /* DDB */
 
+#ifndef CPUSET_STR_FUNC_ONLY
 /*
  * cpusets provide a mechanism for creating and manipulating sets of
  * processors for the purpose of constraining the scheduling of threads to
@@ -636,6 +637,7 @@ cpusetobj_ffs(const cpuset_t *set)
 	}
 	return (cbit);
 }
+#endif /* !CPUSET_STR_FUNC_ONLY */
 
 /*
  * Return a string representing a valid layout for a cpuset_t object.
@@ -697,6 +699,7 @@ cpusetobj_strscan(cpuset_t *set, const char *buf)
 	return (0);
 }
 
+#ifndef CPUSET_STR_FUNC_ONLY
 /*
  * Apply an anonymous mask to a single thread.
  */
@@ -1171,3 +1174,4 @@ DB_SHOW_COMMAND(cpusets, db_show_cpusets)
 	}
 }
 #endif /* DDB */
+#endif /* !CPUSET_STR_FUNC_ONLY */

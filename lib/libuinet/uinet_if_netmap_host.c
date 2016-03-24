@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -95,7 +95,7 @@ struct if_netmap_host_context {
 
 
 struct if_netmap_host_context *
-if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigned int qno)
+if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigned int qno, unsigned int *num_extra_bufs)
 {
 	struct if_netmap_host_context *ctx;
 
@@ -106,8 +106,10 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 	ctx->fd = nmfd;
 
 	ctx->cfgfd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
-	if (-1 == ctx->cfgfd)
+	if (-1 == ctx->cfgfd)  {
+		printf("%s: failed to open configuration socket\n", __func__);
 		goto fail;
+	}
 
 	ctx->isvale = isvale;
 	ctx->ifname = ifname;
@@ -123,10 +125,12 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 
 	if (!ctx->isvale) {
 		if (0 != if_netmap_set_offload(ctx, 0)) {
+			printf("%s: failed to disable offload\n", __func__);
 			goto fail;
 		}
 
 		if (0 != if_netmap_set_promisc(ctx, 1)) {
+			printf("%s: failed to set promiscuous mode\n", __func__);
 			goto fail;
 		}
 	}
@@ -137,15 +141,18 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 #else
 	ctx->req.nr_ringid = NETMAP_NO_TX_POLL | qno;
 	ctx->req.nr_flags = NR_REG_ONE_NIC;
+	ctx->req.nr_arg3 = *num_extra_bufs;
 #endif
 	snprintf(ctx->req.nr_name, sizeof(ctx->req.nr_name), "%s", ifname);
 
 	if (-1 == ioctl(ctx->fd, NIOCREGIF, &ctx->req)) {
+		printf("%s: NIOCREGIF ioctl failed (%d)\n", __func__, errno);
 		goto fail;
 	} 
 
 	ctx->mem = uhi_mmap(NULL, ctx->req.nr_memsize, UHI_PROT_READ | UHI_PROT_WRITE, UHI_MAP_NOCORE | UHI_MAP_SHARED, ctx->fd, 0);
 	if (MAP_FAILED == ctx->mem) {
+		printf("%s: mmap failed\n", __func__);
 		goto fail;
 	}
 
@@ -157,6 +164,19 @@ if_netmap_register_if(int nmfd, const char *ifname, unsigned int isvale, unsigne
 	 * might still be non-zero from a previous user's activities
 	 */
 	ctx->hw_rx_ring->reserved = 0;
+#else
+	/*
+	 * Some versions of netmap don't initialize ni_bufs_head in the
+	 * newly allocated netmap_if structure when no extra buffers are
+	 * requested, and will return a non-zero value if a previous use of
+	 * that netmap_if structure had an extra buffers list that wasn't
+	 * completely freed successfully.  This will then lead to more
+	 * buffer free errors when this netmap_if is reclaimed.  Stop the
+	 * madness by providing the initialization here.
+	 */
+	if (ctx->req.nr_arg3 == 0)
+		if_netmap_set_bufshead(ctx, 0);
+	*num_extra_bufs = ctx->req.nr_arg3;
 #endif
 
 	return (ctx);
@@ -179,8 +199,51 @@ if_netmap_deregister_if(struct if_netmap_host_context *ctx)
 }
 
 
+uint32_t
+if_netmap_get_bufshead(struct if_netmap_host_context *ctx)
+{
+#if NETMAP_API >= 10
+	return (NETMAP_IF(ctx->mem, ctx->req.nr_offset)->ni_bufs_head);
+#else
+	return 0;
+#endif
+}
+
+
 void
-if_netmap_rxupdate(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur, const uint32_t *reserved)
+if_netmap_set_bufshead(struct if_netmap_host_context *ctx, uint32_t head)
+{
+#if NETMAP_API >= 10
+	NETMAP_IF(ctx->mem, ctx->req.nr_offset)->ni_bufs_head = head;
+#endif
+}
+
+
+uint32_t *
+if_netmap_buffer_address(struct if_netmap_host_context *ctx, uint32_t index)
+{
+	return ((uint32_t *)NETMAP_BUF(ctx->hw_rx_ring, index));
+}
+
+
+uint32_t
+if_netmap_buffer_get_next(struct if_netmap_host_context *ctx, uint32_t index)
+{
+	return (*if_netmap_buffer_address(ctx, index));
+}
+
+
+void
+if_netmap_buffer_set_next(struct if_netmap_host_context *ctx, uint32_t index, uint32_t next_index)
+{
+	*if_netmap_buffer_address(ctx, index) = next_index;
+}
+
+
+
+
+int
+if_netmap_rxsync(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur, const uint32_t *reserved)
 {
 	struct netmap_ring *rxr = ctx->hw_rx_ring;
 
@@ -194,8 +257,12 @@ if_netmap_rxupdate(struct if_netmap_host_context *ctx, const uint32_t *avail, co
 		rxr->head = rxr->cur - *reserved;
 		if ((int)rxr->head < 0)
 			rxr->head += rxr->num_slots;
+	} else {
+		rxr->head = rxr->cur;
 	}
 #endif
+
+	return (ioctl(ctx->fd, NIOCRXSYNC, NULL) == -1 ? errno : 0);
 }
 
 
@@ -246,32 +313,65 @@ if_netmap_rxbufsize(struct if_netmap_host_context *ctx)
 
 
 void *
-if_netmap_rxslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t *len, uint32_t *index)
+if_netmap_rxslot(struct if_netmap_host_context *ctx, uint32_t slotno, uint32_t *index, void **ptr, uint32_t *len)
 {
 	struct netmap_ring *rxr = ctx->hw_rx_ring;
-	uint32_t cur = *slotno;
 
-	*slotno = NETMAP_RING_NEXT(rxr, cur); 
-	*len = rxr->slot[cur].len;
-	*index = rxr->slot[cur].buf_idx;
-	return (NETMAP_BUF(rxr, rxr->slot[cur].buf_idx));
+	*len = rxr->slot[slotno].len;
+	*index = rxr->slot[slotno].buf_idx;
+	*ptr = (void *)rxr->slot[slotno].ptr;
+	return (NETMAP_BUF(rxr, rxr->slot[slotno].buf_idx));
+}
+
+
+uint32_t
+if_netmap_rxslotnext(struct if_netmap_host_context *ctx, uint32_t curslot)
+{
+	struct netmap_ring *rxr = ctx->hw_rx_ring;
+	return (NETMAP_RING_NEXT(rxr, curslot));
+}
+
+
+uint32_t
+if_netmap_rxslotaddn(struct if_netmap_host_context *ctx, uint32_t curslot, uint32_t n)
+{
+	struct netmap_ring *rxr = ctx->hw_rx_ring;
+	uint32_t next;
+
+	next = curslot + n;
+	if (next >= rxr->num_slots)
+		next -= rxr->num_slots;
+
+	return (next);
 }
 
 
 void
-if_netmap_rxsetslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t index)
+if_netmap_rxsetslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t index, void *ptr)
 {
 	struct netmap_ring *rxr = ctx->hw_rx_ring;
 	uint32_t cur = *slotno;
 
-	rxr->slot[cur].buf_idx = index;
-	rxr->slot[cur].flags |= NS_BUF_CHANGED;
 	*slotno = NETMAP_RING_NEXT(rxr, cur);
+	if (rxr->slot[cur].buf_idx != index) {
+		rxr->slot[cur].buf_idx = index;
+		rxr->slot[cur].flags |= NS_BUF_CHANGED;
+	}
+	rxr->slot[cur].ptr = (uint64_t)ptr;
 }
 
 
-int
-if_netmap_txsync(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur)
+void
+if_netmap_rxsetslotptr(struct if_netmap_host_context *ctx, uint32_t slotno, void *ptr)
+{
+	struct netmap_ring *rxr = ctx->hw_rx_ring;
+
+	rxr->slot[slotno].ptr = (uint64_t)ptr;
+}
+
+
+void
+if_netmap_txupdate(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur)
 {
 	struct netmap_ring *txr = ctx->hw_tx_ring;
 
@@ -282,7 +382,13 @@ if_netmap_txsync(struct if_netmap_host_context *ctx, const uint32_t *avail, cons
 	if (cur)
 		txr->head = txr->cur = *cur;
 #endif
+}
 
+
+int
+if_netmap_txsync(struct if_netmap_host_context *ctx, const uint32_t *avail, const uint32_t *cur)
+{
+	if_netmap_txupdate(ctx, avail, cur);
 	return (ioctl(ctx->fd, NIOCTXSYNC, NULL) == -1 ? errno : 0);
 }
 
@@ -313,16 +419,50 @@ if_netmap_txslots(struct if_netmap_host_context *ctx)
 
 
 void *
-if_netmap_txslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t len)
+if_netmap_txslot(struct if_netmap_host_context *ctx, uint32_t slotno, uint32_t *index, void **ptr)
+{
+	struct netmap_ring *txr = ctx->hw_tx_ring;
+		
+	*index = txr->slot[slotno].buf_idx;
+	*ptr = (void *)txr->slot[slotno].ptr;
+	return (NETMAP_BUF(txr, txr->slot[slotno].buf_idx));
+}
+
+
+uint32_t
+if_netmap_txslotnext(struct if_netmap_host_context *ctx, uint32_t curslot)
+{
+	struct netmap_ring *txr = ctx->hw_tx_ring;
+	return (NETMAP_RING_NEXT(txr, curslot));
+}
+
+
+void
+if_netmap_txsetslot(struct if_netmap_host_context *ctx, uint32_t *slotno, uint32_t index, void *ptr, uint32_t len, int report)
 {
 	struct netmap_ring *txr = ctx->hw_tx_ring;
 	uint32_t cur = *slotno;
-		
+
 	assert(len <= txr->nr_buf_size);
 
+	*slotno = NETMAP_RING_NEXT(txr, cur);
+	if (txr->slot[cur].buf_idx != index) {
+		txr->slot[cur].buf_idx = index;
+		txr->slot[cur].flags |= NS_BUF_CHANGED;
+	}
+	if (report)
+		txr->slot[cur].flags |= NS_REPORT;
+	txr->slot[cur].ptr = (uint64_t)ptr;
 	txr->slot[cur].len = len;
-	*slotno = NETMAP_RING_NEXT(txr, cur); 
-	return (NETMAP_BUF(txr, txr->slot[cur].buf_idx));
+}
+
+
+void
+if_netmap_txsetslotptr(struct if_netmap_host_context *ctx, uint32_t slotno, void *ptr)
+{
+	struct netmap_ring *txr = ctx->hw_tx_ring;
+
+	txr->slot[slotno].ptr = (uint64_t)ptr;
 }
 
 
@@ -408,9 +548,9 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 	ifr.ifr_reqcap = ifr.ifr_curcap;
 
 	if (on)
-		ifr.ifr_reqcap |= IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO;
+		ifr.ifr_reqcap |= IFCAP_HWCSUM | IFCAP_LRO | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO;
 	else
-		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
+		ifr.ifr_reqcap &= ~(IFCAP_HWCSUM | IFCAP_LRO | IFCAP_TSO | IFCAP_TOE | IFCAP_VLAN_HWFILTER | IFCAP_VLAN_HWTAGGING | IFCAP_VLAN_HWCSUM | IFCAP_VLAN_HWTSO);
 
 	if (-1 == ioctl(ctx->cfgfd, SIOCSIFCAP, &ifr)) {
 		perror("set interface capabilities failed");
@@ -418,9 +558,9 @@ if_netmap_set_offload(struct if_netmap_host_context *ctx, int on)
 	}
 #elif defined(__linux__)
 
-	/* XXX 
-	 * Apparently there's no way to disable VLAN offload before 2.6.37?
-	 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
+	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_LRO, on);
+#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,37)
 	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_RXVLAN, on);
 	if_netmap_ethtool_set_flag(ctx, &ifr, ETH_FLAG_TXVLAN, on);

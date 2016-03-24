@@ -1,7 +1,7 @@
 /*
  * libev native API header
  *
- * Copyright (c) 2007,2008,2009,2010,2011,2012 Marc Alexander Lehmann <libev@schmorp.de>
+ * Copyright (c) 2007,2008,2009,2010,2011,2012,2015 Marc Alexander Lehmann <libev@schmorp.de>
  * All rights reserved.
  * Copyright (c) 2014 Patrick Kelsey. All rights reserved.
  *
@@ -43,11 +43,15 @@
 
 #ifdef __cplusplus
 # define EV_CPP(x) x
+# if __cplusplus >= 201103L
+#  define EV_THROW noexcept
+# else
+#  define EV_THROW throw ()
+# endif
 #else
 # define EV_CPP(x)
+# define EV_THROW
 #endif
-
-#define EV_THROW EV_CPP(throw())
 
 EV_CPP(extern "C" {)
 
@@ -142,6 +146,10 @@ EV_CPP(extern "C" {)
 # define EV_WALK_ENABLE 0 /* not yet */
 #endif
 
+#ifndef EV_COUNTERS_ENABLE
+# define EV_COUNTERS_ENABLE 0
+#endif
+
 /*****************************************************************************/
 
 #if EV_CHILD_ENABLE && !EV_SIGNAL_ENABLE
@@ -162,6 +170,8 @@ EV_CPP(extern "C" {)
 /*****************************************************************************/
 
 typedef double ev_tstamp;
+
+#include <string.h> /* for memmove */
 
 #ifndef EV_ATOMIC_T
 # include <signal.h>
@@ -226,7 +236,7 @@ struct ev_loop;
 /*****************************************************************************/
 
 #define EV_VERSION_MAJOR 4
-#define EV_VERSION_MINOR 15
+#define EV_VERSION_MINOR 20
 
 /* eventmask, revents, events... */
 enum {
@@ -270,6 +280,15 @@ enum {
 
 /* not official, do not use */
 #define EV_CB(type,name) void name (EV_P_ struct ev_ ## type *w, int revents)
+
+#if EV_COUNTERS_ENABLE
+typedef uint64_t ev_counter;
+
+typedef struct ev_loop_counters
+{
+  ev_counter iterations;
+} ev_loop_counters;
+#endif
 
 /*
  * struct member types:
@@ -646,6 +665,13 @@ EV_API_DECL void ev_loop_destroy (EV_P);
 /* you can actually call it at any time, anywhere :) */
 EV_API_DECL void ev_loop_fork (EV_P) EV_THROW;
 
+#if EV_UINET_ENABLE
+/* enable UINET single-thread-stack processing for the loop. If used, this must be */
+/* invoked before any ev_uinet watchers are started and before ev_run() is invoked */
+/* on the loop. */
+EV_API_DECL void ev_loop_enable_uinet_sts (EV_P_ struct uinet_sts_cfg *cfg) EV_THROW;
+#endif
+
 EV_API_DECL unsigned int ev_backend (EV_P) EV_THROW; /* backend in use by loop */
 
 EV_API_DECL void ev_now_update (EV_P) EV_THROW; /* update event loop time */
@@ -701,8 +727,10 @@ EV_API_DECL void ev_set_timeout_collect_interval (EV_P_ ev_tstamp interval) EV_T
 /* advanced stuff for threading etc. support, see docs */
 EV_API_DECL void ev_set_userdata (EV_P_ void *data) EV_THROW;
 EV_API_DECL void *ev_userdata (EV_P) EV_THROW;
-EV_API_DECL void ev_set_invoke_pending_cb (EV_P_ void (*invoke_pending_cb)(EV_P)) EV_THROW;
-EV_API_DECL void ev_set_loop_release_cb (EV_P_ void (*release)(EV_P), void (*acquire)(EV_P) EV_THROW) EV_THROW;
+typedef void (*ev_loop_callback)(EV_P);
+EV_API_DECL void ev_set_invoke_pending_cb (EV_P_ ev_loop_callback invoke_pending_cb) EV_THROW;
+/* C++ doesn't allow the use of the ev_loop_callback typedef here, so we need to spell it out */
+EV_API_DECL void ev_set_loop_release_cb (EV_P_ void (*release)(EV_P) EV_THROW, void (*acquire)(EV_P) EV_THROW) EV_THROW;
 
 EV_API_DECL unsigned int ev_pending_count (EV_P) EV_THROW; /* number of pending events, if any */
 EV_API_DECL void ev_invoke_pending (EV_P); /* invoke all pending watchers */
@@ -758,7 +786,8 @@ EV_API_DECL void ev_resume  (EV_P) EV_THROW;
 #define ev_is_pending(ev)                    (0 + ((ev_watcher *)(void *)(ev))->pending) /* ro, true when watcher is waiting for callback invocation */
 #define ev_is_active(ev)                     (0 + ((ev_watcher *)(void *)(ev))->active) /* ro, true when the watcher has been started */
 
-#define ev_cb(ev)                            (ev)->cb /* rw */
+#define ev_cb_(ev)                           (ev)->cb /* rw */
+#define ev_cb(ev)                            (memmove (&ev_cb_ (ev), &((ev_watcher *)(ev))->cb, sizeof (ev_cb_ (ev))), (ev)->cb)
 
 #if EV_MINPRI == EV_MAXPRI
 # define ev_priority(ev)                     ((ev), EV_MINPRI)
@@ -771,11 +800,11 @@ EV_API_DECL void ev_resume  (EV_P) EV_THROW;
 #define ev_periodic_at(ev)                   (+((ev_watcher_time *)(ev))->at)
 
 #ifndef ev_set_cb
-# define ev_set_cb(ev,cb_)                   ev_cb (ev) = (cb_)
+# define ev_set_cb(ev,cb_)                   (ev_cb_ (ev) = (cb_), memmove (&((ev_watcher *)(ev))->cb, &ev_cb_ (ev), sizeof (ev_cb_ (ev))))
 #endif
 
 /* stopping (enabling, adding) a watcher does nothing if it is already running */
-/* stopping (disabling, deleting) a watcher does nothing unless its already running */
+/* stopping (disabling, deleting) a watcher does nothing unless it's already running */
 #if EV_PROTOTYPES
 
 /* feeds an event into a watcher as if the event actually occurred */
@@ -863,10 +892,16 @@ EV_API_DECL void ev_async_send     (EV_P_ ev_async *w) EV_THROW;
 
 # if EV_UINET_ENABLE
 EV_API_DECL struct ev_uinet_ctx *ev_uinet_attach  (struct uinet_socket *so) EV_THROW;
+EV_API_DECL struct uinet_socket *ev_uinet_so  (struct ev_uinet_ctx *ctx) EV_THROW;
 EV_API_DECL void ev_uinet_detach   (struct ev_uinet_ctx *ctx) EV_THROW;
 EV_API_DECL void ev_uinet_start    (EV_P_ ev_uinet *w) EV_THROW;
 EV_API_DECL void ev_uinet_stop     (EV_P_ ev_uinet *w) EV_THROW;
 EV_API_DECL void ev_loop_attach_uinet_interface (EV_P_ uinet_if_t uif) EV_THROW;
+# endif
+
+# if EV_COUNTERS_ENABLE
+EV_API_DECL ev_loop_counters *ev_loop_counters_get(EV_P) EV_THROW;
+EV_API_DECL void ev_loop_counters_reset(EV_P) EV_THROW;
 # endif
 
 #if EV_COMPAT3
