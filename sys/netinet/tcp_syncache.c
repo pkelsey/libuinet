@@ -129,6 +129,25 @@ SYSCTL_VNET_INT(_net_inet_tcp, OID_AUTO, syncookies_only, CTLFLAG_RW,
 #define TOEPCB_ISSET(sc) ((sc)->sc_toepcb != NULL)
 #endif
 
+#ifdef UINET
+VNET_DEFINE(syncache_event_callback_t, syncache_event_cb);
+VNET_DEFINE(void *, syncache_event_cb_arg);
+
+#ifdef PROMISCUOUS_INET
+#define SYNCACHE_REPORT_EVENT(e_, sc_) do {			\
+	if (V_syncache_event_cb)				\
+		(*V_syncache_event_cb)(V_syncache_event_cb_arg, e_, &(sc_)->sc_inc, &((struct ifl2info *)((sc_)->sc_l2tag))->ifl2i_info); \
+} while (0)
+#else
+#define SYNCACHE_REPORT_EVENT(e_, sc_) do {			\
+	if (V_syncache_event_cb)				\
+		(*V_syncache_event_cb)(V_syncache_event_cb_arg, e_, &(sc_)->sc_inc, NULL); \
+} while (0)
+#endif /* PROMISCUOUS_INET */
+#else
+#define SYNCACHE_REPORT_EVENT(e_, sc_)
+#endif /* UINET */
+
 static void	 syncache_drop(struct syncache *, struct syncache_head *);
 static void	 syncache_free(struct syncache *);
 static void	 syncache_insert(struct syncache *, struct syncache_head *, int);
@@ -352,6 +371,7 @@ syncache_insert(struct syncache *sc, struct syncache_head *sch, int initial_time
 		KASSERT(!TAILQ_EMPTY(&sch->sch_bucket),
 			("sch->sch_length incorrect"));
 		sc2 = TAILQ_LAST(&sch->sch_bucket, sch_head);
+		SYNCACHE_REPORT_EVENT(SYNCACHE_EVENT_DROP_BUCKET_FULL, sc2);
 		syncache_drop(sc2, sch);
 		TCPSTAT_INC(tcps_sc_bucketoverflow);
 	}
@@ -459,6 +479,7 @@ syncache_timer(void *xsch)
 				    s, __func__);
 				free(s, M_TCPLOG);
 			}
+			SYNCACHE_REPORT_EVENT(SYNCACHE_EVENT_DROP_REXMTS, sc);
 			syncache_drop(sc, sch);
 			TCPSTAT_INC(tcps_sc_stale);
 			continue;
@@ -711,6 +732,7 @@ syncache_chkrst(struct in_conninfo *inc, struct tcphdr *th)
 	 */
 	if (SEQ_GEQ(th->th_seq, sc->sc_irs) &&
 	    SEQ_LEQ(th->th_seq, sc->sc_irs + sc->sc_wnd)) {
+		SYNCACHE_REPORT_EVENT(SYNCACHE_EVENT_DROP_RST, sc);
 		syncache_drop(sc, sch);
 		if ((s = tcp_log_addrs(inc, th, NULL, NULL)))
 			log(LOG_DEBUG, "%s; %s: Our SYN|ACK was rejected, "
@@ -748,6 +770,7 @@ syncache_badack(struct in_conninfo *inc)
 #endif /* PROMISCUOUS_INET */
 	SCH_LOCK_ASSERT(sch);
 	if (sc != NULL) {
+		SYNCACHE_REPORT_EVENT(SYNCACHE_EVENT_DROP_BAD_ACK, sc);
 		syncache_drop(sc, sch);
 		TCPSTAT_INC(tcps_sc_badack);
 	}
@@ -894,6 +917,7 @@ syncache_unreach(struct in_conninfo *inc, struct tcphdr *th)
 		sc->sc_flags |= SCF_UNREACH;
 		goto done;
 	}
+	SYNCACHE_REPORT_EVENT(SYNCACHE_EVENT_DROP_UNREACH, sc);
 	syncache_drop(sc, sch);
 	TCPSTAT_INC(tcps_sc_unreach);
 done:
@@ -2085,8 +2109,10 @@ _syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		 * entry and insert the new one.
 		 */
 		TCPSTAT_INC(tcps_sc_zonefail);
-		if ((sc = TAILQ_LAST(&sch->sch_bucket, sch_head)) != NULL)
+		if ((sc = TAILQ_LAST(&sch->sch_bucket, sch_head)) != NULL) {
+			SYNCACHE_REPORT_EVENT(SYNCACHE_EVENT_DROP_NOMEM, sc);
 			syncache_drop(sc, sch);
+		}
 		sc = uma_zalloc(V_tcp_syncache.zone, M_NOWAIT | M_ZERO);
 		if (sc == NULL) {
 #ifdef PASSIVE_INET

@@ -44,6 +44,7 @@
 #include <netinet/in.h>
 #include <netinet/in_var.h>
 #include <netinet/in_promisc.h>
+#include <netinet/tcp_syncache.h>
 #include <net/pfil.h>
 #include <net/vnet.h>
 
@@ -1774,6 +1775,11 @@ uinet_instance_init(struct uinet_instance *uinst, struct vnet *vnet,
 	uinst->ui_userdata = cfg->userdata;
 	uinst->ui_index = instance_count++;
 	
+	CURVNET_SET(uinst->ui_vnet);
+	V_syncache_event_cb = (syncache_event_callback_t)(cfg->syncache_event_cb);
+	V_syncache_event_cb_arg = cfg->syncache_event_cb_arg;
+	CURVNET_RESTORE();
+
 	/*
 	 * Don't respond with a reset to TCP segments that the stack will
 	 * not claim nor with an ICMP port unreachable message to UDP
