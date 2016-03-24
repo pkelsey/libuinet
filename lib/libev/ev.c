@@ -2636,11 +2636,18 @@ uinet_batch_event_handler (void *arg, int event)
 		   uinet_in_batch >= 0);
 
       /*
-       * Always notify the event loop at the end of every batch so
-       * continuously overlapping batches from multiple interfaces don't
-       * result in event starvation.
+       * Always notify the event loop at the end of every batch if there are
+       * pending events so continuously overlapping batches from multiple
+       * interfaces don't result in the event queue stalling (because
+       * uinet_in_batch never reaches zero in such circumstances).
+       *
+       * There is of course no risk of an event queue stall if it is empty,
+       * so no async notification is sent in that case in order to avoid
+       * spurious wakeups.
        */
-      ev_async_send (EV_A_ &uinet_async_w);
+      if (uinet_num_pending)
+        ev_async_send (EV_A_ &uinet_async_w);
+
       break;
     }
   pthread_mutex_unlock (&uinet_pend_lock);
@@ -2709,6 +2716,7 @@ uinet_socket_events (ev_uinet_ctx *soctx, int events)
     {
       new_pend_flags |= EV_UINET_PENDING;
       UINET_LIST_INSERT_HEAD (&uinet_pend_head, soctx, pend_list);
+      uinet_num_pending++;
       if (!uinet_in_batch)
         ev_async_send (EV_A_ &uinet_async_w);
     }
@@ -3074,6 +3082,7 @@ uinet_process_pending_list (EV_P_ ev_async *w_async, int revents)
 
   pthread_mutex_lock (&uinet_pend_lock);
   UINET_LIST_SWAP (&uinet_pend_head, &uinet_prev_pend_head, ev_uinet_ctx, pend_list);
+  uinet_num_pending = 0;
   pthread_mutex_unlock (&uinet_pend_lock);
 
   /* Any sockets that were not pending during the above list swap and that
@@ -3381,6 +3390,7 @@ loop_init (EV_P_ unsigned int flags) EV_THROW
   ev_init (&uinet_sts_prepare_w, uinet_sts_prepare);
 
   uinet_in_batch = 0;
+  uinet_num_pending = 0;
 #endif
 }
 
