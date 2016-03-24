@@ -180,6 +180,7 @@ ifneq (${HOST_OS},Darwin)
 UINET_HOST_SRCS+= uinet_if_netmap_host.c
 endif
 
+ifdef UINET_IPSEC
 CRYPTO_ASM_SRCS+=			\
 	aesencdec_${MACHINE_CPUARCH}.S	\
 	aeskeys_${MACHINE_CPUARCH}.S
@@ -199,7 +200,10 @@ CRYPTO_SRCS+=			\
 	rijndael-api.c		\
 	sha1.c			\
 	sha2.c
-
+else
+CRYPTO_SRCS+=			\
+	sha1.c
+endif
 
 KERN_SRCS+=			\
 	kern_cpuset.c		\
@@ -357,6 +361,7 @@ endif
 NETINET6_SRCS+=
 
 
+ifdef UINET_IPSEC
 OPENCRYPTO_SRCS+=	\
 	cast.c		\
 	criov.c		\
@@ -366,6 +371,7 @@ OPENCRYPTO_SRCS+=	\
 	rmd160.c	\
 	skipjack.c	\
 	xform.c
+endif
 
 #	cryptodev.c
 
