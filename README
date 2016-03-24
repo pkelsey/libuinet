@@ -23,6 +23,15 @@ Packet I/O is currently accomplished via netmap or libpcap (although
 the latter interface is relatively new and untested).
 
 
+Branches
+=============================================================================
+
+The most up-to-date sources are on master.
+
+A large merge to master was performed on 24 March 2016, which includes
+API churn.  The pre-merge point was tagged as master_20160324.
+
+
 Building libuinet and the sample programs
 =============================================================================
 
@@ -47,13 +56,20 @@ optimization level and debug symbol generation.  For example:
 
 gmake DEBUG_FLAGS="-O2 -ggdb" clean config all
 
+The core of the demo programs are implemented in lib/libuinet_demo.
+They can be run via the single front-end bin/multitool.
 
-The currently functioning sample programs are:
+The currently functioning demo programs are:
 
-echo		A loopback server
-echo++		A C++ loopback server
+connscale       A TCP connection generator/terminator
+echo            A loopback server
 passive         A passive reconstructor
-tproxy		A transparent proxy
+passive_extract A passive reconstructor that extracts file from HTTP streams
+
+Still waiting to be updated is:
+
+echo++	        A C++ loopback server
+tproxy          A transparent proxy
 
 
 Notes
