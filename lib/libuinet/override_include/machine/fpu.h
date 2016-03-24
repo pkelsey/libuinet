@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,24 +23,16 @@
  * SUCH DAMAGE.
  */
 
-#include <sys/param.h>
-#include <sys/kernel.h>
-#include <sys/systm.h>
-#include <sys/sysctl.h>
+#ifndef	_UINET_MACHINE_FPU_H_
+#define _UINET_MACHINE_FPU_H_
 
-SYSCTL_NODE(, 0,	  sysctl, CTLFLAG_RW, 0,
-	"Sysctl internal magic");
-SYSCTL_NODE(, CTL_KERN,	  kern,   CTLFLAG_RW|CTLFLAG_CAPRD, 0,
-	"High kernel, proc, limits &c");
-SYSCTL_NODE(, CTL_VM,	  vm,     CTLFLAG_RW, 0,
-	"Virtual memory");
-SYSCTL_NODE(, CTL_NET,	  net,    CTLFLAG_RW, 0,
-	"Network, (see socket.h)");
-SYSCTL_NODE(, CTL_DEBUG,  debug,  CTLFLAG_RW, 0,
-	"Debugging");
-SYSCTL_NODE(, CTL_HW,	  hw,     CTLFLAG_RW, 0,
-	"hardware");
-SYSCTL_NODE(, CTL_MACHDEP, machdep, CTLFLAG_RW, 0,
-	"machine dependent");
+struct fpu_kern_ctx *fpu_kern_alloc_ctx(u_int flags);
 
-SYSCTL_NODE(_kern, OID_AUTO, features, CTLFLAG_RD, 0, "Kernel Features");
+#define fpu_kern_alloc_ctx(flags_)	NULL
+#define fpu_kern_free_ctx(ctx_)
+#define fpu_kern_enter(td_, ctx_, flags_) 0
+#define fpu_kern_leave(td_, ctx_)	0
+#define fpu_kern_thread(flags_)		0
+#define is_fpu_kern_thread(flags_)	1
+
+#endif	/* _UINET_MACHINE_FPU_H_ */

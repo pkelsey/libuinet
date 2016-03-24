@@ -31,7 +31,7 @@ NO_WSOMETIMES_UNINITIALIZED=	-Wno-error-sometimes-uninitialized
 # some incentive to fix them eventually.
 CWARNEXTRA?=	-Wno-error-tautological-compare -Wno-error-empty-body \
 		-Wno-error-parentheses-equality -Wno-incompatible-library-redeclaration \
-		-Wno-builtin-requires-header
+		-Wno-builtin-requires-header -Wno-error-shift-negative-value -Wno-unknown-warning-option
 endif
 
 ifeq (${COMPILER_TYPE},gcc)

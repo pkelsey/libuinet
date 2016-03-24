@@ -1,8 +1,8 @@
 /*-
  * Copyright (c) 2010 Kip Macy
  * All rights reserved.
- * Copyright (c) 2013 Patrick Kelsey. All rights reserved.
-
+ * Copyright (c) 2013-2015 Patrick Kelsey. All rights reserved.
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
@@ -45,6 +45,10 @@
 #include <vm/uma.h>
 #include <vm/uma_int.h>
 
+#if defined(__amd64__) || defined(__i386__)
+#include <machine/cpufunc.h>
+#endif
+
 #include "uinet_internal.h"
 #include "uinet_host_interface.h"
 #include "uinet_if_netmap.h"
@@ -66,6 +70,9 @@ pthread_mutex_t init_lock;
 pthread_cond_t init_cond;
 #endif
 
+char static_hints[] = "";
+int hintmode = 0;
+
 static struct thread *shutdown_helper_thread;
 static struct thread *at_least_one_sighandling_thread;
 static struct uhi_msg shutdown_helper_msg;
@@ -75,6 +82,11 @@ uint32_t epoch_number;
 uint32_t instance_count;
 
 unsigned int uinet_hz;
+
+#if defined(__amd64__) || defined(__i386__)
+unsigned int cpu_feature;
+unsigned int cpu_feature2;
+#endif
 
 
 static unsigned int
@@ -106,7 +118,15 @@ uinet_init(struct uinet_global_cfg *cfg, struct uinet_instance_cfg *inst_cfg)
 	unsigned int ncpus;
 	unsigned int num_hash_buckets;
 
-	uinet_hz = HZ;
+#if defined(__amd64__) || defined(__i386__)
+	unsigned int regs[4];
+
+	do_cpuid(1, regs);
+	cpu_feature = regs[3];
+	cpu_feature2 = regs[2];
+#endif
+
+uinet_hz = HZ;
 
 	if (cfg == NULL) {
 		uinet_default_cfg(&default_cfg, UINET_GLOBAL_CFG_MEDIUM);
