@@ -483,9 +483,8 @@ __END_DECLS
 /* Promiscuous INET */
 #define IP_SYNFILTER			90   /* syn_filter_optarg; attach/detach/query SYN filter */
 #define IP_SYNFILTER_RESULT		91   /* syn_filter_cbarg; deliver deferred filter result */
-#define IP_CATCHALL_LISTEN		92   /* make socket the catchall listen socket */
 
-/* Promiscuous INET outpu interface control */
+/* Promiscuous INET output interface control */
 #define IP_TXIF				92   /* set index of interface to use for transmit */
 
 /* Packet copy control */
@@ -494,6 +493,9 @@ __END_DECLS
 #define IP_COPY_IF			95   /* interface to copy to */
 
 #define IP_SERIALNO			96   /* flow serial number */
+
+#define IP_CATCHALL_LISTEN		97   /* make socket the catchall listen socket */
+
 
 /* Flags for IP_COPY_MODE */
 #define IP_COPY_MODE_OFF	0x00
