@@ -1352,6 +1352,12 @@ in_pcbdrop(struct inpcb *inp)
 		struct inpcbport *phd = inp->inp_phd;
 
 		INP_HASH_WLOCK(inp->inp_pcbinfo);
+
+#ifdef PROMISCUOUS_INET
+	if (inp == inp->inp_pcbinfo->ipi_catchall_listen)
+		inp->inp_pcbinfo->ipi_catchall_listen = NULL;
+#endif
+
 		LIST_REMOVE(inp, inp_hash);
 		LIST_REMOVE(inp, inp_portlist);
 		if (LIST_FIRST(&phd->phd_pcblist) == NULL) {
@@ -2006,6 +2012,10 @@ in_pcblookup_hash_promisc_locked(struct inpcbinfo *pcbinfo, struct in_addr faddr
 	}
 
 
+	if (((lookupflags & INPLOOKUP_WILDCARD) != 0) &&
+	    pcbinfo->ipi_catchall_listen)
+		return pcbinfo->ipi_catchall_listen;
+
 	/*
 	 * Then look for a wildcard match, if requested.
 	 */
@@ -2427,6 +2437,12 @@ in_pcbremlists(struct inpcb *inp)
 		struct inpcbport *phd = inp->inp_phd;
 
 		INP_HASH_WLOCK(pcbinfo);
+
+#ifdef PROMISCUOUS_INET
+	if (inp == pcbinfo->ipi_catchall_listen)
+		pcbinfo->ipi_catchall_listen = NULL;
+#endif
+
 		LIST_REMOVE(inp, inp_hash);
 		LIST_REMOVE(inp, inp_portlist);
 		if (LIST_FIRST(&phd->phd_pcblist) == NULL) {
