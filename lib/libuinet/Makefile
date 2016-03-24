@@ -310,7 +310,6 @@ NETINET_SRCS+=		\
 	ip_icmp.c	\
 	ip_id.c		\
 	ip_input.c	\
-	ip_ipsec.c	\
 	ip_options.c	\
 	ip_output.c	\
 	raw_ip.c	\
@@ -331,6 +330,13 @@ NETINET_SRCS+=		\
 	cc.c		\
 	cc_newreno.c
 
+ifdef UINET_IPSEC
+NETINET_SRCS+=		\
+	ip_ipsec.c
+endif
+
+
+ifdef UINET_IPSEC
 NETIPSEC_SRCS+=		\
 	ipsec.c		\
 	ipsec_input.c	\
@@ -343,6 +349,7 @@ NETIPSEC_SRCS+=		\
 	xform_esp.c	\
 	xform_ipcomp.c	\
 	xform_ipip.c
+endif
 
 # only if TCP_SIGNTAURE is defined
 #xform_tcp.c
