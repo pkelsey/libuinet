@@ -325,7 +325,11 @@ sf_write_header(pcap_t *p, FILE *fp, int linktype, int thiszone, int snaplen)
 {
 	struct pcap_file_header hdr;
 
+#ifdef PCAP_TSTAMP_PRECISION_NANO
 	hdr.magic = p->opt.tstamp_precision == PCAP_TSTAMP_PRECISION_NANO ? NSEC_TCPDUMP_MAGIC : TCPDUMP_MAGIC;
+#else
+	hdr.magic = TCPDUMP_MAGIC;
+#endif
 	hdr.version_major = PCAP_VERSION_MAJOR;
 	hdr.version_minor = PCAP_VERSION_MINOR;
 
@@ -443,14 +447,17 @@ pcap_dump_open_append(pcap_t *p, const char *fname)
 		switch (ph.magic) {
 
 		case TCPDUMP_MAGIC:
+#ifdef PCAP_TSTAMP_PRECISION_NANO
 			if (p->opt.tstamp_precision != PCAP_TSTAMP_PRECISION_MICRO) {
 				snprintf(p->errbuf, PCAP_ERRBUF_SIZE,
 				    "%s: different time stamp precision, cannot append to file", fname);
 				fclose(f);
 				return (NULL);
 			}
+#endif
 			break;
 
+#ifdef PCAP_TSTAMP_PRECISION_NANO
 		case NSEC_TCPDUMP_MAGIC:
 			if (p->opt.tstamp_precision != PCAP_TSTAMP_PRECISION_NANO) {
 				snprintf(p->errbuf, PCAP_ERRBUF_SIZE,
@@ -459,7 +466,8 @@ pcap_dump_open_append(pcap_t *p, const char *fname)
 				return (NULL);
 			}
 			break;
-
+#endif
+			
 		case SWAPLONG(TCPDUMP_MAGIC):
 		case SWAPLONG(NSEC_TCPDUMP_MAGIC):
 			snprintf(p->errbuf, PCAP_ERRBUF_SIZE,
