@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2015-2016 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -58,6 +58,7 @@
 #include "uinet_ev.h"
 #include "uinet_demo_connscale.h"
 #include "uinet_demo_echo.h"
+#include "uinet_demo_nproxy.h"
 #include "uinet_demo_passive.h"
 #include "uinet_demo_passive_extract.h"
 
@@ -104,6 +105,7 @@ struct stack_config {
 	unsigned int stats_interval;
 	unsigned int first_stats;
 	ev_tstamp first_stats_time;
+	unsigned int syncache_stats;
 
 	struct event_loop_config *elcfg;
 	uinet_instance_t uinst;
@@ -158,9 +160,10 @@ enum multitool_opt_id {
 	MT_OPT_PCAP_TX_FILE_DIRBITS,
 	MT_OPT_PCAP_TX_FILE_MODE,
 	MT_OPT_SOMAXCONN,
-	MT_OPT_SYNCACHE_HASHSIZE,
 	MT_OPT_SYNCACHE_BUCKETLIMIT,
 	MT_OPT_SYNCACHE_CACHELIMIT,
+	MT_OPT_SYNCACHE_HASHSIZE,
+	MT_OPT_SYNCACHE_STATS,
 	MT_OPT_TCBHASHSIZE,
 
 	MAX_MT_OPT_VALUE /* always last */
@@ -189,6 +192,7 @@ static const struct option long_options[] = {
 	{ "brief-tcp-stats",	optional_argument,	NULL, 'J' },
 	{ "stack",		optional_argument,	NULL, 's' },
 	{ "sts",		no_argument,		NULL, 'S' },
+	{ "syncache-stats",	no_argument,		NULL, MT_OPT_SYNCACHE_STATS },
 
 /* interface types */
 	{ "netmap",		required_argument,	NULL, 'n' },
@@ -212,6 +216,7 @@ static const struct option long_options[] = {
 /* demo app options */
 	{ "connscale",		optional_argument,	NULL, 'C' },
 	{ "echo",		optional_argument,	NULL, 'E' },
+	{ "nproxy",		optional_argument,	NULL, 'O' },
 	{ "passive",		optional_argument,	NULL, 'P' },
 	{ "passive-extract",	optional_argument,	NULL, 'X' },
 
@@ -268,6 +273,7 @@ usage(const char *progname)
 	printf("                          Print brief TCP stats every <interval> seconds (default 1)\n");
 	printf("  --stack, -s [=name]     Create a new stack instance in the current event loop, with optional name\n");
 	printf("  --sts, -S               Run stack instance in single-thread-stack mode\n");
+	printf("  --syncache-stats        Print syncache stats for this stack instance when event loop stats are enabled\n");
 	printf("\n");
 	printf("Interface creation options:\n");
 	printf("\n");
@@ -298,6 +304,7 @@ usage(const char *progname)
 	printf("\n");
 	printf("  --connscale, -C [=name] Create a connscale client or server in the current stack, with optional name\n");
 	printf("  --echo, -E [=name]      Create an echo server in the current stack, with optional name\n");
+	printf("  --nproxy, -O [=name]    Create a non-transparent proxy server in the current stack, with optional name\n");
 	printf("  --passive, -P [=name]   Create a passive reassembly server in the current stack, with optional name\n");
 	printf("  --passive-extract, -X [=name]\n");
 	printf("                          Create a passive reassembly server that extracts http payloads in the current stack, with optional name\n");
@@ -666,6 +673,7 @@ stats_cb(struct ev_loop *loop, ev_timer *w, int revents)
 	struct event_loop_config *elcfg = w->data;
 	struct stack_config *scfg;
 	struct interface_config *ifcfg;
+	struct uinet_tcpstat tcpstat;
 	struct uinet_ifstat stat;
 	unsigned int i, j;
 	char tmpbuf[32];
@@ -684,6 +692,20 @@ stats_cb(struct ev_loop *loop, ev_timer *w, int revents)
 	for (i = 0; i < elcfg->num_stacks; i++) {
 		scfg = elcfg->scfgs[i];
 		snprintf(tmpbuf, sizeof(tmpbuf), "  [%s]", scfg->name);
+		if (scfg->syncache_stats) {
+			uinet_gettcpstat(scfg->uinst, &tcpstat);
+			printf("%s  syncache stats\n", tmpbuf);
+#define PRINT_SYNCACHE_ROW(a,b,c) printf("    %14s=%11lu   %14s=%11lu   %14s=%11lu\n", \
+					 #a, tcpstat.tcps_sc_##a,	\
+					 #b, tcpstat.tcps_sc_##b,	\
+					 #c, tcpstat.tcps_sc_##c)
+			PRINT_SYNCACHE_ROW(added, retransmitted, dupsyn);
+			PRINT_SYNCACHE_ROW(dropped, completed, bucketoverflow);
+			PRINT_SYNCACHE_ROW(cacheoverflow, reset, stale);
+			PRINT_SYNCACHE_ROW(aborted, badack, unreach);
+			PRINT_SYNCACHE_ROW(zonefail, sendcookie, recvcookie);
+#undef PRINT_SYNCACHE_ROW
+		}
 		printf("%-16s %11s %11s %11s %11s %11s %11s %8s %8s %8s %8s\n", tmpbuf,
 		       "in_copy", "in_zcopy", "in_drop", "out_copy", "out_zcopy", "out_drop",
 		       "in_Kpps", "in_MBps", "out_Kpps", "out_MBps");
@@ -831,6 +853,7 @@ int main(int argc, char **argv)
 	struct interface_config ifcfgs[MAX_IFS];
 	struct uinet_demo_connscale connscalecfgs[MAX_APPS];
 	struct uinet_demo_echo echocfgs[MAX_APPS];
+	struct uinet_demo_nproxy nproxycfgs[MAX_APPS];
 	struct uinet_demo_passive passivecfgs[MAX_APPS];
 	struct uinet_demo_passive_extract passivexcfgs[MAX_APPS];
 	struct event_loop_config *curloopcfg;
@@ -839,6 +862,7 @@ int main(int argc, char **argv)
 	struct uinet_demo_config *curappcfg;
 	struct uinet_demo_connscale *curconnscalecfg;
 	struct uinet_demo_echo *curechocfg;
+	struct uinet_demo_nproxy *curnproxycfg;
 	struct uinet_demo_passive *curpassivecfg;
 	struct uinet_demo_passive_extract *curpassivexcfg;
 	struct ev_loop *curloop;
@@ -848,6 +872,7 @@ int main(int argc, char **argv)
 	unsigned int num_apps;
 	unsigned int num_connscale_servers;
 	unsigned int num_echo_servers;
+	unsigned int num_nproxy_servers;
 	unsigned int num_passive_servers;
 	unsigned int num_passivex_servers;
 	unsigned int exit_after_config;
@@ -932,6 +957,7 @@ int main(int argc, char **argv)
 	curappcfg = NULL;
 	curconnscalecfg = NULL;
 	curechocfg = NULL;
+	curnproxycfg = NULL;
 	curpassivecfg = NULL;
 	curpassivexcfg = NULL;
 
@@ -941,6 +967,7 @@ int main(int argc, char **argv)
 	num_apps = 0;
 	num_connscale_servers = 0;
 	num_echo_servers = 0;
+	num_nproxy_servers = 0;
 	num_passive_servers = 0;
 	num_passivex_servers = 0;
 
@@ -948,7 +975,7 @@ int main(int argc, char **argv)
 	baseline_verbose = 0;
 	config_state = CONFIGURING_GLOBALS;
 
-	while ((opt = getopt_long(argc, argv, "b:c:e::E::g::hI:J::m::n:Np:P::r:R:s::St:vX:Z:",
+	while ((opt = getopt_long(argc, argv, "b:c:C:e::E::g::hI:J::m::n:NO:p:P::r:R:s::St:vX:Z:",
 				    long_options, NULL)) != -1) {
 		switch (opt) {
 		case 'b':
@@ -978,7 +1005,7 @@ int main(int argc, char **argv)
 			break;
 		case 'C':
 			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new connscale client/server");
-			LIMIT_OBJECTS("connscale clients/servers", num_echo_servers, MAX_APPS);
+			LIMIT_OBJECTS("connscale clients/servers", num_connscale_servers, MAX_APPS);
 
 			curconnscalecfg = &connscalecfgs[num_connscale_servers];
 			curappcfg = (struct uinet_demo_config *)curconnscalecfg;
@@ -1044,7 +1071,7 @@ int main(int argc, char **argv)
 				curstackcfg->stats_interval = 1;
 			break;
 		case 'm':
-			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK, "Enabling stats output");
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_LOOP, "Enabling stats output");
 			if (optarg)
 				curloopcfg->stats_interval = strtoul(optarg, NULL, 10);
 			else
@@ -1070,7 +1097,9 @@ int main(int argc, char **argv)
 
 			curifcfg = &ifcfgs[num_ifs];
 			init_ifcfg(curifcfg, num_ifs, type, optarg);
+
 			num_ifs++;
+			
 			curifcfg->scfg = curstackcfg;
 			curifcfg->type_name = type_name;
 			curifcfg->verbose = baseline_verbose;
@@ -1081,6 +1110,27 @@ int main(int argc, char **argv)
 		}
 		case 'N':
 			exit_after_config = 1;
+			break;
+		case 'O':
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new nproxy server");
+			LIMIT_OBJECTS("nproxy servers", num_nproxy_servers, MAX_APPS);
+
+			curnproxycfg = &nproxycfgs[num_nproxy_servers];
+			curappcfg = (struct uinet_demo_config *)curnproxycfg;
+			if (0 != uinet_demo_init_cfg(&curnproxycfg->cfg, UINET_DEMO_NPROXY, num_nproxy_servers, optarg,
+						     baseline_verbose)) {
+				printf("Error initializing configuration for new nproxy server\n");
+				return (EXIT_FAILURE);
+			}
+			num_apps++;
+			num_nproxy_servers++;
+			
+			curstackcfg->acfgs[curstackcfg->num_apps++] = curappcfg;
+			
+			if (-1 == uinet_demo_process_args(curappcfg, argc, argv))
+				return (EXIT_FAILURE);
+
+			config_state = CONFIGURING_APP;
 			break;
 		case 'P':
 			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK|CONFIGURING_IF|CONFIGURING_APP, "Creating a new passive server");
@@ -1221,9 +1271,9 @@ int main(int argc, char **argv)
 		case MT_OPT_NETMAP_EXTRA_BUFS:
 		case MT_OPT_NMBCLUSTERS:
 		case MT_OPT_SOMAXCONN:
-		case MT_OPT_SYNCACHE_HASHSIZE:
 		case MT_OPT_SYNCACHE_BUCKETLIMIT:
 		case MT_OPT_SYNCACHE_CACHELIMIT:
+		case MT_OPT_SYNCACHE_HASHSIZE:
 		case MT_OPT_TCBHASHSIZE:
 			REQUIRE_STATE(CONFIGURING_GLOBALS, "Specifying a global option");
 			OPTION_SET(opt) = 1;
@@ -1254,7 +1304,12 @@ int main(int argc, char **argv)
 				       curifcfg->type_name, curifcfg->ucfg.configstr);
 			}
 			break;
+		case MT_OPT_SYNCACHE_STATS:
+			REQUIRE_STATE(CONFIGURING_GLOBALS|CONFIGURING_STACK, "Enabling syncache stats");
+			curstackcfg->syncache_stats = 1;
+			break;
 		default: 
+			printf("Unknown argument %s\n", argv[optind]);
 			usage(argv[0]);
 			return (EXIT_FAILURE);
 		}

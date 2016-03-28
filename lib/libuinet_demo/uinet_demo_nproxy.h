@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015 Patrick Kelsey. All rights reserved.
+ * Copyright (c) 2016 Patrick Kelsey. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,52 +23,24 @@
  * SUCH DAMAGE.
  */
 
-#ifndef _UINET_DEMO_H_
-#define _UINET_DEMO_H_
+#ifndef _UINET_DEMO_NPROXY_H_
+#define _UINET_DEMO_NPROXY_H_
 
-#include <stdint.h>
-
-#include "uinet_ev.h"
-#include "uinet_api.h"
+#include "uinet_demo.h"
 
 
-enum uinet_demo_id {
-	UINET_DEMO_CONNSCALE,
-	UINET_DEMO_ECHO,
-	UINET_DEMO_NPROXY,
-	UINET_DEMO_PASSIVE,
-	UINET_DEMO_PASSIVE_EXTRACT,
-
-	UINET_NUM_DEMO_APPS /* always last */
+struct uinet_demo_nproxy {
+	struct uinet_demo_config cfg;
+	char listen_addr[UINET_NAME_BUF_LEN];
+	unsigned int listen_port;
+	int promisc;
+	const char *outbound_if_name;
+	
+	uint64_t next_id;
+	struct uinet_socket *listen_socket;
+	ev_uinet listen_watcher;
+	uinet_if_t outbound_if;
 };
 
 
-struct uinet_demo_config {
-	char name[UINET_NAME_BUF_LEN];
-	uint64_t id;
-	enum uinet_demo_id which;
-	unsigned int verbose;
-	unsigned int copy_every;
-	uint64_t copy_limit;
-	const char *copy_to;
-
-	uinet_if_t copy_uif;
-	unsigned int copy_mode;
-	uinet_instance_t uinst;
-	struct ev_loop *loop;
-};
-
-
-int uinet_demo_init(void);
-void uinet_demo_shutdown(void);
-
-const char *uinet_demo_name(enum uinet_demo_id which);
-void uinet_demo_print_usage(enum uinet_demo_id which);
-int uinet_demo_init_cfg(struct uinet_demo_config *cfg, enum uinet_demo_id which,
-			uint64_t instance_id, const char *name, int verbose);
-int uinet_demo_process_args(struct uinet_demo_config *cfg, int argc, char **argv);
-void uinet_demo_print_cfg(struct uinet_demo_config *cfg);
-int uinet_demo_start(struct uinet_demo_config *cfg, uinet_instance_t uinst,
-		     struct ev_loop *loop);
-
-#endif /* _UINET_DEMO_H_ */
+#endif /* _UINET_DEMO_NPROXY_H_ */

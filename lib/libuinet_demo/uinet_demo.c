@@ -192,6 +192,7 @@ uinet_demo_init(void)
 
 	UINET_DEMO_INIT(connscale);
 	UINET_DEMO_INIT(echo);
+	UINET_DEMO_INIT(nproxy);
 	UINET_DEMO_INIT(passive);
 	UINET_DEMO_INIT(passive_extract);
 
