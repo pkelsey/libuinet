@@ -30,7 +30,6 @@
 #include <sys/socket.h>
 
 #include <net/if.h>
-#include <net/vnet.h>
 
 #include "uinet_api.h"
 #include "uinet_if.h"
@@ -42,6 +41,8 @@ extern uint64_t global_timestamp_counter;
 extern uint32_t epoch_number;
 
 extern uint32_t instance_count;
+
+struct vnet;
 
 struct uinet_instance {
 	struct vnet *ui_vnet;
