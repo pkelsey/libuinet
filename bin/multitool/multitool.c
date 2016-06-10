@@ -367,8 +367,8 @@ first_look_handler(void *arg, struct uinet_pd_list *pkts)
 	to_stack = ifcfg->scfg->num_apps ? 1 : 0;
 
 	if ((ifcfg->verbose > 1) && to_stack)
-		printf("%s (%s): First-look handler sending packets to the stack\n",
-		       ifcfg->ucfg.alias, ifcfg->ucfg.configstr);
+		printf("%s (%s): First-look handler sending %d packets to the stack\n",
+		       ifcfg->ucfg.alias, ifcfg->ucfg.configstr, pkts->num_descs);
 
 	if (ifcfg->num_bridge_to > 0) {
 		if (ifcfg->verbose > 1)
