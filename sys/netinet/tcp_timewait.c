@@ -515,6 +515,8 @@ tcp_twclose(struct tcptw *tw, int reuse)
 	tw->tw_inpcb = NULL;
 	if (!timewait_skipped)
 		tcp_tw_2msl_stop(tw);
+	else
+		inp->inp_flags |= INP_TIMEWAIT; /* all further processing should be aware we came through the TIMEWAIT path */
 	inp->inp_ppcb = NULL;
 	in_pcbdrop(inp);
 
