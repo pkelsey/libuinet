@@ -101,6 +101,7 @@ int   uinet_solisten(struct uinet_socket *so, int backlog);
 int   uinet_soreadable(struct uinet_socket *so, unsigned int in_upcall);
 int   uinet_sowritable(struct uinet_socket *so, unsigned int in_upcall);
 int   uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uinet_uio *uio, int *flagsp);
+int   uinet_sosetcatchall(struct uinet_socket *so);
 int   uinet_sosetcopymode(struct uinet_socket *so, unsigned int mode, uint64_t limit, uinet_if_t uif);
 void  uinet_sosetnonblocking(struct uinet_socket *so, unsigned int nonblocking);
 int   uinet_sosetsockopt(struct uinet_socket *so, int level, int optname, void *optval, unsigned int optlen);

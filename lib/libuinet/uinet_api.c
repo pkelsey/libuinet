@@ -931,6 +931,21 @@ uinet_soreceive(struct uinet_socket *so, struct uinet_sockaddr **psa, struct uin
 
 
 int
+uinet_sosetcatchall(struct uinet_socket *so)
+{
+	struct socket *so_internal = (struct socket *)so;
+	unsigned int optval, optlen;
+	int error;
+	
+	optlen = sizeof(optval);
+	optval = 1;
+	error = so_setsockopt(so_internal, IPPROTO_IP, IP_CATCHALL_LISTEN, &optval, optlen);
+
+	return (error);
+}
+
+
+int
 uinet_sosetcopymode(struct uinet_socket *so, unsigned int mode, uint64_t limit, uinet_if_t uif)
 {
 	struct socket *so_internal = (struct socket *)so;

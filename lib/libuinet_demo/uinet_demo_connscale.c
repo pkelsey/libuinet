@@ -666,6 +666,14 @@ connscale_start_server(struct uinet_demo_connscale *connscale)
 			goto fail;
 		}
 
+
+		/* If listening on 0.0.0.0:0, make this socket the
+		 * catchall listen so that all wildcard inpcb lookups
+		 * will resolve to this socket.
+		 */
+		if ((ip.s_addr == INADDR_ANY) && (port == 0))
+			uinet_sosetcatchall(listen_socket);
+		
 		if (connscale->cfg.verbose) {
 			printf("%s: Listening on vlan=%s", connscale->cfg.name,
 			       uinet_demo_vlan_str(tmp, sizeof(tmp), vlan, connscale->vlans.num_tags));

@@ -77,6 +77,7 @@ uinet_solisten
 uinet_soreadable
 uinet_sowritable
 uinet_soreceive
+uinet_sosetcatchall
 uinet_sosetcopymode
 uinet_sosetnonblocking
 uinet_sosetsockopt
