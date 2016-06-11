@@ -81,7 +81,7 @@ uinet_iffind_byname(uinet_instance_t uinst, const char *ifname)
 int
 uinet_ifcreate(uinet_instance_t uinst, struct uinet_if_cfg *cfg, uinet_if_t *uif)
 {
-	struct uinet_if *new_uif;
+	struct uinet_if *new_uif = NULL;
 	int alias_len;
 	int error = 0;
 
