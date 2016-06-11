@@ -749,14 +749,65 @@ struct uinet_sts_cfg {
 
 	/* global/per-loop event system context pointer passed to callbacks */
 	void *sts_evctx;
-	/* returns pointer to event system instance context */
+
+	/* 
+	 * Returns a pointer to event system instance-specific context.  A
+	 * NULL return indicates an error from the event system.  libuinet
+	 * doesn't require any specific behavior from this callback except
+	 * for a non-NULL return - this callback is solely for the benefit
+	 * of the event system.
+	 */
 	void *(*sts_instance_created_cb)(void *evctx, uinet_instance_t uinst);
+
+	/* 
+	 * libuinet doesn't require any specific behavior from this callback
+         * except for a non-NULL return - this callback is solely for the
+         * benefit of the event system.  The evinstctx value passed is the
+         * one returned by sts_instance_created_cb().
+	 */
 	void (*sts_instance_destroyed_cb)(void *evinstctx);
+
+	/*
+	 * The implementation of this callback must cause the event loop
+	 * that corresponds to the given evinstctx to invoke
+	 * uinet_sts_events_process() on the uinet stack instance that
+	 * corresponds to evinstctx.  This callback may be invoked from the
+	 * execution context of any other event loop in the application that
+	 * is processing a uinet stack instance.  If all of the stack
+	 * instances in the application will execute in the same execution
+	 * context, then thread-safety is not an issue and the
+	 * implementation can simply invoke uinet_sts_events_process()
+	 * directly.  The reason this callback exists is that there are
+	 * certain events that can occur in one stack instace that require
+	 * action to be taken in all stack instances.
+	 */
 	void (*sts_instance_event_notify_cb)(void *evinstctx);
-	/* returns pointer to event system if context */
+	
+	/* 
+	 * Returns a pointer to event system interface-specific context.  A
+	 * NULL return indicates an error from the event system.  libuinet
+	 * doesn't require any specific behavior from this callback except
+	 * for a non-NULL return - this callback is solely for the benefit
+	 * of the event system.
+	 */
 	void *(*sts_if_created_cb)(void *evinstctx, uinet_if_t uif);
+
+	/* 
+	 * libuinet doesn't require any specific behavior from this callback
+         * except for a non-NULL return - the evifctx value passed is the
+         * one returned by sts_if_created_cb().
+	 */
 	void (*sts_if_destroyed_cb)(void *evifctx);
 
+	/*
+	 * These callbacks must implement the timer API described by the
+	 * callout(9) man page from FreeBSD 9.1.  If facing this
+	 * implementation task for your event system, don't forget that you
+	 * need not worry about concurrency as all of these callbacks will
+	 * occur in a single execution context.  Also, you must read and
+	 * understand the callout related notes in
+	 * libuinet/sys/net/vnet.h.
+	 */
 	void (*sts_callout_init)(void *ctx, void *c);
 	int (*sts_callout_reset)(void *ctx, void *c, int ticks, void (*func)(void *), void *arg);
 	int (*sts_callout_schedule)(void *ctx, void *c, int ticks);
