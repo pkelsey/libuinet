@@ -244,7 +244,7 @@ vnet_alloc(struct vnet_sts *sts)
 #if defined(VIMAGE_STS_ONLY)
 	else {
 		SDT_PROBE2(vnet, functions, vnet_alloc, return, __LINE__, NULL);
-		free(vnet, M_DEEVBUF);
+		free(vnet, M_VNET);
 		return (NULL);
 	}	
 #endif
