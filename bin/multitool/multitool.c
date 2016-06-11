@@ -54,6 +54,10 @@
 #include <mach/thread_policy.h>
 #endif
 
+#if defined(__linux__)
+typedef cpu_set_t cpuset_t;
+#endif /* __linux__ */
+
 #include "uinet_api.h"
 #include "uinet_ev.h"
 #include "uinet_demo_connscale.h"

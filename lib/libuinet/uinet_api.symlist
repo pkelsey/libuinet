@@ -6,6 +6,7 @@ uinet_free_sockaddr
 uinet_getl2info
 uinet_getifstat
 uinet_gettcpstat
+uinet_hz
 uinet_ifaliasname
 uinet_ifcreate
 uinet_if_batch_rx
