@@ -279,6 +279,7 @@ if_pcap_destroy_handle(struct if_pcap_host_context *ctx)
 }
 
 
+#if !defined(__linux)
 /*******************************************************************************
  * XXX awful hack to have pcap_dump_open_append() regardless of pcap library
  * version available
@@ -370,11 +371,15 @@ pcap_setup_dump(pcap_t *p, int linktype, FILE *f, const char *fname)
 	}
 	return ((pcap_dumper_t *)f);
 }
-
+#endif /* !defined(__linux) */
 
 static pcap_dumper_t *
 pcap_dump_open_append(pcap_t *p, const char *fname)
 {
+#if defined(__linux)
+	printf("Warning: pcap file append mode not available, overwrite will be used instead");
+	return NULL;
+#else
 	FILE *f;
 	int linktype;
 	size_t amt_read;
@@ -536,6 +541,7 @@ pcap_dump_open_append(pcap_t *p, const char *fname)
 		return (NULL);
 	}
 	return ((pcap_dumper_t *)f);
+#endif
 }
 
 /*
