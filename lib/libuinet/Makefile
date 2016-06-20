@@ -150,6 +150,7 @@ UINET_SRCS+=			\
 	uinet_subr_stack.c	\
 	uinet_subr_uio.c	\
 	uinet_support.c		\
+	uinet_timecounter.c	\
 	uinet_tty.c		\
 	uinet_uipc_shm.c	\
 	uinet_uma_int.c		\
