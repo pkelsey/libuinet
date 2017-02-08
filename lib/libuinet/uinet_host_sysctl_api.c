@@ -23,6 +23,7 @@
  * SUCH DAMAGE.
  */
 
+#define _BSD_SOURCE
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
