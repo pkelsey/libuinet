@@ -415,10 +415,10 @@ all: libuinet.a
 libuinet.a: machine_includes uinet_api.symlist ${MHEADERS} ${MSRCS} ${HOST_OBJS} ${ASM_OBJS} ${OBJS}
 ifeq (${HOST_OS},Darwin)
 	sed 's/.*/_&/' < uinet_api.symlist > uinet_api.symlist.darwin
-	${LD} -r -o $*.ro -exported_symbols_list uinet_api.symlist.darwin ${HOST_OBJS} ${ASM_OBJS} ${OBJS}
+	${LD} -d -r -o $*.ro -exported_symbols_list uinet_api.symlist.darwin ${HOST_OBJS} ${ASM_OBJS} ${OBJS}
 	rm uinet_api.symlist.darwin
 else
-	${LD} -r -o $*.ro ${ASM_OBJS} ${OBJS}
+	${LD} -d -r -o $*.ro ${ASM_OBJS} ${OBJS}
 	nm $*.ro  | grep -v ' U ' | cut -d ' ' -f 3 > $*_localize_list.tmp
 	objcopy --localize-symbols=$*_localize_list.tmp $*.ro 
 	rm $*_localize_list.tmp
